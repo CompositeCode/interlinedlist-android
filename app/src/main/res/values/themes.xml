@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Splash screen shown until the first Compose frame; brand mark on Ocean Blue. -->
+    <style name="Theme.InterlinedList.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/brand_ocean_blue</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/il_logo_mark</item>
+        <item name="postSplashScreenTheme">@style/Theme.InterlinedList</item>
+    </style>
+
+    <!-- Base activity theme; the Compose UI supplies the real Material 3 styling. -->
+    <style name="Theme.InterlinedList" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/brand_ocean_blue</item>
+    </style>
+</resources>
