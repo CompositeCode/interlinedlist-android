@@ -32,3 +32,6 @@ include(":core:designsystem")
 include(":core:network")
 include(":core:database")
 include(":core:datastore")
+
+// Feature modules (added per roadmap phase)
+include(":feature:auth")

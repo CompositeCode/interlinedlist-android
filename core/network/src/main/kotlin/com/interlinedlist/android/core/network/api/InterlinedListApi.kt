@@ -1,8 +1,8 @@
 package com.interlinedlist.android.core.network.api
 
+import com.interlinedlist.android.core.network.dto.CurrentUserResponse
 import com.interlinedlist.android.core.network.dto.SyncTokenRequest
 import com.interlinedlist.android.core.network.dto.SyncTokenResponse
-import com.interlinedlist.android.core.network.dto.UserDto
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
@@ -20,7 +20,7 @@ interface InterlinedListApi {
     @POST("api/auth/sync-token")
     suspend fun createSyncToken(@Body body: SyncTokenRequest): SyncTokenResponse
 
-    /** Returns the authenticated user, including `customerStatus`. */
-    @GET("api/users/me")
-    suspend fun getCurrentUser(): UserDto
+    /** Returns the authenticated user, wrapped as `{ "user": ... }`, including `customerStatus`. */
+    @GET("api/user")
+    suspend fun getCurrentUser(): CurrentUserResponse
 }
