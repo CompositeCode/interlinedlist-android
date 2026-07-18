@@ -170,7 +170,10 @@ private fun MainShell(onLoggedOut: () -> Unit) {
         ) {
             // ---- Lists ----
             composable(Routes.LISTS) {
-                ListsRoute(onOpenList = { id -> tabNav.navigate(Routes.listDetail(id)) })
+                ListsRoute(
+                    onOpenList = { id -> tabNav.navigate(Routes.listDetail(id)) },
+                    onOpenConnections = { tabNav.navigate(Routes.LIST_CONNECTIONS) },
+                )
             }
             composable(
                 Routes.LIST_DETAIL,

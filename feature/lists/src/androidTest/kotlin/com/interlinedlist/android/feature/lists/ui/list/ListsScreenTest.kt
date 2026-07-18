@@ -31,6 +31,7 @@ class ListsScreenTest {
                 ListsScreen(
                     state = state,
                     onOpenList = onOpenList,
+                    onOpenConnections = {},
                     onSearchQueryChange = {},
                     onLoadMore = {},
                     onCreateList = {},

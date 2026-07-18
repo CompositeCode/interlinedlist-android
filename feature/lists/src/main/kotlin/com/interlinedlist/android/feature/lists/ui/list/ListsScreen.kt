@@ -14,7 +14,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -57,6 +59,7 @@ object ListsTestTags {
 @Composable
 fun ListsRoute(
     onOpenList: (String) -> Unit,
+    onOpenConnections: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: ListsViewModel = hiltViewModel(),
 ) {
@@ -64,6 +67,7 @@ fun ListsRoute(
     ListsScreen(
         state = state,
         onOpenList = onOpenList,
+        onOpenConnections = onOpenConnections,
         onSearchQueryChange = viewModel::onSearchQueryChange,
         onLoadMore = viewModel::loadMore,
         onCreateList = { title -> viewModel.createList(title, description = null, onCreated = { onOpenList(it.id) }) },
@@ -77,6 +81,7 @@ fun ListsRoute(
 fun ListsScreen(
     state: ListsUiState,
     onOpenList: (String) -> Unit,
+    onOpenConnections: () -> Unit,
     onSearchQueryChange: (String) -> Unit,
     onLoadMore: () -> Unit,
     onCreateList: (String) -> Unit,
@@ -84,7 +89,16 @@ fun ListsScreen(
 ) {
     Scaffold(
         modifier = modifier.fillMaxSize(),
-        topBar = { TopAppBar(title = { Text("Lists") }) },
+        topBar = {
+            TopAppBar(
+                title = { Text("Lists") },
+                actions = {
+                    IconButton(onClick = onOpenConnections) {
+                        Icon(Icons.Default.Hub, contentDescription = "List connections")
+                    }
+                },
+            )
+        },
         floatingActionButton = {
             if (!state.subscriptionRequired) {
                 ExtendedFloatingActionButton(
@@ -286,6 +300,7 @@ private fun ListsScreenPreview() {
                 ),
             ),
             onOpenList = {},
+            onOpenConnections = {},
             onSearchQueryChange = {},
             onLoadMore = {},
             onCreateList = {},
