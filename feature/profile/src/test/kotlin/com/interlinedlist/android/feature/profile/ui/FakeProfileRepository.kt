@@ -4,6 +4,9 @@ import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
 import com.interlinedlist.android.core.model.CustomerStatus
 import com.interlinedlist.android.feature.profile.data.ProfileRepository
+import com.interlinedlist.android.feature.profile.domain.FollowCounts
+import com.interlinedlist.android.feature.profile.domain.FollowStatus
+import com.interlinedlist.android.feature.profile.domain.FollowUser
 import com.interlinedlist.android.feature.profile.domain.ProfileUser
 import com.interlinedlist.android.feature.profile.domain.UserSearchResult
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -65,7 +68,93 @@ class FakeProfileRepository : ProfileRepository {
         lastSearchQuery = query
         return searchResult
     }
+
+    // --- Following ---
+
+    var followStatusResult: ApiResult<FollowStatus> = ApiResult.Success(FollowStatus.NOT_FOLLOWING)
+    var followCountsResult: ApiResult<FollowCounts> = ApiResult.Success(FollowCounts())
+    var followResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var unfollowResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var followersResult: ApiResult<List<FollowUser>> = ApiResult.Success(emptyList())
+    var followingResult: ApiResult<List<FollowUser>> = ApiResult.Success(emptyList())
+    var followRequestsResult: ApiResult<List<FollowUser>> = ApiResult.Success(emptyList())
+    var approveResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var rejectResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var removeFollowerResult: ApiResult<Unit> = ApiResult.Success(Unit)
+
+    var followStatusUserId: String? = null
+    var followCountsUserId: String? = null
+    var followedUserId: String? = null
+    var unfollowedUserId: String? = null
+    var followersUsername: String? = null
+    var followingUsername: String? = null
+    var approvedUserId: String? = null
+    var rejectedUserId: String? = null
+    var removedFollowerUserId: String? = null
+    var followCount = 0
+    var unfollowCount = 0
+    var followRequestsCount = 0
+
+    override suspend fun getFollowStatus(userId: String): ApiResult<FollowStatus> {
+        followStatusUserId = userId
+        return followStatusResult
+    }
+
+    override suspend fun getFollowCounts(userId: String): ApiResult<FollowCounts> {
+        followCountsUserId = userId
+        return followCountsResult
+    }
+
+    override suspend fun followUser(userId: String): ApiResult<Unit> {
+        followedUserId = userId
+        followCount++
+        return followResult
+    }
+
+    override suspend fun unfollowUser(userId: String): ApiResult<Unit> {
+        unfollowedUserId = userId
+        unfollowCount++
+        return unfollowResult
+    }
+
+    override suspend fun getFollowers(username: String): ApiResult<List<FollowUser>> {
+        followersUsername = username
+        return followersResult
+    }
+
+    override suspend fun getFollowing(username: String): ApiResult<List<FollowUser>> {
+        followingUsername = username
+        return followingResult
+    }
+
+    override suspend fun getFollowRequests(): ApiResult<List<FollowUser>> {
+        followRequestsCount++
+        return followRequestsResult
+    }
+
+    override suspend fun approveFollowRequest(userId: String): ApiResult<Unit> {
+        approvedUserId = userId
+        return approveResult
+    }
+
+    override suspend fun rejectFollowRequest(userId: String): ApiResult<Unit> {
+        rejectedUserId = userId
+        return rejectResult
+    }
+
+    override suspend fun removeFollower(userId: String): ApiResult<Unit> {
+        removedFollowerUserId = userId
+        return removeFollowerResult
+    }
 }
+
+/** Shorthand for building a follow-list/request user in tests. */
+fun testFollowUser(
+    id: String = "f1",
+    username: String = "ada",
+    displayName: String? = "Ada Lovelace",
+    avatarUrl: String? = null,
+) = FollowUser(id = id, username = username, displayName = displayName, avatarUrl = avatarUrl)
 
 /** Shorthand for building a domain profile user in tests. */
 fun testUser(

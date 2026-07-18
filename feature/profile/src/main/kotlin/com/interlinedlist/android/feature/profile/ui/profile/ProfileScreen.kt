@@ -1,21 +1,31 @@
 package com.interlinedlist.android.feature.profile.ui.profile
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Extension
+import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -23,6 +33,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -30,70 +41,110 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.interlinedlist.android.core.designsystem.theme.InterlinedListTheme
 import com.interlinedlist.android.core.model.CustomerStatus
+import com.interlinedlist.android.feature.profile.domain.FollowCounts
 import com.interlinedlist.android.feature.profile.domain.ProfileUser
 
+/** Stable test tags for the Account hub's menu rows. */
+object AccountMenuTestTags {
+    const val FOLLOWERS = "accountMenuFollowers"
+    const val FOLLOWING = "accountMenuFollowing"
+    const val REQUESTS = "accountMenuRequests"
+    const val NOTIFICATIONS = "accountMenuNotifications"
+    const val ORGANIZATIONS = "accountMenuOrganizations"
+    const val INTEGRATIONS = "accountMenuIntegrations"
+    const val EDIT_PROFILE = "accountMenuEditProfile"
+    const val SEARCH_USERS = "accountMenuSearchUsers"
+}
+
 /**
- * The app's "Account" tab: the current signed-in user's profile with entries to
- * edit the profile, search users, and sign out.
+ * The app's "Account" tab: a hub built around the current user's profile header
+ * (with tappable follower/following counts) and a menu that links out to the rest of
+ * the app.
+ *
+ * The follows/edit/search callbacks navigate within this module; the notifications,
+ * organizations, and integrations callbacks navigate to OTHER feature modules — this
+ * module only exposes them, the app wires the destinations.
  *
  * @param onEditProfile navigate to the edit-profile route.
  * @param onSearchUsers navigate to the user-search route.
- * @param onSignOut invoked after the caller performs sign-out (mirrors HomeScreen's
- *   `onLoggedOut`); the profile module does not own session state, so the app wires
- *   this to the auth logout + navigation.
+ * @param onOpenFollowers navigate to the current user's followers list.
+ * @param onOpenFollowing navigate to the current user's following list.
+ * @param onOpenRequests navigate to the pending follow-requests screen.
+ * @param onOpenNotifications navigate to the notifications module.
+ * @param onOpenOrganizations navigate to the organizations module.
+ * @param onOpenIntegrations navigate to the integrations module.
+ * @param onSignOut invoked after the caller performs sign-out; the profile module does
+ *   not own session state, so the app wires this to the auth logout + navigation.
  */
 @Composable
 fun ProfileRoute(
     onEditProfile: () -> Unit,
     onSearchUsers: () -> Unit,
+    onOpenFollowers: (String) -> Unit,
+    onOpenFollowing: (String) -> Unit,
+    onOpenRequests: () -> Unit,
+    onOpenNotifications: () -> Unit,
+    onOpenOrganizations: () -> Unit,
+    onOpenIntegrations: () -> Unit,
     onSignOut: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: ProfileViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    // The hub's own follower/following lists are keyed on the signed-in user's
+    // username, which the loaded profile carries; ignore taps until it's loaded.
     ProfileScreen(
         state = state,
         onEditProfile = onEditProfile,
         onSearchUsers = onSearchUsers,
+        onOpenFollowers = { state.user?.username?.let(onOpenFollowers) },
+        onOpenFollowing = { state.user?.username?.let(onOpenFollowing) },
+        onOpenRequests = onOpenRequests,
+        onOpenNotifications = onOpenNotifications,
+        onOpenOrganizations = onOpenOrganizations,
+        onOpenIntegrations = onOpenIntegrations,
         onSignOut = onSignOut,
         onRetry = viewModel::refresh,
         modifier = modifier,
     )
 }
 
-/** Stateless "Account" UI — easy to preview and to drive from Compose tests. */
+/** Stateless "Account" hub UI — easy to preview and to drive from Compose tests. */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileScreen(
     state: ProfileUiState,
     onEditProfile: () -> Unit,
     onSearchUsers: () -> Unit,
+    onOpenFollowers: () -> Unit,
+    onOpenFollowing: () -> Unit,
+    onOpenRequests: () -> Unit,
+    onOpenNotifications: () -> Unit,
+    onOpenOrganizations: () -> Unit,
+    onOpenIntegrations: () -> Unit,
     onSignOut: () -> Unit,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
         modifier = modifier.fillMaxSize(),
-        topBar = {
-            TopAppBar(
-                title = { Text("Account") },
-                actions = {
-                    IconButton(onClick = onSearchUsers, modifier = Modifier.testTag(ProfileTestTags.SEARCH)) {
-                        Icon(Icons.Default.Search, contentDescription = "Search users")
-                    }
-                    IconButton(onClick = onEditProfile, modifier = Modifier.testTag(ProfileTestTags.EDIT)) {
-                        Icon(Icons.Default.Edit, contentDescription = "Edit profile")
-                    }
-                },
-            )
-        },
+        topBar = { TopAppBar(title = { Text("Account") }) },
     ) { padding ->
         when {
             state.user != null -> Column(
-                Modifier.fillMaxSize().padding(padding),
-                horizontalAlignment = Alignment.CenterHorizontally,
+                Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .verticalScroll(rememberScrollState()),
             ) {
-                ProfileContent(user = state.user, modifier = Modifier.weight(1f, fill = false))
+                // Profile header with tappable follower/following counts.
+                ProfileContent(
+                    user = state.user,
+                    counts = state.followCounts,
+                    onOpenFollowers = onOpenFollowers,
+                    onOpenFollowing = onOpenFollowing,
+                    // followStatus defaults to SELF here, so no follow button renders.
+                )
 
                 if (state.errorMessage != null) {
                     Text(
@@ -107,16 +158,63 @@ fun ProfileScreen(
                     )
                 }
 
-                Spacer(Modifier.height(24.dp))
-                OutlinedButton(
+                HorizontalDivider()
+
+                AccountMenuRow(
+                    icon = Icons.Default.Group,
+                    label = "Followers",
+                    onClick = onOpenFollowers,
+                    tag = AccountMenuTestTags.FOLLOWERS,
+                )
+                AccountMenuRow(
+                    icon = Icons.Default.Group,
+                    label = "Following",
+                    onClick = onOpenFollowing,
+                    tag = AccountMenuTestTags.FOLLOWING,
+                )
+                AccountMenuRow(
+                    icon = Icons.Default.PersonAdd,
+                    label = "Follow requests",
+                    onClick = onOpenRequests,
+                    tag = AccountMenuTestTags.REQUESTS,
+                )
+                AccountMenuRow(
+                    icon = Icons.Default.Notifications,
+                    label = "Notifications",
+                    onClick = onOpenNotifications,
+                    tag = AccountMenuTestTags.NOTIFICATIONS,
+                )
+                AccountMenuRow(
+                    icon = Icons.Default.Business,
+                    label = "Organizations",
+                    onClick = onOpenOrganizations,
+                    tag = AccountMenuTestTags.ORGANIZATIONS,
+                )
+                AccountMenuRow(
+                    icon = Icons.Default.Extension,
+                    label = "Integrations",
+                    onClick = onOpenIntegrations,
+                    tag = AccountMenuTestTags.INTEGRATIONS,
+                )
+                AccountMenuRow(
+                    icon = Icons.Default.Edit,
+                    label = "Edit profile",
+                    onClick = onEditProfile,
+                    tag = AccountMenuTestTags.EDIT_PROFILE,
+                )
+                AccountMenuRow(
+                    icon = Icons.Default.Search,
+                    label = "Search users",
+                    onClick = onSearchUsers,
+                    tag = AccountMenuTestTags.SEARCH_USERS,
+                )
+                AccountMenuRow(
+                    icon = Icons.AutoMirrored.Filled.Logout,
+                    label = "Sign out",
                     onClick = onSignOut,
-                    modifier = Modifier
-                        .padding(horizontal = 24.dp)
-                        .fillMaxWidth()
-                        .testTag(ProfileTestTags.SIGN_OUT),
-                ) {
-                    Text("Sign out")
-                }
+                    tag = ProfileTestTags.SIGN_OUT,
+                )
+
                 Spacer(Modifier.height(24.dp))
             }
 
@@ -139,10 +237,42 @@ fun ProfileScreen(
                         modifier = Modifier.testTag(ProfileTestTags.ERROR),
                     )
                     Spacer(Modifier.height(16.dp))
-                    Button(onClick = onRetry) { Text("Retry") }
+                    androidx.compose.material3.Button(onClick = onRetry) { Text("Retry") }
                 }
             }
         }
+    }
+}
+
+/** A single tappable row in the Account hub's menu. */
+@Composable
+private fun AccountMenuRow(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    tag: String,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .testTag(tag)
+            .padding(horizontal = 24.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.width(16.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f),
+        )
+        Icon(
+            Icons.AutoMirrored.Filled.ArrowForward,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -162,9 +292,16 @@ private fun ProfileScreenPreview() {
                     isCurrentUser = true,
                 ),
                 isLoading = false,
+                followCounts = FollowCounts(followers = 128, following = 87),
             ),
             onEditProfile = {},
             onSearchUsers = {},
+            onOpenFollowers = {},
+            onOpenFollowing = {},
+            onOpenRequests = {},
+            onOpenNotifications = {},
+            onOpenOrganizations = {},
+            onOpenIntegrations = {},
             onSignOut = {},
             onRetry = {},
         )

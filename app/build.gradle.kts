@@ -53,6 +53,9 @@ dependencies {
     implementation(project(":feature:messages"))
     implementation(project(":feature:documents"))
     implementation(project(":feature:profile"))
+    implementation(project(":feature:notifications"))
+    implementation(project(":feature:organizations"))
+    implementation(project(":feature:integrations"))
 
     // Compose
     implementation(platform(libs.androidx.compose.bom))

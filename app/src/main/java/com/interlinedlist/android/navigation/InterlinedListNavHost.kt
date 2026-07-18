@@ -28,6 +28,9 @@ import com.interlinedlist.android.feature.auth.ui.LoginRoute
 import com.interlinedlist.android.feature.documents.ui.browser.DocumentsFolderRoute
 import com.interlinedlist.android.feature.documents.ui.browser.DocumentsRoute
 import com.interlinedlist.android.feature.documents.ui.editor.DocumentEditorRoute
+import com.interlinedlist.android.feature.integrations.ui.accounts.ConnectedAccountsRoute
+import com.interlinedlist.android.feature.integrations.ui.export.ExportRoute
+import com.interlinedlist.android.feature.integrations.ui.hub.IntegrationsRoute
 import com.interlinedlist.android.feature.lists.ui.connections.ConnectionsRoute
 import com.interlinedlist.android.feature.lists.ui.detail.ListDetailRoute
 import com.interlinedlist.android.feature.lists.ui.list.ListsRoute
@@ -36,7 +39,13 @@ import com.interlinedlist.android.feature.lists.ui.watchers.WatchersRoute
 import com.interlinedlist.android.feature.messages.ui.detail.MessageDetailRoute
 import com.interlinedlist.android.feature.messages.ui.feed.MessagesRoute
 import com.interlinedlist.android.feature.messages.ui.scheduled.ScheduledMessagesRoute
+import com.interlinedlist.android.feature.notifications.ui.NotificationsRoute
+import com.interlinedlist.android.feature.organizations.ui.detail.OrganizationDetailRoute
+import com.interlinedlist.android.feature.organizations.ui.list.OrganizationsRoute
 import com.interlinedlist.android.feature.profile.ui.edit.EditProfileRoute
+import com.interlinedlist.android.feature.profile.ui.follow.FollowRequestsRoute
+import com.interlinedlist.android.feature.profile.ui.follow.FollowersRoute
+import com.interlinedlist.android.feature.profile.ui.follow.FollowingRoute
 import com.interlinedlist.android.feature.profile.ui.profile.ProfileRoute
 import com.interlinedlist.android.feature.profile.ui.profile.UserProfileRoute
 import com.interlinedlist.android.feature.profile.ui.search.UserSearchRoute
@@ -48,8 +57,8 @@ object Routes {
     const val MAIN = "main"
 
     // Top-level tabs (bottom navigation).
-    const val LISTS = "lists"
     const val MESSAGES = "messages"
+    const val LISTS = "lists"
     const val DOCUMENTS = "documents"
     const val ACCOUNT = "account"
 
@@ -67,11 +76,22 @@ object Routes {
     const val DOCUMENT_FOLDER = "documents/folder/{folderId}"
     const val DOCUMENT_EDITOR = "documents/editor/{documentId}"
 
-    // Profile destinations. Distinct prefixes so a username can never collide
-    // with the edit/search routes.
+    // Profile / following destinations. Distinct prefixes so a username can
+    // never collide with the edit/search/list routes.
     const val PROFILE_EDIT = "editProfile"
     const val USER_SEARCH = "userSearch"
     const val USER_PROFILE = "user/{username}"
+    const val FOLLOWERS = "followers/{username}"
+    const val FOLLOWING = "following/{username}"
+    const val FOLLOW_REQUESTS = "followRequests"
+
+    // Notifications / organizations / integrations (reached from the Account hub).
+    const val NOTIFICATIONS = "notifications"
+    const val ORGANIZATIONS = "organizations"
+    const val ORGANIZATION_DETAIL = "organizations/{orgId}"
+    const val INTEGRATIONS = "integrations"
+    const val INTEGRATIONS_EXPORT = "integrations/export"
+    const val INTEGRATIONS_ACCOUNTS = "integrations/accounts"
 
     fun listDetail(id: String) = "lists/$id"
     fun listSchema(id: String) = "lists/$id/schema"
@@ -80,6 +100,9 @@ object Routes {
     fun documentFolder(id: String) = "documents/folder/$id"
     fun documentEditor(id: String) = "documents/editor/$id"
     fun userProfile(username: String) = "user/$username"
+    fun followers(username: String) = "followers/$username"
+    fun following(username: String) = "following/$username"
+    fun organization(orgId: String) = "organizations/$orgId"
 }
 
 /**
@@ -168,6 +191,26 @@ private fun MainShell(onLoggedOut: () -> Unit) {
             startDestination = Routes.MESSAGES,
             modifier = Modifier.padding(padding),
         ) {
+            // ---- Messages ----
+            composable(Routes.MESSAGES) {
+                MessagesRoute(
+                    onOpenMessage = { id -> tabNav.navigate(Routes.messageDetail(id)) },
+                    onOpenScheduled = { tabNav.navigate(Routes.MESSAGES_SCHEDULED) },
+                )
+            }
+            composable(
+                Routes.MESSAGE_DETAIL,
+                arguments = listOf(navArgument("messageId") { type = NavType.StringType }),
+            ) {
+                MessageDetailRoute(
+                    onBack = { tabNav.popBackStack() },
+                    onOpenMessage = { id -> tabNav.navigate(Routes.messageDetail(id)) },
+                )
+            }
+            composable(Routes.MESSAGES_SCHEDULED) {
+                ScheduledMessagesRoute(onBack = { tabNav.popBackStack() })
+            }
+
             // ---- Lists ----
             composable(Routes.LISTS) {
                 ListsRoute(
@@ -206,26 +249,6 @@ private fun MainShell(onLoggedOut: () -> Unit) {
                 ConnectionsRoute(onBack = { tabNav.popBackStack() })
             }
 
-            // ---- Messages ----
-            composable(Routes.MESSAGES) {
-                MessagesRoute(
-                    onOpenMessage = { id -> tabNav.navigate(Routes.messageDetail(id)) },
-                    onOpenScheduled = { tabNav.navigate(Routes.MESSAGES_SCHEDULED) },
-                )
-            }
-            composable(
-                Routes.MESSAGE_DETAIL,
-                arguments = listOf(navArgument("messageId") { type = NavType.StringType }),
-            ) {
-                MessageDetailRoute(
-                    onBack = { tabNav.popBackStack() },
-                    onOpenMessage = { id -> tabNav.navigate(Routes.messageDetail(id)) },
-                )
-            }
-            composable(Routes.MESSAGES_SCHEDULED) {
-                ScheduledMessagesRoute(onBack = { tabNav.popBackStack() })
-            }
-
             // ---- Documents ----
             composable(Routes.DOCUMENTS) {
                 DocumentsRoute(
@@ -253,7 +276,7 @@ private fun MainShell(onLoggedOut: () -> Unit) {
                 )
             }
 
-            // ---- Account / Profile ----
+            // ---- Account / Profile hub ----
             composable(Routes.ACCOUNT) {
                 // Sign-out reuses the existing auth-backed logout; the profile
                 // module intentionally owns no session state.
@@ -261,6 +284,12 @@ private fun MainShell(onLoggedOut: () -> Unit) {
                 ProfileRoute(
                     onEditProfile = { tabNav.navigate(Routes.PROFILE_EDIT) },
                     onSearchUsers = { tabNav.navigate(Routes.USER_SEARCH) },
+                    onOpenFollowers = { username -> tabNav.navigate(Routes.followers(username)) },
+                    onOpenFollowing = { username -> tabNav.navigate(Routes.following(username)) },
+                    onOpenRequests = { tabNav.navigate(Routes.FOLLOW_REQUESTS) },
+                    onOpenNotifications = { tabNav.navigate(Routes.NOTIFICATIONS) },
+                    onOpenOrganizations = { tabNav.navigate(Routes.ORGANIZATIONS) },
+                    onOpenIntegrations = { tabNav.navigate(Routes.INTEGRATIONS) },
                     onSignOut = { logoutViewModel.logout(onLoggedOut) },
                 )
             }
@@ -280,7 +309,72 @@ private fun MainShell(onLoggedOut: () -> Unit) {
                 Routes.USER_PROFILE,
                 arguments = listOf(navArgument("username") { type = NavType.StringType }),
             ) {
-                UserProfileRoute(onBack = { tabNav.popBackStack() })
+                UserProfileRoute(
+                    onBack = { tabNav.popBackStack() },
+                    onOpenFollowers = { username -> tabNav.navigate(Routes.followers(username)) },
+                    onOpenFollowing = { username -> tabNav.navigate(Routes.following(username)) },
+                )
+            }
+            composable(
+                Routes.FOLLOWERS,
+                arguments = listOf(navArgument("username") { type = NavType.StringType }),
+            ) {
+                FollowersRoute(
+                    onOpenUser = { username -> tabNav.navigate(Routes.userProfile(username)) },
+                    onBack = { tabNav.popBackStack() },
+                )
+            }
+            composable(
+                Routes.FOLLOWING,
+                arguments = listOf(navArgument("username") { type = NavType.StringType }),
+            ) {
+                FollowingRoute(
+                    onOpenUser = { username -> tabNav.navigate(Routes.userProfile(username)) },
+                    onBack = { tabNav.popBackStack() },
+                )
+            }
+            composable(Routes.FOLLOW_REQUESTS) {
+                FollowRequestsRoute(
+                    onOpenUser = { username -> tabNav.navigate(Routes.userProfile(username)) },
+                    onBack = { tabNav.popBackStack() },
+                )
+            }
+
+            // ---- Notifications ----
+            composable(Routes.NOTIFICATIONS) {
+                NotificationsRoute(onBack = { tabNav.popBackStack() })
+            }
+
+            // ---- Organizations ----
+            composable(Routes.ORGANIZATIONS) {
+                OrganizationsRoute(
+                    onOpenOrg = { id -> tabNav.navigate(Routes.organization(id)) },
+                    onBack = { tabNav.popBackStack() },
+                )
+            }
+            composable(
+                Routes.ORGANIZATION_DETAIL,
+                arguments = listOf(navArgument("orgId") { type = NavType.StringType }),
+            ) {
+                OrganizationDetailRoute(
+                    onBack = { tabNav.popBackStack() },
+                    onDeleted = { tabNav.popBackStack() },
+                )
+            }
+
+            // ---- Integrations & exports ----
+            composable(Routes.INTEGRATIONS) {
+                IntegrationsRoute(
+                    onBack = { tabNav.popBackStack() },
+                    onOpenExport = { tabNav.navigate(Routes.INTEGRATIONS_EXPORT) },
+                    onOpenConnectedAccounts = { tabNav.navigate(Routes.INTEGRATIONS_ACCOUNTS) },
+                )
+            }
+            composable(Routes.INTEGRATIONS_EXPORT) {
+                ExportRoute(onBack = { tabNav.popBackStack() })
+            }
+            composable(Routes.INTEGRATIONS_ACCOUNTS) {
+                ConnectedAccountsRoute(onBack = { tabNav.popBackStack() })
             }
         }
     }

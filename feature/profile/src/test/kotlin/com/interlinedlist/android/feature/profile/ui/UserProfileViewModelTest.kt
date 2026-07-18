@@ -4,6 +4,8 @@ import androidx.lifecycle.SavedStateHandle
 import com.google.common.truth.Truth.assertThat
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
+import com.interlinedlist.android.feature.profile.domain.FollowCounts
+import com.interlinedlist.android.feature.profile.domain.FollowStatus
 import com.interlinedlist.android.feature.profile.ui.profile.PROFILE_USERNAME_ARG
 import com.interlinedlist.android.feature.profile.ui.profile.UserProfileViewModel
 import kotlinx.coroutines.Dispatchers
@@ -68,5 +70,103 @@ class UserProfileViewModelTest {
         } catch (e: IllegalStateException) {
             assertThat(e).hasMessageThat().contains(PROFILE_USERNAME_ARG)
         }
+    }
+
+    @Test
+    fun `loads follow status and counts for another user`() = runTest(dispatcher) {
+        val ada = testUser(id = "u2", username = "ada", isCurrentUser = false)
+        repo.refreshUserResult = ApiResult.Success(ada)
+        repo.followStatusResult = ApiResult.Success(FollowStatus.NOT_FOLLOWING)
+        repo.followCountsResult = ApiResult.Success(FollowCounts(followers = 5, following = 3))
+
+        val vm = viewModel("ada")
+        advanceUntilIdle()
+
+        assertThat(repo.followStatusUserId).isEqualTo("u2")
+        assertThat(repo.followCountsUserId).isEqualTo("u2")
+        assertThat(vm.uiState.value.followStatus).isEqualTo(FollowStatus.NOT_FOLLOWING)
+        assertThat(vm.uiState.value.followCounts.followers).isEqualTo(5)
+        assertThat(vm.uiState.value.canFollow).isTrue()
+    }
+
+    @Test
+    fun `viewing your own profile marks the status as SELF`() = runTest(dispatcher) {
+        val me = testUser(id = "me", username = "adron", isCurrentUser = true)
+        repo.refreshUserResult = ApiResult.Success(me)
+
+        val vm = viewModel("adron")
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.followStatus).isEqualTo(FollowStatus.SELF)
+        assertThat(vm.uiState.value.canFollow).isFalse()
+        // No status call is made for your own profile.
+        assertThat(repo.followStatusUserId).isNull()
+    }
+
+    @Test
+    fun `toggle follow follows a not-followed user and re-reads the status`() = runTest(dispatcher) {
+        val ada = testUser(id = "u2", username = "ada", isCurrentUser = false)
+        repo.refreshUserResult = ApiResult.Success(ada)
+        repo.followStatusResult = ApiResult.Success(FollowStatus.NOT_FOLLOWING)
+        val vm = viewModel("ada")
+        advanceUntilIdle()
+
+        // After following, the status endpoint reports FOLLOWING.
+        repo.followStatusResult = ApiResult.Success(FollowStatus.FOLLOWING)
+        vm.toggleFollow()
+        advanceUntilIdle()
+
+        assertThat(repo.followCount).isEqualTo(1)
+        assertThat(repo.followedUserId).isEqualTo("u2")
+        assertThat(vm.uiState.value.followStatus).isEqualTo(FollowStatus.FOLLOWING)
+        assertThat(vm.uiState.value.isFollowActionInProgress).isFalse()
+    }
+
+    @Test
+    fun `toggle follow unfollows a followed user`() = runTest(dispatcher) {
+        val ada = testUser(id = "u2", username = "ada", isCurrentUser = false)
+        repo.refreshUserResult = ApiResult.Success(ada)
+        repo.followStatusResult = ApiResult.Success(FollowStatus.FOLLOWING)
+        val vm = viewModel("ada")
+        advanceUntilIdle()
+
+        repo.followStatusResult = ApiResult.Success(FollowStatus.NOT_FOLLOWING)
+        vm.toggleFollow()
+        advanceUntilIdle()
+
+        assertThat(repo.unfollowCount).isEqualTo(1)
+        assertThat(repo.unfollowedUserId).isEqualTo("u2")
+        assertThat(vm.uiState.value.followStatus).isEqualTo(FollowStatus.NOT_FOLLOWING)
+    }
+
+    @Test
+    fun `toggle follow surfaces an error and leaves the status unchanged`() = runTest(dispatcher) {
+        val ada = testUser(id = "u2", username = "ada", isCurrentUser = false)
+        repo.refreshUserResult = ApiResult.Success(ada)
+        repo.followStatusResult = ApiResult.Success(FollowStatus.NOT_FOLLOWING)
+        repo.followResult = ApiResult.Failure(AppError.Server("boom"))
+        val vm = viewModel("ada")
+        advanceUntilIdle()
+
+        vm.toggleFollow()
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.errorMessage).isNotNull()
+        assertThat(vm.uiState.value.followStatus).isEqualTo(FollowStatus.NOT_FOLLOWING)
+        assertThat(vm.uiState.value.isFollowActionInProgress).isFalse()
+    }
+
+    @Test
+    fun `toggle follow is a no-op on your own profile`() = runTest(dispatcher) {
+        val me = testUser(id = "me", username = "adron", isCurrentUser = true)
+        repo.refreshUserResult = ApiResult.Success(me)
+        val vm = viewModel("adron")
+        advanceUntilIdle()
+
+        vm.toggleFollow()
+        advanceUntilIdle()
+
+        assertThat(repo.followCount).isEqualTo(0)
+        assertThat(repo.unfollowCount).isEqualTo(0)
     }
 }

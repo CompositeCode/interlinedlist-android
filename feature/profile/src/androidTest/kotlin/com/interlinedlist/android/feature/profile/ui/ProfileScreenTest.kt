@@ -8,8 +8,10 @@ import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.interlinedlist.android.core.designsystem.theme.InterlinedListTheme
 import com.interlinedlist.android.core.model.CustomerStatus
+import com.interlinedlist.android.feature.profile.domain.FollowCounts
 import com.interlinedlist.android.feature.profile.domain.ProfileUser
 import com.interlinedlist.android.feature.profile.domain.UserSearchResult
+import com.interlinedlist.android.feature.profile.ui.profile.AccountMenuTestTags
 import com.interlinedlist.android.feature.profile.ui.profile.ProfileScreen
 import com.interlinedlist.android.feature.profile.ui.profile.ProfileTestTags
 import com.interlinedlist.android.feature.profile.ui.profile.ProfileUiState
@@ -38,19 +40,37 @@ class ProfileScreenTest {
         isCurrentUser = true,
     )
 
-    @Test
-    fun profile_showsNameUsernameAndSubscriberBadge() {
+    private fun stubbedProfileScreen(
+        state: ProfileUiState,
+        onEditProfile: () -> Unit = {},
+        onSearchUsers: () -> Unit = {},
+        onOpenFollowers: () -> Unit = {},
+        onOpenFollowing: () -> Unit = {},
+        onOpenRequests: () -> Unit = {},
+        onSignOut: () -> Unit = {},
+    ) {
         composeRule.setContent {
             InterlinedListTheme {
                 ProfileScreen(
-                    state = ProfileUiState(user = sampleUser(), isLoading = false),
-                    onEditProfile = {},
-                    onSearchUsers = {},
-                    onSignOut = {},
+                    state = state,
+                    onEditProfile = onEditProfile,
+                    onSearchUsers = onSearchUsers,
+                    onOpenFollowers = onOpenFollowers,
+                    onOpenFollowing = onOpenFollowing,
+                    onOpenRequests = onOpenRequests,
+                    onOpenNotifications = {},
+                    onOpenOrganizations = {},
+                    onOpenIntegrations = {},
+                    onSignOut = onSignOut,
                     onRetry = {},
                 )
             }
         }
+    }
+
+    @Test
+    fun profile_showsNameUsernameAndSubscriberBadge() {
+        stubbedProfileScreen(ProfileUiState(user = sampleUser(), isLoading = false))
 
         composeRule.onNodeWithTag(ProfileTestTags.DISPLAY_NAME).assertIsDisplayed()
         composeRule.onNodeWithTag(ProfileTestTags.USERNAME).assertIsDisplayed()
@@ -59,44 +79,58 @@ class ProfileScreenTest {
     }
 
     @Test
-    fun profile_editSearchAndSignOut_invokeCallbacks() {
+    fun profile_showsTappableFollowerCounts() {
+        var openFollowers = false
+        var openFollowing = false
+        stubbedProfileScreen(
+            state = ProfileUiState(
+                user = sampleUser(),
+                isLoading = false,
+                followCounts = FollowCounts(followers = 12, following = 7),
+            ),
+            onOpenFollowers = { openFollowers = true },
+            onOpenFollowing = { openFollowing = true },
+        )
+
+        composeRule.onNodeWithTag(ProfileTestTags.FOLLOWERS_COUNT).performClick()
+        composeRule.onNodeWithTag(ProfileTestTags.FOLLOWING_COUNT).performClick()
+
+        assert(openFollowers)
+        assert(openFollowing)
+    }
+
+    @Test
+    fun profile_menuRows_invokeCallbacks() {
         var edit = false
         var search = false
+        var followers = false
+        var requests = false
         var signOut = false
-        composeRule.setContent {
-            InterlinedListTheme {
-                ProfileScreen(
-                    state = ProfileUiState(user = sampleUser(), isLoading = false),
-                    onEditProfile = { edit = true },
-                    onSearchUsers = { search = true },
-                    onSignOut = { signOut = true },
-                    onRetry = {},
-                )
-            }
-        }
+        stubbedProfileScreen(
+            state = ProfileUiState(user = sampleUser(), isLoading = false),
+            onEditProfile = { edit = true },
+            onSearchUsers = { search = true },
+            onOpenFollowers = { followers = true },
+            onOpenRequests = { requests = true },
+            onSignOut = { signOut = true },
+        )
 
-        composeRule.onNodeWithTag(ProfileTestTags.EDIT).performClick()
-        composeRule.onNodeWithTag(ProfileTestTags.SEARCH).performClick()
+        composeRule.onNodeWithTag(AccountMenuTestTags.EDIT_PROFILE).performClick()
+        composeRule.onNodeWithTag(AccountMenuTestTags.SEARCH_USERS).performClick()
+        composeRule.onNodeWithTag(AccountMenuTestTags.FOLLOWERS).performClick()
+        composeRule.onNodeWithTag(AccountMenuTestTags.REQUESTS).performClick()
         composeRule.onNodeWithTag(ProfileTestTags.SIGN_OUT).performClick()
 
         assert(edit)
         assert(search)
+        assert(followers)
+        assert(requests)
         assert(signOut)
     }
 
     @Test
     fun profile_showsProgress_whileLoadingWithNoCache() {
-        composeRule.setContent {
-            InterlinedListTheme {
-                ProfileScreen(
-                    state = ProfileUiState(user = null, isLoading = true),
-                    onEditProfile = {},
-                    onSearchUsers = {},
-                    onSignOut = {},
-                    onRetry = {},
-                )
-            }
-        }
+        stubbedProfileScreen(ProfileUiState(user = null, isLoading = true))
 
         composeRule.onNodeWithTag(ProfileTestTags.PROGRESS).assertIsDisplayed()
     }

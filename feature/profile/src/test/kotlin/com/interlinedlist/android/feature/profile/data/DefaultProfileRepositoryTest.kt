@@ -6,6 +6,7 @@ import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
 import com.interlinedlist.android.core.model.CustomerStatus
 import com.interlinedlist.android.feature.profile.data.remote.ProfileApi
+import com.interlinedlist.android.feature.profile.domain.FollowStatus
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -255,5 +256,216 @@ class DefaultProfileRepositoryTest {
 
         assertThat(result).isInstanceOf(ApiResult.Success::class.java)
         assertThat((result as ApiResult.Success).data.single().username).isEqualTo("ada")
+    }
+
+    // --- Following ---
+
+    @Test
+    fun `followUser posts to the follow endpoint`() = runTest(testDispatcher) {
+        server.enqueue(MockResponse().setResponseCode(201))
+
+        val result = repository.followUser("u2")
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        val recorded = server.takeRequest()
+        assertThat(recorded.method).isEqualTo("POST")
+        assertThat(recorded.path).isEqualTo("/api/follow/u2")
+    }
+
+    @Test
+    fun `unfollowUser deletes on the follow endpoint`() = runTest(testDispatcher) {
+        server.enqueue(MockResponse().setResponseCode(200))
+
+        val result = repository.unfollowUser("u2")
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        val recorded = server.takeRequest()
+        assertThat(recorded.method).isEqualTo("DELETE")
+        assertThat(recorded.path).isEqualTo("/api/follow/u2")
+    }
+
+    @Test
+    fun `getFollowStatus maps an explicit following status`() = runTest(testDispatcher) {
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{ "status": "following" }"""))
+
+        val result = repository.getFollowStatus("u2")
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        assertThat((result as ApiResult.Success).data).isEqualTo(FollowStatus.FOLLOWING)
+        assertThat(server.takeRequest().path).isEqualTo("/api/follow/u2/status")
+    }
+
+    @Test
+    fun `getFollowStatus reads boolean flags into a requested status`() = runTest(testDispatcher) {
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{ "isFollowing": false, "requested": true }"""))
+
+        val result = repository.getFollowStatus("u2")
+
+        assertThat((result as ApiResult.Success).data).isEqualTo(FollowStatus.REQUESTED)
+    }
+
+    @Test
+    fun `getFollowStatus falls back to not-following when nothing is set`() = runTest(testDispatcher) {
+        server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
+
+        val result = repository.getFollowStatus("u2")
+
+        assertThat((result as ApiResult.Success).data).isEqualTo(FollowStatus.NOT_FOLLOWING)
+    }
+
+    @Test
+    fun `getFollowCounts maps follower and following tallies`() = runTest(testDispatcher) {
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{ "followers": 12, "following": 34 }"""))
+
+        val result = repository.getFollowCounts("u2")
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        val counts = (result as ApiResult.Success).data
+        assertThat(counts.followers).isEqualTo(12)
+        assertThat(counts.following).isEqualTo(34)
+        assertThat(server.takeRequest().path).isEqualTo("/api/follow/u2/counts")
+    }
+
+    @Test
+    fun `getFollowCounts reads the count-suffixed aliases`() = runTest(testDispatcher) {
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody("""{ "followersCount": 5, "followingCount": 8 }"""),
+        )
+
+        val counts = (repository.getFollowCounts("u2") as ApiResult.Success).data
+
+        assertThat(counts.followers).isEqualTo(5)
+        assertThat(counts.following).isEqualTo(8)
+    }
+
+    @Test
+    fun `getFollowers resolves the username via a cached id then lists followers`() = runTest(testDispatcher) {
+        // Seed the cache so no username-lookup round-trip is needed.
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody("""{ "user": { "id": "u2", "username": "ada" } }"""),
+        )
+        repository.refreshUser("ada")
+        server.takeRequest() // consume the /api/users/ada request
+
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{ "users": [ { "id": "f1", "username": "bob", "displayName": "Bob" } ] }""",
+            ),
+        )
+
+        val result = repository.getFollowers("ada")
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        assertThat((result as ApiResult.Success).data.single().username).isEqualTo("bob")
+        // Cached id means the followers request is the only one left — no re-lookup.
+        val recorded = server.takeRequest()
+        assertThat(recorded.path).startsWith("/api/follow/u2/followers")
+    }
+
+    @Test
+    fun `getFollowers resolves the id via a username lookup when uncached`() = runTest(testDispatcher) {
+        // First request: resolve username -> id.
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody("""{ "user": { "id": "u9", "username": "ada" } }"""),
+        )
+        // Second request: the followers list keyed on the resolved id.
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{ "followers": [ { "id": "f2", "username": "cara" } ] }""",
+            ),
+        )
+
+        val result = repository.getFollowers("ada")
+
+        assertThat((result as ApiResult.Success).data.single().username).isEqualTo("cara")
+        assertThat(server.takeRequest().path).isEqualTo("/api/users/ada")
+        assertThat(server.takeRequest().path).startsWith("/api/follow/u9/followers")
+    }
+
+    @Test
+    fun `getFollowing lists the following users`() = runTest(testDispatcher) {
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody("""{ "user": { "id": "u2", "username": "ada" } }"""),
+        )
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{ "following": [ { "id": "g1", "username": "dan" } ] }""",
+            ),
+        )
+
+        val result = repository.getFollowing("ada")
+
+        assertThat((result as ApiResult.Success).data.single().username).isEqualTo("dan")
+        server.takeRequest()
+        assertThat(server.takeRequest().path).startsWith("/api/follow/u2/following")
+    }
+
+    @Test
+    fun `getFollowRequests maps nested and inlined requesters`() = runTest(testDispatcher) {
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """
+                {
+                  "requests": [
+                    { "user": { "id": "r1", "username": "eve", "displayName": "Eve" } },
+                    { "id": "r2", "username": "frank" }
+                  ]
+                }
+                """.trimIndent(),
+            ),
+        )
+
+        val result = repository.getFollowRequests()
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        val users = (result as ApiResult.Success).data
+        assertThat(users.map { it.username }).containsExactly("eve", "frank").inOrder()
+        assertThat(server.takeRequest().path).isEqualTo("/api/follow/requests")
+    }
+
+    @Test
+    fun `approveFollowRequest posts to the approve endpoint`() = runTest(testDispatcher) {
+        server.enqueue(MockResponse().setResponseCode(201))
+
+        val result = repository.approveFollowRequest("r1")
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        val recorded = server.takeRequest()
+        assertThat(recorded.method).isEqualTo("POST")
+        assertThat(recorded.path).isEqualTo("/api/follow/r1/approve")
+    }
+
+    @Test
+    fun `rejectFollowRequest posts to the reject endpoint`() = runTest(testDispatcher) {
+        server.enqueue(MockResponse().setResponseCode(201))
+
+        val result = repository.rejectFollowRequest("r1")
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        val recorded = server.takeRequest()
+        assertThat(recorded.method).isEqualTo("POST")
+        assertThat(recorded.path).isEqualTo("/api/follow/r1/reject")
+    }
+
+    @Test
+    fun `removeFollower deletes on the remove endpoint`() = runTest(testDispatcher) {
+        server.enqueue(MockResponse().setResponseCode(200))
+
+        val result = repository.removeFollower("f1")
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        val recorded = server.takeRequest()
+        assertThat(recorded.method).isEqualTo("DELETE")
+        assertThat(recorded.path).isEqualTo("/api/follow/f1/remove")
+    }
+
+    @Test
+    fun `followUser maps a 404 to NotFound`() = runTest(testDispatcher) {
+        server.enqueue(MockResponse().setResponseCode(404).setBody("""{ "error": "No such user" }"""))
+
+        val result = repository.followUser("ghost")
+
+        assertThat(result).isInstanceOf(ApiResult.Failure::class.java)
+        assertThat((result as ApiResult.Failure).error).isInstanceOf(AppError.NotFound::class.java)
     }
 }

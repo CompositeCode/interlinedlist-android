@@ -27,18 +27,25 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.interlinedlist.android.core.designsystem.theme.InterlinedListTheme
 import com.interlinedlist.android.core.model.CustomerStatus
+import com.interlinedlist.android.feature.profile.domain.FollowCounts
+import com.interlinedlist.android.feature.profile.domain.FollowStatus
 import com.interlinedlist.android.feature.profile.domain.ProfileUser
 
 /**
  * Another user's public profile, reached by drilling down from search (route
  * `profile/{username}`). Includes a back affordance to ascend, mirroring the app's
- * drill-down navigation pattern.
+ * drill-down navigation pattern, plus a follow/unfollow button and tappable
+ * follower/following counts.
  *
  * @param onBack pop back to the previous screen (search).
+ * @param onOpenFollowers open this user's followers list (`followers/{username}`).
+ * @param onOpenFollowing open this user's following list (`following/{username}`).
  */
 @Composable
 fun UserProfileRoute(
     onBack: () -> Unit,
+    onOpenFollowers: (String) -> Unit,
+    onOpenFollowing: (String) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: UserProfileViewModel = hiltViewModel(),
 ) {
@@ -47,6 +54,9 @@ fun UserProfileRoute(
         state = state,
         onBack = onBack,
         onRetry = viewModel::refresh,
+        onToggleFollow = viewModel::toggleFollow,
+        onOpenFollowers = { state.user?.username?.let(onOpenFollowers) },
+        onOpenFollowing = { state.user?.username?.let(onOpenFollowing) },
         modifier = modifier,
     )
 }
@@ -58,6 +68,9 @@ fun UserProfileScreen(
     state: ProfileUiState,
     onBack: () -> Unit,
     onRetry: () -> Unit,
+    onToggleFollow: () -> Unit = {},
+    onOpenFollowers: () -> Unit = {},
+    onOpenFollowing: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -77,6 +90,12 @@ fun UserProfileScreen(
             state.user != null -> ProfileContent(
                 user = state.user,
                 modifier = Modifier.fillMaxSize().padding(padding),
+                counts = state.followCounts,
+                onOpenFollowers = onOpenFollowers,
+                onOpenFollowing = onOpenFollowing,
+                followStatus = state.followStatus,
+                isFollowActionInProgress = state.isFollowActionInProgress,
+                onToggleFollow = onToggleFollow,
             )
 
             state.isLoading -> Box(
@@ -121,6 +140,8 @@ private fun UserProfileScreenPreview() {
                     isCurrentUser = false,
                 ),
                 isLoading = false,
+                followStatus = FollowStatus.NOT_FOLLOWING,
+                followCounts = FollowCounts(followers = 128, following = 87),
             ),
             onBack = {},
             onRetry = {},

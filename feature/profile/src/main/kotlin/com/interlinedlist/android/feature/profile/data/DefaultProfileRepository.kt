@@ -8,12 +8,19 @@ import com.interlinedlist.android.core.network.error.safeApiCall
 import com.interlinedlist.android.feature.profile.data.local.ProfileDao
 import com.interlinedlist.android.feature.profile.data.local.toDomain
 import com.interlinedlist.android.feature.profile.data.local.toEntity
+import com.interlinedlist.android.feature.profile.data.mapper.toFollowCounts
+import com.interlinedlist.android.feature.profile.data.mapper.toFollowStatus
+import com.interlinedlist.android.feature.profile.data.mapper.toFollowUser
+import com.interlinedlist.android.feature.profile.data.mapper.toFollowUserOrNull
 import com.interlinedlist.android.feature.profile.data.mapper.toProfileUser
 import com.interlinedlist.android.feature.profile.data.mapper.toSearchResult
 import com.interlinedlist.android.feature.profile.data.remote.ProfileApi
 import com.interlinedlist.android.feature.profile.data.remote.dto.AvatarFromUrlRequest
 import com.interlinedlist.android.feature.profile.data.remote.dto.ProfileUserDto
 import com.interlinedlist.android.feature.profile.data.remote.dto.UpdateProfileRequest
+import com.interlinedlist.android.feature.profile.domain.FollowCounts
+import com.interlinedlist.android.feature.profile.domain.FollowStatus
+import com.interlinedlist.android.feature.profile.domain.FollowUser
 import com.interlinedlist.android.feature.profile.domain.ProfileUser
 import com.interlinedlist.android.feature.profile.domain.UserSearchResult
 import kotlinx.coroutines.flow.Flow
@@ -127,6 +134,58 @@ class DefaultProfileRepository @Inject constructor(
                 .map { response -> response.usersOrEmpty.map { it.toSearchResult() } }
         }
 
+    override suspend fun getFollowStatus(userId: String): ApiResult<FollowStatus> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.getFollowStatus(userId).toFollowStatus() }
+        }
+
+    override suspend fun getFollowCounts(userId: String): ApiResult<FollowCounts> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.getFollowCounts(userId).toFollowCounts() }
+        }
+
+    override suspend fun followUser(userId: String): ApiResult<Unit> =
+        withContext(dispatchers.io) { safeApiCall(json) { api.followUser(userId) } }
+
+    override suspend fun unfollowUser(userId: String): ApiResult<Unit> =
+        withContext(dispatchers.io) { safeApiCall(json) { api.unfollowUser(userId) } }
+
+    override suspend fun getFollowers(username: String): ApiResult<List<FollowUser>> =
+        withContext(dispatchers.io) {
+            when (val id = resolveUserId(username)) {
+                is ApiResult.Success -> safeApiCall(json) {
+                    api.getFollowers(id.data, limit = LIST_LIMIT).usersOrEmpty.map { it.toFollowUser() }
+                }
+                is ApiResult.Failure -> id
+            }
+        }
+
+    override suspend fun getFollowing(username: String): ApiResult<List<FollowUser>> =
+        withContext(dispatchers.io) {
+            when (val id = resolveUserId(username)) {
+                is ApiResult.Success -> safeApiCall(json) {
+                    api.getFollowing(id.data, limit = LIST_LIMIT).usersOrEmpty.map { it.toFollowUser() }
+                }
+                is ApiResult.Failure -> id
+            }
+        }
+
+    override suspend fun getFollowRequests(): ApiResult<List<FollowUser>> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) {
+                api.getFollowRequests().requestsOrEmpty.mapNotNull { it.toFollowUserOrNull() }
+            }
+        }
+
+    override suspend fun approveFollowRequest(userId: String): ApiResult<Unit> =
+        withContext(dispatchers.io) { safeApiCall(json) { api.approveFollowRequest(userId) } }
+
+    override suspend fun rejectFollowRequest(userId: String): ApiResult<Unit> =
+        withContext(dispatchers.io) { safeApiCall(json) { api.rejectFollowRequest(userId) } }
+
+    override suspend fun removeFollower(userId: String): ApiResult<Unit> =
+        withContext(dispatchers.io) { safeApiCall(json) { api.removeFollower(userId) } }
+
     /** Caches [dto] as the current user, clearing the flag from any stale row first. */
     private suspend fun cacheCurrentUser(dto: ProfileUserDto): ProfileUser {
         val domain = dto.toProfileUser(isCurrentUser = true)
@@ -135,7 +194,27 @@ class DefaultProfileRepository @Inject constructor(
         return domain
     }
 
+    /**
+     * Resolves a [username] to its stable id — the follow endpoints key on the id,
+     * while the UI navigates by username. Prefers the Room cache (populated when the
+     * profile was viewed) and falls back to `GET /api/users/{username}`.
+     */
+    private suspend fun resolveUserId(username: String): ApiResult<String> {
+        profileDao.getByUsername(username)?.let { return ApiResult.Success(it.id) }
+        return safeApiCall(json) { api.getUserByUsername(username).userOrSelf }.let { result ->
+            when (result) {
+                is ApiResult.Success -> {
+                    val dto = result.data
+                        ?: return ApiResult.Failure(AppError.NotFound("User not found"))
+                    ApiResult.Success(dto.id)
+                }
+                is ApiResult.Failure -> result
+            }
+        }
+    }
+
     private companion object {
         const val SEARCH_LIMIT = 20
+        const val LIST_LIMIT = 50
     }
 }

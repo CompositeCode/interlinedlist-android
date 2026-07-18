@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shares the cache/exports directory that DefaultIntegrationsRepository writes CSVs into. -->
+<paths>
+    <cache-path
+        name="exports"
+        path="exports/" />
+</paths>

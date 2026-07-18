@@ -40,23 +40,19 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
-    // Photo Picker (rememberLauncherForActivityResult) for document image uploads.
     implementation(libs.androidx.activity.compose)
 
-    // This module owns its own Room cache (see DocumentsDatabase) — it must not
-    // reuse the shared :core:database, so it pulls Room in directly.
-    implementation(libs.room.runtime)
-    implementation(libs.room.ktx)
-    ksp(libs.room.compiler)
+    // androidx.core.content.FileProvider hands a cached CSV to the Android share sheet.
+    // This module has no Room cache: exports stream fresh CSV and status/limits are
+    // lightweight live reads, so there is nothing worth persisting locally.
+    implementation(libs.androidx.core.ktx)
 
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
     implementation(libs.androidx.hilt.navigation.compose)
 
-    implementation(libs.coil.compose)
-
     implementation(libs.retrofit.core)
-    // okhttp is used directly for multipart image uploads (MultipartBody / RequestBody).
+    // okhttp is used directly for the streaming CSV ResponseBody.
     implementation(libs.okhttp.core)
     implementation(libs.kotlinx.serialization.json)
 

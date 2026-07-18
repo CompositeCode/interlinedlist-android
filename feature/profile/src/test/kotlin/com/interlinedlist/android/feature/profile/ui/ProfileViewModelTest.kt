@@ -4,6 +4,7 @@ import app.cash.turbine.test
 import com.google.common.truth.Truth.assertThat
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
+import com.interlinedlist.android.feature.profile.domain.FollowCounts
 import com.interlinedlist.android.feature.profile.ui.profile.ProfileViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -66,6 +67,20 @@ class ProfileViewModelTest {
 
         assertThat(vm.uiState.value.user?.username).isEqualTo("adron")
         assertThat(vm.uiState.value.errorMessage).isNotNull()
+    }
+
+    @Test
+    fun `loads the current user's own follower and following counts`() = runTest(dispatcher) {
+        val user = testUser(id = "me", username = "adron")
+        repo.refreshCurrentUserResult = ApiResult.Success(user)
+        repo.followCountsResult = ApiResult.Success(FollowCounts(followers = 42, following = 17))
+
+        val vm = ProfileViewModel(repo)
+        advanceUntilIdle()
+
+        assertThat(repo.followCountsUserId).isEqualTo("me")
+        assertThat(vm.uiState.value.followCounts.followers).isEqualTo(42)
+        assertThat(vm.uiState.value.followCounts.following).isEqualTo(17)
     }
 
     @Test

@@ -1,6 +1,9 @@
 package com.interlinedlist.android.feature.profile.data
 
 import com.interlinedlist.android.core.common.result.ApiResult
+import com.interlinedlist.android.feature.profile.domain.FollowCounts
+import com.interlinedlist.android.feature.profile.domain.FollowStatus
+import com.interlinedlist.android.feature.profile.domain.FollowUser
 import com.interlinedlist.android.feature.profile.domain.ProfileUser
 import com.interlinedlist.android.feature.profile.domain.UserSearchResult
 import kotlinx.coroutines.flow.Flow
@@ -51,4 +54,40 @@ interface ProfileRepository {
 
     /** One-shot user search against `GET /api/users/search` (not cached). */
     suspend fun searchUsers(query: String): ApiResult<List<UserSearchResult>>
+
+    // --- Following ---
+
+    /** The current user's follow relationship to [userId] via `GET /api/follow/{userId}/status`. */
+    suspend fun getFollowStatus(userId: String): ApiResult<FollowStatus>
+
+    /** Follower / following counts for [userId] via `GET /api/follow/{userId}/counts`. */
+    suspend fun getFollowCounts(userId: String): ApiResult<FollowCounts>
+
+    /** Follows [userId] via `POST /api/follow/{userId}`. */
+    suspend fun followUser(userId: String): ApiResult<Unit>
+
+    /** Unfollows [userId] via `DELETE /api/follow/{userId}`. */
+    suspend fun unfollowUser(userId: String): ApiResult<Unit>
+
+    /**
+     * The users following the user named [username], reached by drilling down from a
+     * profile. Resolves the username to an id, then reads
+     * `GET /api/follow/{userId}/followers`.
+     */
+    suspend fun getFollowers(username: String): ApiResult<List<FollowUser>>
+
+    /** The users the user named [username] follows via `GET /api/follow/{userId}/following`. */
+    suspend fun getFollowing(username: String): ApiResult<List<FollowUser>>
+
+    /** The current user's pending follow requests via `GET /api/follow/requests`. */
+    suspend fun getFollowRequests(): ApiResult<List<FollowUser>>
+
+    /** Approves a pending request from [userId] via `POST /api/follow/{userId}/approve`. */
+    suspend fun approveFollowRequest(userId: String): ApiResult<Unit>
+
+    /** Rejects a pending request from [userId] via `POST /api/follow/{userId}/reject`. */
+    suspend fun rejectFollowRequest(userId: String): ApiResult<Unit>
+
+    /** Removes [userId] as a follower via `DELETE /api/follow/{userId}/remove`. */
+    suspend fun removeFollower(userId: String): ApiResult<Unit>
 }

@@ -17,8 +17,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
-import com.interlinedlist.android.core.designsystem.theme.AmberGold
-import com.interlinedlist.android.core.designsystem.theme.OceanBlue
 
 /**
  * A circular user avatar. Loads [avatarUrl] with Coil when present, otherwise falls
@@ -47,7 +45,7 @@ fun UserAvatar(
             modifier = modifier
                 .size(size)
                 .clip(shape)
-                .background(OceanBlue),
+                .background(MaterialTheme.colorScheme.primary),
             contentAlignment = Alignment.Center,
         ) {
             Text(
@@ -64,7 +62,7 @@ fun UserAvatar(
 @Composable
 fun SubscriberBadge(modifier: Modifier = Modifier) {
     Surface(
-        color = AmberGold,
+        color = MaterialTheme.colorScheme.tertiaryContainer,
         shape = MaterialTheme.shapes.small,
         modifier = modifier,
     ) {
@@ -72,7 +70,7 @@ fun SubscriberBadge(modifier: Modifier = Modifier) {
             text = "Subscriber",
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurface,
+            color = MaterialTheme.colorScheme.onTertiaryContainer,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
         )
     }
