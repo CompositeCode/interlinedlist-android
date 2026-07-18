@@ -32,7 +32,6 @@ dependencies {
     implementation(project(":core:network"))
     implementation(project(":core:datastore"))
 
-    // Compose
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.material3)
@@ -41,35 +40,33 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
-    implementation(libs.androidx.navigation.compose)
 
-    // DI
+    // This module owns its own Room cache (see DocumentsDatabase) — it must not
+    // reuse the shared :core:database, so it pulls Room in directly.
+    implementation(libs.room.runtime)
+    implementation(libs.room.ktx)
+    ksp(libs.room.compiler)
+
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
     implementation(libs.androidx.hilt.navigation.compose)
 
-    // Networking (Retrofit annotations + serialization for DTOs)
+    implementation(libs.coil.compose)
+
     implementation(libs.retrofit.core)
     implementation(libs.kotlinx.serialization.json)
-    implementation(libs.kotlinx.coroutines.core)
-
-    // Feature-local Room cache (offline-first)
-    implementation(libs.room.runtime)
-    implementation(libs.room.ktx)
-    implementation(libs.room.paging)
-    ksp(libs.room.compiler)
-    implementation(libs.androidx.paging.runtime)
-    implementation(libs.androidx.paging.compose)
-
-    // Images
-    implementation(libs.coil.compose)
 
     // Unit tests
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.turbine)
     testImplementation(libs.truth)
+    // Repository tests hit a MockWebServer through the real Retrofit stack.
     testImplementation(libs.okhttp.mockwebserver)
+    testImplementation(libs.retrofit.core)
+    testImplementation(libs.retrofit.kotlinx.serialization)
+    testImplementation(libs.okhttp.core)
+    testImplementation(libs.kotlinx.serialization.json)
 
     // Instrumented / UI tests
     androidTestImplementation(libs.androidx.test.ext.junit)

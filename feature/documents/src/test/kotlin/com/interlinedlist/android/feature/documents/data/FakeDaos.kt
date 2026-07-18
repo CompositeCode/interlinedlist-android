@@ -1,0 +1,74 @@
+package com.interlinedlist.android.feature.documents.data
+
+import com.interlinedlist.android.feature.documents.data.local.DocumentDao
+import com.interlinedlist.android.feature.documents.data.local.DocumentEntity
+import com.interlinedlist.android.feature.documents.data.local.FolderDao
+import com.interlinedlist.android.feature.documents.data.local.FolderEntity
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.map
+
+/**
+ * In-memory [DocumentDao] mirroring the real DAO's query semantics, so repository
+ * tests can assert cache writes without Room/Robolectric.
+ */
+class FakeDocumentDao : DocumentDao {
+    private val rows = MutableStateFlow<List<DocumentEntity>>(emptyList())
+
+    fun snapshot(): List<DocumentEntity> = rows.value.sortedBy { it.sortOrder }
+
+    override fun observeRootDocuments(): Flow<List<DocumentEntity>> =
+        rows.map { list -> list.filter { it.folderId == null }.sortedBy { it.sortOrder } }
+
+    override fun observeDocumentsInFolder(folderId: String): Flow<List<DocumentEntity>> =
+        rows.map { list -> list.filter { it.folderId == folderId }.sortedBy { it.sortOrder } }
+
+    override fun observeDocument(id: String): Flow<DocumentEntity?> =
+        rows.map { list -> list.firstOrNull { it.id == id } }
+
+    override suspend fun getDocument(id: String): DocumentEntity? =
+        rows.value.firstOrNull { it.id == id }
+
+    override suspend fun maxSortOrder(): Int = rows.value.maxOfOrNull { it.sortOrder } ?: -1
+
+    override suspend fun upsertAll(documents: List<DocumentEntity>) {
+        documents.forEach { upsert(it) }
+    }
+
+    override suspend fun upsert(document: DocumentEntity) {
+        rows.value = rows.value.filterNot { it.id == document.id } + document
+    }
+
+    override suspend fun deleteById(id: String) {
+        rows.value = rows.value.filterNot { it.id == id }
+    }
+
+    override suspend fun clearRoot() {
+        rows.value = rows.value.filterNot { it.folderId == null }
+    }
+
+    override suspend fun clearFolder(folderId: String) {
+        rows.value = rows.value.filterNot { it.folderId == folderId }
+    }
+}
+
+class FakeFolderDao : FolderDao {
+    private val rows = MutableStateFlow<List<FolderEntity>>(emptyList())
+
+    fun snapshot(): List<FolderEntity> = rows.value.sortedBy { it.sortOrder }
+
+    override fun observeFolders(): Flow<List<FolderEntity>> =
+        rows.map { list -> list.sortedBy { it.sortOrder } }
+
+    override suspend fun upsertAll(folders: List<FolderEntity>) {
+        folders.forEach { upsert(it) }
+    }
+
+    override suspend fun upsert(folder: FolderEntity) {
+        rows.value = rows.value.filterNot { it.id == folder.id } + folder
+    }
+
+    override suspend fun clear() {
+        rows.value = emptyList()
+    }
+}
