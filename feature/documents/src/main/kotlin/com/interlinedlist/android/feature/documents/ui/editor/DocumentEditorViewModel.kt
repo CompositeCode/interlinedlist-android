@@ -24,6 +24,7 @@ data class DocumentEditorUiState(
     val folderId: String? = null,
     val isLoading: Boolean = true,
     val isSaving: Boolean = false,
+    val isUploadingImage: Boolean = false,
     val isPreview: Boolean = false,
     val hasUnsavedChanges: Boolean = false,
     val errorMessage: String? = null,
@@ -109,6 +110,31 @@ class DocumentEditorViewModel @Inject constructor(
         _uiState.update { it.copy(content = value, hasUnsavedChanges = true, errorMessage = null) }
 
     fun togglePreview() = _uiState.update { it.copy(isPreview = !it.isPreview) }
+
+    /**
+     * Uploads a picked image for this document and appends a markdown image
+     * reference for it into the body. The screen supplies the raw bytes read from
+     * the picker's content URI; keeping the VM byte-based avoids an Android
+     * dependency here and keeps it unit-testable.
+     */
+    fun uploadImage(fileName: String, mimeType: String, bytes: ByteArray) {
+        _uiState.update { it.copy(isUploadingImage = true, errorMessage = null) }
+        viewModelScope.launch {
+            when (val result = repository.uploadImage(documentId, fileName, mimeType, bytes)) {
+                is ApiResult.Success -> _uiState.update {
+                    val marker = "\n![${fileName}](uploading…)\n"
+                    it.copy(
+                        isUploadingImage = false,
+                        content = it.content + marker,
+                        hasUnsavedChanges = true,
+                    )
+                }
+                is ApiResult.Failure -> _uiState.update {
+                    it.copy(isUploadingImage = false, errorMessage = result.error.toUserMessage())
+                }
+            }
+        }
+    }
 
     /** Persists edits; invokes [onSaved] on success. */
     fun save(onSaved: () -> Unit = {}) {

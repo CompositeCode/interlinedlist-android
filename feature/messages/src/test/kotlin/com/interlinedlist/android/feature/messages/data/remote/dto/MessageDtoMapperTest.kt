@@ -70,4 +70,62 @@ class MessageDtoMapperTest {
         ).toDomain(currentUserId = null)
         assertThat(message.authorLabel).isEqualTo("handle")
     }
+
+    @Test
+    fun `maps attached media and scheduled time`() {
+        val message = MessageDto(
+            id = "m4",
+            content = "look",
+            imageUrls = listOf("a.png", "b.png"),
+            videoUrls = listOf("v.mp4"),
+            scheduledAt = "2026-07-19T09:00:00Z",
+        ).toDomain(currentUserId = null)
+
+        assertThat(message.imageUrls).containsExactly("a.png", "b.png").inOrder()
+        assertThat(message.videoUrls).containsExactly("v.mp4")
+        assertThat(message.hasMedia).isTrue()
+        assertThat(message.scheduledAt).isEqualTo("2026-07-19T09:00:00Z")
+    }
+
+    @Test
+    fun `maps link metadata into a preview when it carries content`() {
+        val message = MessageDto(
+            id = "m5",
+            content = "read this",
+            linkMetadata = LinkMetadataDto(
+                url = "https://example.com",
+                title = "Example",
+                description = "A page",
+                image = "https://example.com/og.png",
+                siteName = "Example",
+            ),
+        ).toDomain(currentUserId = null)
+
+        val preview = message.linkPreview
+        assertThat(preview).isNotNull()
+        assertThat(preview!!.url).isEqualTo("https://example.com")
+        assertThat(preview.title).isEqualTo("Example")
+    }
+
+    @Test
+    fun `drops an empty link preview`() {
+        val message = MessageDto(
+            id = "m6",
+            content = "no preview",
+            linkMetadata = LinkMetadataDto(url = "https://example.com"),
+        ).toDomain(currentUserId = null)
+
+        assertThat(message.linkPreview).isNull()
+    }
+
+    @Test
+    fun `drops a link preview without a url`() {
+        val message = MessageDto(
+            id = "m7",
+            content = "x",
+            linkMetadata = LinkMetadataDto(title = "no url"),
+        ).toDomain(currentUserId = null)
+
+        assertThat(message.linkPreview).isNull()
+    }
 }

@@ -40,6 +40,8 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
+    // Photo Picker (rememberLauncherForActivityResult) for document image uploads.
+    implementation(libs.androidx.activity.compose)
 
     // This module owns its own Room cache (see DocumentsDatabase) — it must not
     // reuse the shared :core:database, so it pulls Room in directly.
@@ -54,6 +56,8 @@ dependencies {
     implementation(libs.coil.compose)
 
     implementation(libs.retrofit.core)
+    // okhttp is used directly for multipart image uploads (MultipartBody / RequestBody).
+    implementation(libs.okhttp.core)
     implementation(libs.kotlinx.serialization.json)
 
     // Unit tests

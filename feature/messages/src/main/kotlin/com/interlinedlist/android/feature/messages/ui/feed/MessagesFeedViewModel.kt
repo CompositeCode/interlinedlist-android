@@ -6,6 +6,7 @@ import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
 import com.interlinedlist.android.feature.messages.data.MessagesRepository
 import com.interlinedlist.android.feature.messages.domain.Message
+import com.interlinedlist.android.feature.messages.domain.ReportReason
 import com.interlinedlist.android.feature.messages.ui.isSubscriptionGate
 import com.interlinedlist.android.feature.messages.ui.toUserMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -17,6 +18,15 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+
+/** A pending media attachment being uploaded, or already uploaded, for a compose. */
+data class PendingAttachment(
+    val fileName: String,
+    val isVideo: Boolean,
+    /** Set once the upload finishes; null while [isUploading]. */
+    val hostedUrl: String? = null,
+    val isUploading: Boolean = true,
+)
 
 /** Feed screen state: the cached messages plus transient network/compose flags. */
 data class MessagesFeedUiState(
@@ -30,9 +40,21 @@ data class MessagesFeedUiState(
     val isComposeOpen: Boolean = false,
     val composeText: String = "",
     val isPosting: Boolean = false,
+    /** Media attached to the in-progress compose. */
+    val attachments: List<PendingAttachment> = emptyList(),
+    /** Optional future send time (ISO-8601) for the in-progress compose. */
+    val scheduledAt: String? = null,
+    /** The message currently being reported (drives the report dialog), if any. */
+    val reportTarget: Message? = null,
+    val isReporting: Boolean = false,
 ) {
     val isEmpty: Boolean get() = messages.isEmpty()
-    val canPost: Boolean get() = composeText.isNotBlank() && !isPosting
+    val hasAttachments: Boolean get() = attachments.isNotEmpty()
+    val isUploading: Boolean get() = attachments.any { it.isUploading }
+    val isScheduled: Boolean get() = scheduledAt != null
+    val canPost: Boolean
+        get() = (composeText.isNotBlank() || attachments.any { it.hostedUrl != null }) &&
+            !isPosting && !isUploading
 }
 
 /** Transient (non-cached) UI flags kept separate from the Room-backed message list. */
@@ -45,6 +67,10 @@ private data class FeedTransientState(
     val isComposeOpen: Boolean = false,
     val composeText: String = "",
     val isPosting: Boolean = false,
+    val attachments: List<PendingAttachment> = emptyList(),
+    val scheduledAt: String? = null,
+    val reportTarget: Message? = null,
+    val isReporting: Boolean = false,
 )
 
 @HiltViewModel
@@ -70,6 +96,10 @@ class MessagesFeedViewModel @Inject constructor(
                 isComposeOpen = t.isComposeOpen,
                 composeText = t.composeText,
                 isPosting = t.isPosting,
+                attachments = t.attachments,
+                scheduledAt = t.scheduledAt,
+                reportTarget = t.reportTarget,
+                isReporting = t.isReporting,
             )
         }.stateIn(
             scope = viewModelScope,
@@ -134,22 +164,121 @@ class MessagesFeedViewModel @Inject constructor(
 
     fun openCompose() = transient.update { it.copy(isComposeOpen = true, errorMessage = null) }
 
-    fun dismissCompose() = transient.update { it.copy(isComposeOpen = false, composeText = "") }
+    fun dismissCompose() = transient.update {
+        it.copy(isComposeOpen = false, composeText = "", attachments = emptyList(), scheduledAt = null)
+    }
 
     fun onComposeTextChange(value: String) = transient.update { it.copy(composeText = value) }
 
+    /** Sets (or clears with null) the future send time for the in-progress compose. */
+    fun onScheduleChange(isoTimestamp: String?) = transient.update { it.copy(scheduledAt = isoTimestamp) }
+
+    /**
+     * Uploads a picked media file and attaches it to the compose. [bytes] and the
+     * file metadata come from the platform picker at the UI layer, keeping this
+     * ViewModel free of Android URI/ContentResolver dependencies.
+     */
+    fun onAttachMedia(bytes: ByteArray, fileName: String, mimeType: String, isVideo: Boolean) {
+        val placeholder = PendingAttachment(fileName = fileName, isVideo = isVideo)
+        transient.update { it.copy(attachments = it.attachments + placeholder, errorMessage = null) }
+        viewModelScope.launch {
+            val result = if (isVideo) {
+                repository.uploadVideo(bytes, fileName, mimeType)
+            } else {
+                repository.uploadImage(bytes, fileName, mimeType)
+            }
+            when (result) {
+                is ApiResult.Success -> transient.update { state ->
+                    state.copy(
+                        attachments = state.attachments.map {
+                            if (it === placeholder || (it.fileName == fileName && it.isUploading)) {
+                                it.copy(hostedUrl = result.data, isUploading = false)
+                            } else {
+                                it
+                            }
+                        },
+                    )
+                }
+                is ApiResult.Failure -> transient.update { state ->
+                    // Drop the failed placeholder and surface the error.
+                    state.copy(
+                        attachments = state.attachments.filterNot {
+                            it.fileName == fileName && it.isUploading
+                        },
+                    ).withError(result.error)
+                }
+            }
+        }
+    }
+
+    /** Removes a not-yet-posted attachment from the compose. */
+    fun onRemoveAttachment(attachment: PendingAttachment) = transient.update {
+        it.copy(attachments = it.attachments - attachment)
+    }
+
     fun post() {
-        val text = transient.value.composeText.trim()
-        if (text.isBlank()) return
+        val snapshot = transient.value
+        val text = snapshot.composeText.trim()
+        val ready = snapshot.attachments.mapNotNull { it.hostedUrl }
+        if (text.isBlank() && ready.isEmpty()) return
+        if (snapshot.attachments.any { it.isUploading }) return
+        val images = snapshot.attachments.filterNot { it.isVideo }.mapNotNull { it.hostedUrl }
+        val videos = snapshot.attachments.filter { it.isVideo }.mapNotNull { it.hostedUrl }
         transient.update { it.copy(isPosting = true, errorMessage = null) }
         viewModelScope.launch {
-            when (val result = repository.createMessage(text)) {
+            when (
+                val result = repository.createMessage(
+                    content = text,
+                    imageUrls = images,
+                    videoUrls = videos,
+                    scheduledAt = snapshot.scheduledAt,
+                )
+            ) {
                 is ApiResult.Success -> transient.update {
-                    it.copy(isPosting = false, isComposeOpen = false, composeText = "")
+                    it.copy(
+                        isPosting = false,
+                        isComposeOpen = false,
+                        composeText = "",
+                        attachments = emptyList(),
+                        scheduledAt = null,
+                    )
                 }
                 is ApiResult.Failure -> transient.update {
                     it.copy(isPosting = false).withError(result.error)
                 }
+            }
+        }
+    }
+
+    // --- report ------------------------------------------------------------
+
+    fun openReport(message: Message) = transient.update { it.copy(reportTarget = message, errorMessage = null) }
+
+    fun dismissReport() = transient.update { it.copy(reportTarget = null, isReporting = false) }
+
+    fun submitReport(reason: ReportReason, detail: String) {
+        val target = transient.value.reportTarget ?: return
+        transient.update { it.copy(isReporting = true, errorMessage = null) }
+        viewModelScope.launch {
+            when (val result = repository.report(target.id, reason, detail)) {
+                is ApiResult.Success -> transient.update {
+                    it.copy(isReporting = false, reportTarget = null)
+                }
+                is ApiResult.Failure -> transient.update {
+                    it.copy(isReporting = false, reportTarget = null).withError(result.error)
+                }
+            }
+        }
+    }
+
+    // --- link metadata -----------------------------------------------------
+
+    /** Fetches link-preview metadata for a message; the cache Flow re-emits it. */
+    fun onFetchMetadata(message: Message) {
+        viewModelScope.launch {
+            val result = repository.fetchMetadata(message.id)
+            if (result is ApiResult.Failure) {
+                transient.update { it.withError(result.error) }
             }
         }
     }

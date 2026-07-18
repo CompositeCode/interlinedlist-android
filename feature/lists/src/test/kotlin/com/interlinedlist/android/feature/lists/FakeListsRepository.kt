@@ -3,12 +3,17 @@ package com.interlinedlist.android.feature.lists
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
 import com.interlinedlist.android.feature.lists.data.ListsRepository
+import com.interlinedlist.android.feature.lists.domain.ListConnection
 import com.interlinedlist.android.feature.lists.domain.ListDetail
 import com.interlinedlist.android.feature.lists.domain.ListFolder
 import com.interlinedlist.android.feature.lists.domain.ListRow
 import com.interlinedlist.android.feature.lists.domain.ListSchema
 import com.interlinedlist.android.feature.lists.domain.ListSummary
 import com.interlinedlist.android.feature.lists.domain.Paged
+import com.interlinedlist.android.feature.lists.domain.RefreshResult
+import com.interlinedlist.android.feature.lists.domain.Watcher
+import com.interlinedlist.android.feature.lists.domain.WatcherCandidate
+import com.interlinedlist.android.feature.lists.domain.WatcherRole
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 
@@ -32,8 +37,28 @@ class FakeListsRepository : ListsRepository {
     var updateRowResult: ApiResult<ListRow>? = null
     var deleteRowResult: ApiResult<Unit> = ApiResult.Success(Unit)
 
+    // Round-2 deferred features.
+    var updateSchemaResult: ApiResult<ListSchema>? = null
+    var refreshGithubResult: ApiResult<RefreshResult> =
+        ApiResult.Success(RefreshResult(message = null, added = 0, updated = 0, removed = 0))
+    var watchersResult: ApiResult<List<Watcher>> = ApiResult.Success(emptyList())
+    var isWatchingResult: ApiResult<Boolean> = ApiResult.Success(false)
+    var candidatesResult: ApiResult<List<WatcherCandidate>> = ApiResult.Success(emptyList())
+    var addWatcherResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var updateWatcherRoleResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var removeWatcherResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var connectionsResult: ApiResult<List<ListConnection>> = ApiResult.Success(emptyList())
+    var createConnectionResult: ApiResult<ListConnection>? = null
+    var deleteConnectionResult: ApiResult<Unit> = ApiResult.Success(Unit)
+
     var refreshCount = 0
     var loadMoreCount = 0
+    var updateSchemaCount = 0
+    var refreshGithubCount = 0
+    var addWatcherCount = 0
+    var removeWatcherCount = 0
+    var lastSchemaUpdate: ListSchema? = null
+    var lastWatcherSearch: String? = null
 
     override fun observeLists(): Flow<List<ListSummary>> = cache
 
@@ -82,6 +107,57 @@ class FakeListsRepository : ListsRepository {
 
     override suspend fun createFolder(name: String, parentId: String?): ApiResult<ListFolder> =
         ApiResult.Success(ListFolder("f", name, parentId))
+
+    override suspend fun updateSchema(listId: String, schema: ListSchema): ApiResult<ListSchema> {
+        updateSchemaCount++
+        lastSchemaUpdate = schema
+        return updateSchemaResult ?: ApiResult.Success(schema)
+    }
+
+    override suspend fun refreshGithubList(listId: String): ApiResult<RefreshResult> {
+        refreshGithubCount++
+        return refreshGithubResult
+    }
+
+    override suspend fun getWatchers(listId: String, limit: Int): ApiResult<List<Watcher>> = watchersResult
+
+    override suspend fun isWatching(listId: String): ApiResult<Boolean> = isWatchingResult
+
+    override suspend fun searchWatcherCandidates(
+        listId: String,
+        query: String,
+        limit: Int,
+    ): ApiResult<List<WatcherCandidate>> {
+        lastWatcherSearch = query
+        return candidatesResult
+    }
+
+    override suspend fun addWatcher(listId: String, userId: String, role: WatcherRole): ApiResult<Unit> {
+        addWatcherCount++
+        return addWatcherResult
+    }
+
+    override suspend fun updateWatcherRole(
+        listId: String,
+        userId: String,
+        role: WatcherRole,
+    ): ApiResult<Unit> = updateWatcherRoleResult
+
+    override suspend fun removeWatcher(listId: String, userId: String): ApiResult<Unit> {
+        removeWatcherCount++
+        return removeWatcherResult
+    }
+
+    override suspend fun getConnections(): ApiResult<List<ListConnection>> = connectionsResult
+
+    override suspend fun createConnection(
+        fromListId: String,
+        toListId: String,
+        label: String?,
+    ): ApiResult<ListConnection> = createConnectionResult
+        ?: ApiResult.Success(ListConnection("c-new", fromListId, toListId, label, fromListId, toListId))
+
+    override suspend fun deleteConnection(id: String): ApiResult<Unit> = deleteConnectionResult
 
     companion object {
         fun subscriptionFailure(): ApiResult.Failure =

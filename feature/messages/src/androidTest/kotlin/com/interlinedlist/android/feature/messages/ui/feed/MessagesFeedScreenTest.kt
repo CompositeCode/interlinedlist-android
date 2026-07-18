@@ -11,6 +11,9 @@ import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.interlinedlist.android.core.designsystem.theme.InterlinedListTheme
 import com.interlinedlist.android.feature.messages.domain.Message
+import com.interlinedlist.android.feature.messages.ui.components.MessageCardTags
+import com.interlinedlist.android.feature.messages.ui.components.MessageMediaTags
+import com.interlinedlist.android.feature.messages.ui.components.ReportDialogTags
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -21,16 +24,22 @@ class MessagesFeedScreenTest {
     @get:Rule
     val composeRule = createComposeRule()
 
-    private fun message(id: String, body: String) = Message(
+    private fun message(
+        id: String,
+        body: String,
+        imageUrls: List<String> = emptyList(),
+    ) = Message(
         id = id, content = body, authorId = "u1", authorUsername = "adron",
         authorDisplayName = "Adron", authorAvatarUrl = null, createdAt = null,
         digCount = 0, replyCount = 0, dugByMe = false, parentId = null, mine = false,
+        imageUrls = imageUrls,
     )
 
     /** Hosts the stateless feed with a tiny in-memory state holder. */
     private fun setFeed(
         initial: MessagesFeedUiState,
         onOpenMessage: (String) -> Unit = {},
+        onReport: (Message) -> Unit = {},
     ) {
         composeRule.setContent {
             var state by mutableStateOf(initial)
@@ -46,6 +55,7 @@ class MessagesFeedScreenTest {
                     onDismissCompose = { state = state.copy(isComposeOpen = false) },
                     onComposeTextChange = { state = state.copy(composeText = it) },
                     onPost = {},
+                    onReport = onReport,
                 )
             }
         }
@@ -85,5 +95,39 @@ class MessagesFeedScreenTest {
         setFeed(MessagesFeedUiState(messages = listOf(message("1", "hi"))))
         composeRule.onNodeWithTag(MessagesFeedTags.FAB).performClick()
         composeRule.onNodeWithTag(MessagesFeedTags.COMPOSE_INPUT).assertIsDisplayed()
+    }
+
+    @Test
+    fun attachedImage_isRendered() {
+        setFeed(
+            MessagesFeedUiState(
+                messages = listOf(message("1", "with photo", imageUrls = listOf("https://cdn/a.png"))),
+            ),
+        )
+        composeRule.onNodeWithTag(MessageMediaTags.IMAGE).assertIsDisplayed()
+    }
+
+    @Test
+    fun overflowMenu_reportsAnotherUsersMessage() {
+        var reported: String? = null
+        setFeed(
+            MessagesFeedUiState(messages = listOf(message("77", "not mine"))),
+            onReport = { reported = it.id },
+        )
+        composeRule.onNodeWithTag(MessageCardTags.MENU).performClick()
+        composeRule.onNodeWithTag(MessageCardTags.REPORT).performClick()
+        assert(reported == "77")
+    }
+
+    @Test
+    fun reportDialog_isShown_whenReportTargetIsSet() {
+        setFeed(MessagesFeedUiState(reportTarget = message("77", "not mine")))
+        composeRule.onNodeWithTag(ReportDialogTags.DIALOG).assertIsDisplayed()
+    }
+
+    @Test
+    fun scheduledAction_isPresent_inTheTopBar() {
+        setFeed(MessagesFeedUiState(messages = listOf(message("1", "hi"))))
+        composeRule.onNodeWithTag(MessagesFeedTags.SCHEDULED_ACTION).assertIsDisplayed()
     }
 }

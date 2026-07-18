@@ -40,6 +40,8 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
+    // Avatar picker uses rememberLauncherForActivityResult from activity-compose.
+    implementation(libs.androidx.activity.compose)
 
     // This module owns its own Room cache (see DocumentsDatabase) — it must not
     // reuse the shared :core:database, so it pulls Room in directly.
@@ -54,6 +56,8 @@ dependencies {
     implementation(libs.coil.compose)
 
     implementation(libs.retrofit.core)
+    // Multipart avatar upload needs OkHttp's MultipartBody/RequestBody directly.
+    implementation(libs.okhttp.core)
     implementation(libs.kotlinx.serialization.json)
 
     // Unit tests

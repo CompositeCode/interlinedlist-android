@@ -1,12 +1,19 @@
 package com.interlinedlist.android.feature.messages.data.remote
 
 import com.interlinedlist.android.feature.messages.data.remote.dto.CreateMessageRequest
+import com.interlinedlist.android.feature.messages.data.remote.dto.MediaUploadResponse
 import com.interlinedlist.android.feature.messages.data.remote.dto.MessageResponse
 import com.interlinedlist.android.feature.messages.data.remote.dto.MessagesResponse
+import com.interlinedlist.android.feature.messages.data.remote.dto.MetadataResponse
+import com.interlinedlist.android.feature.messages.data.remote.dto.ReportRequest
+import com.interlinedlist.android.feature.messages.data.remote.dto.ScheduledMessagesResponse
+import okhttp3.MultipartBody
 import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
+import retrofit2.http.Multipart
 import retrofit2.http.POST
+import retrofit2.http.Part
 import retrofit2.http.Path
 import retrofit2.http.Query
 
@@ -55,4 +62,26 @@ interface MessagesApi {
         @Query("limit") limit: Int,
         @Query("offset") offset: Int,
     ): MessagesResponse
+
+    /** Uploads an image and returns its hosted URL to attach on compose. */
+    @Multipart
+    @POST("api/messages/images/upload")
+    suspend fun uploadImage(@Part file: MultipartBody.Part): MediaUploadResponse
+
+    /** Uploads a video and returns its hosted URL to attach on compose. */
+    @Multipart
+    @POST("api/messages/videos/upload")
+    suspend fun uploadVideo(@Part file: MultipartBody.Part): MediaUploadResponse
+
+    /** The caller's scheduled (not-yet-published) messages. */
+    @GET("api/messages/scheduled")
+    suspend fun getScheduled(): ScheduledMessagesResponse
+
+    /** Reports a message with a reason (and optional free-text detail). */
+    @POST("api/messages/{id}/report")
+    suspend fun report(@Path("id") id: String, @Body body: ReportRequest)
+
+    /** Fetches and attaches link-preview metadata for a message's links. */
+    @POST("api/messages/{id}/metadata")
+    suspend fun fetchMetadata(@Path("id") id: String): MetadataResponse
 }

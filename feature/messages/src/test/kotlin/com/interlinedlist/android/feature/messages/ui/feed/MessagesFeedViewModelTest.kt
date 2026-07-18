@@ -4,6 +4,7 @@ import app.cash.turbine.test
 import com.google.common.truth.Truth.assertThat
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
+import com.interlinedlist.android.feature.messages.domain.ReportReason
 import com.interlinedlist.android.feature.messages.ui.FakeMessagesRepository
 import com.interlinedlist.android.feature.messages.ui.sampleMessage
 import kotlinx.coroutines.Dispatchers
@@ -17,6 +18,8 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
+
+// PendingAttachment and MessagesFeedUiState live in this package.
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class MessagesFeedViewModelTest {
@@ -175,5 +178,126 @@ class MessagesFeedViewModelTest {
         advanceUntilIdle()
 
         assertThat(repo.deletedIds).containsExactly("9")
+    }
+
+    @Test
+    fun `attaching media uploads and records the hosted url`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            uploadImageResult = ApiResult.Success("https://cdn/a.png")
+        }
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.openCompose()
+        vm.onAttachMedia("bytes".toByteArray(), "a.png", "image/png", isVideo = false)
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertThat(repo.uploadedImages).isEqualTo(1)
+        assertThat(state.attachments).hasSize(1)
+        assertThat(state.attachments.first().hostedUrl).isEqualTo("https://cdn/a.png")
+        assertThat(state.attachments.first().isUploading).isFalse()
+    }
+
+    @Test
+    fun `a failed upload is dropped and surfaces an error`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            uploadImageResult = ApiResult.Failure(AppError.Server("boom"))
+        }
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.openCompose()
+        vm.onAttachMedia("bytes".toByteArray(), "a.png", "image/png", isVideo = false)
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertThat(state.attachments).isEmpty()
+        assertThat(state.errorMessage).isNotEmpty()
+    }
+
+    @Test
+    fun `post forwards attached media and schedule to the repository`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            uploadImageResult = ApiResult.Success("https://cdn/a.png")
+            createResult = ApiResult.Success(sampleMessage(id = "new"))
+        }
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.openCompose()
+        vm.onComposeTextChange("with media")
+        vm.onAttachMedia("bytes".toByteArray(), "a.png", "image/png", isVideo = false)
+        vm.onScheduleChange("2026-07-19T09:00:00Z")
+        advanceUntilIdle()
+        vm.post()
+        advanceUntilIdle()
+
+        val create = repo.lastCreate!!
+        assertThat(create.content).isEqualTo("with media")
+        assertThat(create.imageUrls).containsExactly("https://cdn/a.png")
+        assertThat(create.scheduledAt).isEqualTo("2026-07-19T09:00:00Z")
+        // Compose is reset after a successful post.
+        assertThat(vm.uiState.value.attachments).isEmpty()
+        assertThat(vm.uiState.value.scheduledAt).isNull()
+    }
+
+    @Test
+    fun `canPost is false while an attachment is still uploading`() {
+        // Pure state logic: an in-flight upload blocks posting even with text.
+        val uploading = MessagesFeedUiState(
+            composeText = "text",
+            attachments = listOf(PendingAttachment(fileName = "a.png", isVideo = false, isUploading = true)),
+        )
+        assertThat(uploading.isUploading).isTrue()
+        assertThat(uploading.canPost).isFalse()
+
+        // Once the upload completes, posting is allowed.
+        val ready = uploading.copy(
+            attachments = listOf(
+                PendingAttachment(fileName = "a.png", isVideo = false, hostedUrl = "u", isUploading = false),
+            ),
+        )
+        assertThat(ready.canPost).isTrue()
+    }
+
+    @Test
+    fun `report opens the dialog and submits the chosen reason`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository()
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        val target = sampleMessage(id = "abusive")
+        vm.openReport(target)
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.reportTarget?.id).isEqualTo("abusive")
+
+        vm.submitReport(ReportReason.HARASSMENT, "please review")
+        advanceUntilIdle()
+
+        val report = repo.lastReport!!
+        assertThat(report.messageId).isEqualTo("abusive")
+        assertThat(report.reason).isEqualTo(ReportReason.HARASSMENT)
+        assertThat(report.detail).isEqualTo("please review")
+        assertThat(vm.uiState.value.reportTarget).isNull()
+    }
+
+    @Test
+    fun `fetchMetadata delegates to the repository`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            metadataResult = ApiResult.Success(sampleMessage(id = "m1"))
+        }
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.onFetchMetadata(sampleMessage(id = "m1"))
+        advanceUntilIdle()
+
+        assertThat(repo.metadataFetchedIds).containsExactly("m1")
     }
 }

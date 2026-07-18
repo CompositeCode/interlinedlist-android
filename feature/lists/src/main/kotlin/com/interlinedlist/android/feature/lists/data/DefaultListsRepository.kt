@@ -6,17 +6,26 @@ import com.interlinedlist.android.core.common.result.map
 import com.interlinedlist.android.core.network.error.safeApiCall
 import com.interlinedlist.android.feature.lists.data.local.ListDao
 import com.interlinedlist.android.feature.lists.data.remote.ListsApi
+import com.interlinedlist.android.feature.lists.data.remote.dto.AddWatcherRequest
+import com.interlinedlist.android.feature.lists.data.remote.dto.CreateConnectionRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.CreateFolderRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.CreateListRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.ListDto
 import com.interlinedlist.android.feature.lists.data.remote.dto.RowDto
 import com.interlinedlist.android.feature.lists.data.remote.dto.RowWriteRequest
+import com.interlinedlist.android.feature.lists.data.remote.dto.UpdateSchemaRequest
+import com.interlinedlist.android.feature.lists.data.remote.dto.UpdateWatcherRoleRequest
+import com.interlinedlist.android.feature.lists.domain.ListConnection
 import com.interlinedlist.android.feature.lists.domain.ListDetail
 import com.interlinedlist.android.feature.lists.domain.ListFolder
 import com.interlinedlist.android.feature.lists.domain.ListRow
 import com.interlinedlist.android.feature.lists.domain.ListSchema
 import com.interlinedlist.android.feature.lists.domain.ListSummary
 import com.interlinedlist.android.feature.lists.domain.Paged
+import com.interlinedlist.android.feature.lists.domain.RefreshResult
+import com.interlinedlist.android.feature.lists.domain.Watcher
+import com.interlinedlist.android.feature.lists.domain.WatcherCandidate
+import com.interlinedlist.android.feature.lists.domain.WatcherRole
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
@@ -166,6 +175,118 @@ class DefaultListsRepository @Inject constructor(
         withContext(dispatchers.io) {
             safeApiCall(json) { api.createFolder(CreateFolderRequest(name = name, parentId = parentId)) }
                 .map(ListMapper::folderFromDto)
+        }
+
+    override suspend fun updateSchema(listId: String, schema: ListSchema): ApiResult<ListSchema> =
+        withContext(dispatchers.io) {
+            // The API expects the schema as a serialised DSL string; send the edited
+            // fields as the canonical array DSL and re-parse the response.
+            val dsl = SchemaMapper.toDsl(schema).toString()
+            when (val result = safeApiCall(json) { api.updateSchema(listId, UpdateSchemaRequest(dsl)) }) {
+                is ApiResult.Success -> {
+                    val returned = result.data.schema ?: result.data.data
+                    // Echo the round-tripped schema when present; otherwise trust what we sent.
+                    val parsed = if (returned != null) SchemaMapper.fromJson(returned) else schema
+                    ApiResult.Success(parsed)
+                }
+                is ApiResult.Failure -> result
+            }
+        }
+
+    override suspend fun refreshGithubList(listId: String): ApiResult<RefreshResult> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.refreshList(listId) }
+                .map(ConnectionMapper::refreshFromDto)
+        }
+
+    override suspend fun getWatchers(listId: String, limit: Int): ApiResult<List<Watcher>> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.getWatchers(listId, limit = limit, offset = 0) }
+                .map { response -> response.items.mapNotNull(WatcherMapper::watcherFromDto) }
+        }
+
+    override suspend fun isWatching(listId: String): ApiResult<Boolean> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.getWatchingStatus(listId) }
+                .map { it.isWatchingResolved }
+        }
+
+    override suspend fun searchWatcherCandidates(
+        listId: String,
+        query: String,
+        limit: Int,
+    ): ApiResult<List<WatcherCandidate>> = withContext(dispatchers.io) {
+        safeApiCall(json) {
+            api.searchWatcherUsers(
+                id = listId,
+                search = query,
+                excludeWatchers = true,
+                limit = limit,
+                offset = 0,
+            )
+        }.map { response -> response.items.map(WatcherMapper::candidateFromDto) }
+    }
+
+    override suspend fun addWatcher(
+        listId: String,
+        userId: String,
+        role: WatcherRole,
+    ): ApiResult<Unit> = withContext(dispatchers.io) {
+        safeApiCall(json) {
+            api.addWatcher(listId, AddWatcherRequest(userId = userId, role = role.apiValue))
+        }.map { }
+    }
+
+    override suspend fun updateWatcherRole(
+        listId: String,
+        userId: String,
+        role: WatcherRole,
+    ): ApiResult<Unit> = withContext(dispatchers.io) {
+        safeApiCall(json) {
+            api.updateWatcherRole(listId, userId, UpdateWatcherRoleRequest(role = role.apiValue))
+        }.map { }
+    }
+
+    override suspend fun removeWatcher(listId: String, userId: String): ApiResult<Unit> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.removeWatcher(listId, userId) }.map { }
+        }
+
+    override suspend fun getConnections(): ApiResult<List<ListConnection>> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.getConnections() }
+                .map { response -> response.items.map(ConnectionMapper::connectionFromDto) }
+        }
+
+    override suspend fun createConnection(
+        fromListId: String,
+        toListId: String,
+        label: String?,
+    ): ApiResult<ListConnection> = withContext(dispatchers.io) {
+        val body = CreateConnectionRequest(
+            fromListId = fromListId,
+            toListId = toListId,
+            label = label?.takeIf { it.isNotBlank() },
+        )
+        when (val result = safeApiCall(json) { api.createConnection(body) }) {
+            is ApiResult.Success -> {
+                val dto = result.data.connection ?: result.data.data
+                    ?: return@withContext ApiResult.Success(
+                        ListConnection(
+                            id = "", fromListId = fromListId, toListId = toListId,
+                            label = label?.takeIf { it.isNotBlank() },
+                            fromListTitle = fromListId, toListTitle = toListId,
+                        ),
+                    )
+                ApiResult.Success(ConnectionMapper.connectionFromDto(dto))
+            }
+            is ApiResult.Failure -> result
+        }
+    }
+
+    override suspend fun deleteConnection(id: String): ApiResult<Unit> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.deleteConnection(id) }.map { }
         }
 
     /** Blank form fields are dropped so we don't overwrite server values with empty strings. */

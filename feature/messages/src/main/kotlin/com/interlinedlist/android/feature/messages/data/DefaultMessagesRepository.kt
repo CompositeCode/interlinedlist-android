@@ -9,14 +9,19 @@ import com.interlinedlist.android.feature.messages.data.local.toEntity
 import com.interlinedlist.android.feature.messages.data.remote.MessagesApi
 import com.interlinedlist.android.feature.messages.data.remote.dto.CreateMessageRequest
 import com.interlinedlist.android.feature.messages.data.remote.dto.PaginationDto
+import com.interlinedlist.android.feature.messages.data.remote.dto.ReportRequest
 import com.interlinedlist.android.feature.messages.data.remote.dto.toDomain
 import com.interlinedlist.android.core.network.error.safeApiCall
 import com.interlinedlist.android.feature.messages.domain.Message
+import com.interlinedlist.android.feature.messages.domain.ReportReason
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import javax.inject.Inject
 
 class DefaultMessagesRepository @Inject constructor(
@@ -35,6 +40,9 @@ class DefaultMessagesRepository @Inject constructor(
 
     override fun observeMessage(messageId: String): Flow<Message?> =
         messageDao.observeMessage(messageId).map { it?.toDomain() }
+
+    override fun observeScheduled(): Flow<List<Message>> =
+        messageDao.observeScheduled().map { rows -> rows.map { it.toDomain() } }
 
     override suspend fun refreshFeed(): ApiResult<Boolean> = withContext(dispatchers.io) {
         when (val result = safeCall { api.getMessages(limit = PaginationDto.DEFAULT_LIMIT, offset = 0) }) {
@@ -68,17 +76,49 @@ class DefaultMessagesRepository @Inject constructor(
         }
     }
 
-    override suspend fun createMessage(content: String): ApiResult<Message> = withContext(dispatchers.io) {
-        when (val result = safeCall { api.createMessage(CreateMessageRequest(content = content)) }) {
+    override suspend fun createMessage(
+        content: String,
+        imageUrls: List<String>,
+        videoUrls: List<String>,
+        scheduledAt: String?,
+    ): ApiResult<Message> = withContext(dispatchers.io) {
+        val request = CreateMessageRequest(
+            content = content,
+            imageUrls = imageUrls.ifEmpty { null },
+            videoUrls = videoUrls.ifEmpty { null },
+            scheduledAt = scheduledAt,
+        )
+        when (val result = safeCall { api.createMessage(request) }) {
             is ApiResult.Success -> {
                 val message = result.data.message.toDomain(currentUserId())
-                // Insert at the very top of the feed.
-                val topOrder = (messageDao.maxFeedOrder() ?: 0L)
-                messageDao.upsert(message.toEntity(feedOrder = topOrder - 1L))
+                if (message.scheduledAt != null) {
+                    // Scheduled messages are cached in the scheduled view, not the feed.
+                    messageDao.upsert(message.toEntity(feedOrder = 0L))
+                } else {
+                    // Insert at the very top of the feed.
+                    val topOrder = (messageDao.maxFeedOrder() ?: 0L)
+                    messageDao.upsert(message.toEntity(feedOrder = topOrder - 1L))
+                }
                 ApiResult.Success(message)
             }
             is ApiResult.Failure -> result
         }
+    }
+
+    override suspend fun uploadImage(
+        bytes: ByteArray,
+        fileName: String,
+        mimeType: String,
+    ): ApiResult<String> = withContext(dispatchers.io) {
+        upload(bytes, fileName, mimeType) { api.uploadImage(it) }
+    }
+
+    override suspend fun uploadVideo(
+        bytes: ByteArray,
+        fileName: String,
+        mimeType: String,
+    ): ApiResult<String> = withContext(dispatchers.io) {
+        upload(bytes, fileName, mimeType) { api.uploadVideo(it) }
     }
 
     override suspend fun fetchMessage(messageId: String): ApiResult<Message> = withContext(dispatchers.io) {
@@ -155,6 +195,78 @@ class DefaultMessagesRepository @Inject constructor(
         }
     }
 
+    override suspend fun refreshScheduled(): ApiResult<Unit> = withContext(dispatchers.io) {
+        when (val result = safeCall { api.getScheduled() }) {
+            is ApiResult.Success -> {
+                val entities = result.data.data.mapIndexed { index, dto ->
+                    dto.toDomain(currentUserId()).toEntity(feedOrder = index.toLong())
+                }
+                messageDao.clearScheduled()
+                messageDao.insertAll(entities)
+                ApiResult.Success(Unit)
+            }
+            is ApiResult.Failure -> result
+        }
+    }
+
+    override suspend fun cancelScheduled(messageId: String): ApiResult<Unit> = withContext(dispatchers.io) {
+        when (val result = safeCall { api.deleteMessage(messageId) }) {
+            is ApiResult.Success -> {
+                messageDao.deleteById(messageId)
+                ApiResult.Success(Unit)
+            }
+            is ApiResult.Failure -> result
+        }
+    }
+
+    override suspend fun report(
+        messageId: String,
+        reason: ReportReason,
+        detail: String?,
+    ): ApiResult<Unit> = withContext(dispatchers.io) {
+        safeCall {
+            api.report(
+                id = messageId,
+                body = ReportRequest(reason = reason.wireValue, detail = detail?.takeIf { it.isNotBlank() }),
+            )
+        }
+    }
+
+    override suspend fun fetchMetadata(messageId: String): ApiResult<Message> = withContext(dispatchers.io) {
+        when (val result = safeCall { api.fetchMetadata(messageId) }) {
+            is ApiResult.Success -> {
+                val body = result.data
+                val preview = (body.message?.linkMetadata ?: body.linkMetadata)?.toDomain()
+                val existing = currentEntity(messageId)
+                val updated = when {
+                    // Prefer the fully-formed message the endpoint may echo back.
+                    body.message != null -> body.message.toDomain(currentUserId())
+                        .let { fresh ->
+                            existing?.toDomain()?.copy(
+                                linkPreview = fresh.linkPreview ?: preview,
+                            ) ?: fresh
+                        }
+                    existing != null -> existing.toDomain().copy(linkPreview = preview)
+                    else -> null
+                }
+                if (updated != null) {
+                    messageDao.upsert(updated.toEntity(feedOrder = existingOrderOrTop(messageId)))
+                    ApiResult.Success(updated)
+                } else {
+                    ApiResult.Success(
+                        Message(
+                            id = messageId, content = "", authorId = "", authorUsername = "",
+                            authorDisplayName = null, authorAvatarUrl = null, createdAt = null,
+                            digCount = 0, replyCount = 0, dugByMe = false, parentId = null,
+                            mine = false, linkPreview = preview,
+                        ),
+                    )
+                }
+            }
+            is ApiResult.Failure -> result
+        }
+    }
+
     override suspend fun search(query: String): ApiResult<List<Message>> = withContext(dispatchers.io) {
         when (val result = safeCall {
             api.search(query = query, limit = PaginationDto.DEFAULT_LIMIT, offset = 0)
@@ -171,6 +283,35 @@ class DefaultMessagesRepository @Inject constructor(
         safeApiCall(json, block)
 
     private fun currentUserId(): String? = sessionStore.userId
+
+    /** Shared multipart upload path; extracts the hosted URL from the response. */
+    private suspend fun upload(
+        bytes: ByteArray,
+        fileName: String,
+        mimeType: String,
+        call: suspend (MultipartBody.Part) -> com.interlinedlist.android.feature.messages.data.remote.dto.MediaUploadResponse,
+    ): ApiResult<String> {
+        val part = MultipartBody.Part.createFormData(
+            name = "file",
+            filename = fileName,
+            body = bytes.toRequestBody(mimeType.toMediaTypeOrNull()),
+        )
+        return when (val result = safeCall { call(part) }) {
+            is ApiResult.Success -> {
+                val url = result.data.hostedUrl
+                if (url.isNullOrBlank()) {
+                    ApiResult.Failure(
+                        com.interlinedlist.android.core.common.result.AppError.Server(
+                            "Upload succeeded but no media URL was returned.",
+                        ),
+                    )
+                } else {
+                    ApiResult.Success(url)
+                }
+            }
+            is ApiResult.Failure -> result
+        }
+    }
 
     /** Current cached row for [id], or null. Snapshots the observe Flow. */
     private suspend fun currentEntity(id: String) = messageDao.observeMessage(id).first()

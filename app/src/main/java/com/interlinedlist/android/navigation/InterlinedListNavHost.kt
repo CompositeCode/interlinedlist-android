@@ -15,6 +15,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
@@ -24,13 +25,22 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.interlinedlist.android.feature.auth.ui.LoginRoute
+import com.interlinedlist.android.feature.documents.ui.browser.DocumentsFolderRoute
+import com.interlinedlist.android.feature.documents.ui.browser.DocumentsRoute
 import com.interlinedlist.android.feature.documents.ui.editor.DocumentEditorRoute
-import com.interlinedlist.android.feature.documents.ui.index.DocumentsRoute
+import com.interlinedlist.android.feature.lists.ui.connections.ConnectionsRoute
 import com.interlinedlist.android.feature.lists.ui.detail.ListDetailRoute
 import com.interlinedlist.android.feature.lists.ui.list.ListsRoute
+import com.interlinedlist.android.feature.lists.ui.schema.SchemaEditorRoute
+import com.interlinedlist.android.feature.lists.ui.watchers.WatchersRoute
 import com.interlinedlist.android.feature.messages.ui.detail.MessageDetailRoute
 import com.interlinedlist.android.feature.messages.ui.feed.MessagesRoute
-import com.interlinedlist.android.ui.home.HomeScreen
+import com.interlinedlist.android.feature.messages.ui.scheduled.ScheduledMessagesRoute
+import com.interlinedlist.android.feature.profile.ui.edit.EditProfileRoute
+import com.interlinedlist.android.feature.profile.ui.profile.ProfileRoute
+import com.interlinedlist.android.feature.profile.ui.profile.UserProfileRoute
+import com.interlinedlist.android.feature.profile.ui.search.UserSearchRoute
+import com.interlinedlist.android.ui.home.HomeViewModel
 
 /** Navigation route keys. */
 object Routes {
@@ -43,14 +53,33 @@ object Routes {
     const val DOCUMENTS = "documents"
     const val ACCOUNT = "account"
 
-    // Detail destinations.
+    // Lists destinations.
     const val LIST_DETAIL = "lists/{listId}"
+    const val LIST_SCHEMA = "lists/{listId}/schema"
+    const val LIST_WATCHERS = "lists/{listId}/watchers"
+    const val LIST_CONNECTIONS = "lists/connections"
+
+    // Messages destinations.
     const val MESSAGE_DETAIL = "messageDetail/{messageId}"
+    const val MESSAGES_SCHEDULED = "messages/scheduled"
+
+    // Documents destinations.
+    const val DOCUMENT_FOLDER = "documents/folder/{folderId}"
     const val DOCUMENT_EDITOR = "documents/editor/{documentId}"
 
+    // Profile destinations. Distinct prefixes so a username can never collide
+    // with the edit/search routes.
+    const val PROFILE_EDIT = "editProfile"
+    const val USER_SEARCH = "userSearch"
+    const val USER_PROFILE = "user/{username}"
+
     fun listDetail(id: String) = "lists/$id"
+    fun listSchema(id: String) = "lists/$id/schema"
+    fun listWatchers(id: String) = "lists/$id/watchers"
     fun messageDetail(id: String) = "messageDetail/$id"
+    fun documentFolder(id: String) = "documents/folder/$id"
     fun documentEditor(id: String) = "documents/editor/$id"
+    fun userProfile(username: String) = "user/$username"
 }
 
 /** The four post-login home tabs shown in the bottom navigation bar. */
@@ -116,8 +145,6 @@ private fun MainShell(onLoggedOut: () -> Unit) {
                             selected = hierarchy?.any { it.route == tab.route } == true,
                             onClick = {
                                 tabNav.navigate(tab.route) {
-                                    // Reselecting a tab returns to its root and keeps
-                                    // per-tab state, mirroring standard bottom-nav UX.
                                     popUpTo(tabNav.graph.findStartDestination().id) {
                                         saveState = true
                                     }
@@ -138,21 +165,47 @@ private fun MainShell(onLoggedOut: () -> Unit) {
             startDestination = Routes.LISTS,
             modifier = Modifier.padding(padding),
         ) {
+            // ---- Lists ----
             composable(Routes.LISTS) {
                 ListsRoute(onOpenList = { id -> tabNav.navigate(Routes.listDetail(id)) })
             }
             composable(
                 Routes.LIST_DETAIL,
                 arguments = listOf(navArgument("listId") { type = NavType.StringType }),
-            ) {
+            ) { entry ->
+                val listId = entry.arguments?.getString("listId").orEmpty()
                 ListDetailRoute(
                     onBack = { tabNav.popBackStack() },
                     onListDeleted = { tabNav.popBackStack() },
+                    onEditSchema = { tabNav.navigate(Routes.listSchema(listId)) },
+                    onOpenWatchers = { tabNav.navigate(Routes.listWatchers(listId)) },
                 )
             }
+            composable(
+                Routes.LIST_SCHEMA,
+                arguments = listOf(navArgument("listId") { type = NavType.StringType }),
+            ) {
+                SchemaEditorRoute(
+                    onBack = { tabNav.popBackStack() },
+                    onSaved = { tabNav.popBackStack() },
+                )
+            }
+            composable(
+                Routes.LIST_WATCHERS,
+                arguments = listOf(navArgument("listId") { type = NavType.StringType }),
+            ) {
+                WatchersRoute(onBack = { tabNav.popBackStack() })
+            }
+            composable(Routes.LIST_CONNECTIONS) {
+                ConnectionsRoute(onBack = { tabNav.popBackStack() })
+            }
 
+            // ---- Messages ----
             composable(Routes.MESSAGES) {
-                MessagesRoute(onOpenMessage = { id -> tabNav.navigate(Routes.messageDetail(id)) })
+                MessagesRoute(
+                    onOpenMessage = { id -> tabNav.navigate(Routes.messageDetail(id)) },
+                    onOpenScheduled = { tabNav.navigate(Routes.MESSAGES_SCHEDULED) },
+                )
             }
             composable(
                 Routes.MESSAGE_DETAIL,
@@ -163,11 +216,25 @@ private fun MainShell(onLoggedOut: () -> Unit) {
                     onOpenMessage = { id -> tabNav.navigate(Routes.messageDetail(id)) },
                 )
             }
+            composable(Routes.MESSAGES_SCHEDULED) {
+                ScheduledMessagesRoute(onBack = { tabNav.popBackStack() })
+            }
 
+            // ---- Documents ----
             composable(Routes.DOCUMENTS) {
                 DocumentsRoute(
+                    onOpenFolder = { id -> tabNav.navigate(Routes.documentFolder(id)) },
                     onOpenDocument = { id -> tabNav.navigate(Routes.documentEditor(id)) },
-                    onSearch = { /* Dedicated search screen deferred; see roadmap. */ },
+                )
+            }
+            composable(
+                Routes.DOCUMENT_FOLDER,
+                arguments = listOf(navArgument("folderId") { type = NavType.StringType }),
+            ) {
+                DocumentsFolderRoute(
+                    onOpenFolder = { id -> tabNav.navigate(Routes.documentFolder(id)) },
+                    onOpenDocument = { id -> tabNav.navigate(Routes.documentEditor(id)) },
+                    onBack = { tabNav.popBackStack() },
                 )
             }
             composable(
@@ -180,8 +247,34 @@ private fun MainShell(onLoggedOut: () -> Unit) {
                 )
             }
 
+            // ---- Account / Profile ----
             composable(Routes.ACCOUNT) {
-                HomeScreen(onLoggedOut = onLoggedOut)
+                // Sign-out reuses the existing auth-backed logout; the profile
+                // module intentionally owns no session state.
+                val logoutViewModel: HomeViewModel = hiltViewModel()
+                ProfileRoute(
+                    onEditProfile = { tabNav.navigate(Routes.PROFILE_EDIT) },
+                    onSearchUsers = { tabNav.navigate(Routes.USER_SEARCH) },
+                    onSignOut = { logoutViewModel.logout(onLoggedOut) },
+                )
+            }
+            composable(Routes.PROFILE_EDIT) {
+                EditProfileRoute(
+                    onBack = { tabNav.popBackStack() },
+                    onSaved = { tabNav.popBackStack() },
+                )
+            }
+            composable(Routes.USER_SEARCH) {
+                UserSearchRoute(
+                    onOpenUser = { username -> tabNav.navigate(Routes.userProfile(username)) },
+                    onBack = { tabNav.popBackStack() },
+                )
+            }
+            composable(
+                Routes.USER_PROFILE,
+                arguments = listOf(navArgument("username") { type = NavType.StringType }),
+            ) {
+                UserProfileRoute(onBack = { tabNav.popBackStack() })
             }
         }
     }

@@ -45,12 +45,14 @@ object MessageCardTags {
     const val REPLY = "messageReply"
     const val MENU = "messageMenu"
     const val DELETE = "messageDelete"
+    const val REPORT = "messageReport"
     const val BODY = "messageBody"
 }
 
 /**
- * One message in a feed or reply list: avatar, author + relative time, body, and
- * the dig / reply engagement row. An overflow menu exposes delete for own messages.
+ * One message in a feed or reply list: avatar, author + relative time, body,
+ * attached media / link preview, and the dig / reply engagement row. An overflow
+ * menu exposes delete for own messages and report for everyone else's.
  */
 @Composable
 fun MessageCard(
@@ -59,6 +61,8 @@ fun MessageCard(
     onDig: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
+    onReport: () -> Unit = {},
+    onOpenLink: (String) -> Unit = {},
 ) {
     Row(
         modifier = modifier
@@ -84,9 +88,7 @@ fun MessageCard(
                     )
                 }
                 Spacer(Modifier.weight(1f))
-                if (message.mine) {
-                    OwnMessageMenu(onDelete = onDelete)
-                }
+                MessageMenu(isMine = message.mine, onDelete = onDelete, onReport = onReport)
             }
             Spacer(Modifier.size(4.dp))
             Text(
@@ -94,6 +96,10 @@ fun MessageCard(
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.testTag(MessageCardTags.BODY),
             )
+            if (message.hasMedia || message.linkPreview != null) {
+                Spacer(Modifier.size(8.dp))
+                MessageMedia(message = message, onOpenLink = onOpenLink)
+            }
             Spacer(Modifier.size(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
                 Engagement(
@@ -118,8 +124,12 @@ fun MessageCard(
     }
 }
 
+/**
+ * Overflow menu: own messages offer Delete; everyone else's offer Report. Renders
+ * nothing when there is no applicable action (defensive; both branches are covered).
+ */
 @Composable
-private fun OwnMessageMenu(onDelete: () -> Unit) {
+private fun MessageMenu(isMine: Boolean, onDelete: () -> Unit, onReport: () -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     Box {
         IconButton(
@@ -129,14 +139,25 @@ private fun OwnMessageMenu(onDelete: () -> Unit) {
             Icon(Icons.Filled.MoreVert, contentDescription = "More options")
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            DropdownMenuItem(
-                text = { Text("Delete") },
-                onClick = {
-                    expanded = false
-                    onDelete()
-                },
-                modifier = Modifier.testTag(MessageCardTags.DELETE),
-            )
+            if (isMine) {
+                DropdownMenuItem(
+                    text = { Text("Delete") },
+                    onClick = {
+                        expanded = false
+                        onDelete()
+                    },
+                    modifier = Modifier.testTag(MessageCardTags.DELETE),
+                )
+            } else {
+                DropdownMenuItem(
+                    text = { Text("Report") },
+                    onClick = {
+                        expanded = false
+                        onReport()
+                    },
+                    modifier = Modifier.testTag(MessageCardTags.REPORT),
+                )
+            }
         }
     }
 }

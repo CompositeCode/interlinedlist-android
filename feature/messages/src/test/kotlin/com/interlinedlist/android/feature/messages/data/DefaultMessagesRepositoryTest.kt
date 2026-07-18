@@ -4,6 +4,7 @@ import com.google.common.truth.Truth.assertThat
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
 import com.interlinedlist.android.feature.messages.data.remote.MessagesApi
+import com.interlinedlist.android.feature.messages.domain.ReportReason
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
@@ -235,5 +236,152 @@ class DefaultMessagesRepositoryTest {
 
         assertThat((result as ApiResult.Success).data.map { it.id }).containsExactly("s1")
         assertThat(repo.observeFeed().first()).isEmpty()
+    }
+
+    @Test
+    fun `uploadImage returns the hosted url and posts to the images endpoint`() = runTest(dispatcher) {
+        enqueueJson(201, """{ "url": "https://cdn/pic.png" }""")
+        val repo = repository()
+
+        val result = repo.uploadImage("bytes".toByteArray(), "pic.png", "image/png")
+
+        assertThat((result as ApiResult.Success).data).isEqualTo("https://cdn/pic.png")
+        assertThat(server.takeRequest().path).contains("api/messages/images/upload")
+    }
+
+    @Test
+    fun `uploadVideo falls back to the videoUrl field`() = runTest(dispatcher) {
+        enqueueJson(201, """{ "videoUrl": "https://cdn/clip.mp4" }""")
+        val repo = repository()
+
+        val result = repo.uploadVideo("bytes".toByteArray(), "clip.mp4", "video/mp4")
+
+        assertThat((result as ApiResult.Success).data).isEqualTo("https://cdn/clip.mp4")
+        assertThat(server.takeRequest().path).contains("api/messages/videos/upload")
+    }
+
+    @Test
+    fun `upload with no url in the response is a failure`() = runTest(dispatcher) {
+        enqueueJson(201, """{ }""")
+        val repo = repository()
+
+        val result = repo.uploadImage("bytes".toByteArray(), "pic.png", "image/png")
+
+        assertThat(result).isInstanceOf(ApiResult.Failure::class.java)
+    }
+
+    @Test
+    fun `createMessage with media sends the attached urls`() = runTest(dispatcher) {
+        enqueueJson(
+            201,
+            """{ "message": { "id": "m1", "content": "with media",
+                "imageUrls": ["https://cdn/a.png"] } }""",
+        )
+        val repo = repository()
+
+        val result = repo.createMessage(
+            content = "with media",
+            imageUrls = listOf("https://cdn/a.png"),
+        )
+
+        assertThat((result as ApiResult.Success).data.imageUrls).containsExactly("https://cdn/a.png")
+        val body = server.takeRequest().body.readUtf8()
+        assertThat(body).contains("https://cdn/a.png")
+        assertThat(body).contains("imageUrls")
+    }
+
+    @Test
+    fun `createMessage scheduled is cached in the scheduled view not the feed`() = runTest(dispatcher) {
+        enqueueJson(
+            201,
+            """{ "message": { "id": "sch1", "content": "later",
+                "scheduledAt": "2026-07-19T09:00:00Z" } }""",
+        )
+        val repo = repository()
+
+        val result = repo.createMessage(content = "later", scheduledAt = "2026-07-19T09:00:00Z")
+
+        assertThat((result as ApiResult.Success).data.scheduledAt).isEqualTo("2026-07-19T09:00:00Z")
+        assertThat(repo.observeFeed().first()).isEmpty()
+        assertThat(repo.observeScheduled().first().map { it.id }).containsExactly("sch1")
+    }
+
+    @Test
+    fun `refreshScheduled caches the scheduled messages`() = runTest(dispatcher) {
+        enqueueJson(
+            200,
+            """{ "data": [ { "id": "s1", "content": "one", "scheduledAt": "2026-07-19T09:00:00Z" },
+                          { "id": "s2", "content": "two", "scheduledAt": "2026-07-20T09:00:00Z" } ] }""",
+        )
+        val repo = repository()
+
+        val result = repo.refreshScheduled()
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        assertThat(repo.observeScheduled().first().map { it.id }).containsExactly("s1", "s2").inOrder()
+    }
+
+    @Test
+    fun `cancelScheduled removes the scheduled message from the cache`() = runTest(dispatcher) {
+        enqueueJson(
+            200,
+            """{ "data": [ { "id": "s1", "content": "one", "scheduledAt": "2026-07-19T09:00:00Z" } ] }""",
+        )
+        enqueueJson(200, "")
+        val repo = repository()
+        repo.refreshScheduled()
+
+        val result = repo.cancelScheduled("s1")
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        assertThat(repo.observeScheduled().first()).isEmpty()
+    }
+
+    @Test
+    fun `report posts the reason and detail`() = runTest(dispatcher) {
+        enqueueJson(201, "")
+        val repo = repository()
+
+        val result = repo.report("m1", ReportReason.SPAM, detail = "obvious spam")
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        val request = server.takeRequest()
+        assertThat(request.path).contains("api/messages/m1/report")
+        val body = request.body.readUtf8()
+        assertThat(body).contains("\"reason\":\"spam\"")
+        assertThat(body).contains("obvious spam")
+    }
+
+    @Test
+    fun `report omits blank detail`() = runTest(dispatcher) {
+        enqueueJson(201, "")
+        val repo = repository()
+
+        repo.report("m1", ReportReason.OTHER, detail = "  ")
+
+        val body = server.takeRequest().body.readUtf8()
+        assertThat(body).doesNotContain("detail")
+    }
+
+    @Test
+    fun `fetchMetadata attaches a link preview to the cached message`() = runTest(dispatcher) {
+        enqueueJson(
+            200,
+            """{ "data": [ { "id": "m1", "content": "see https://example.com" } ],
+                "pagination": { "hasMore": false } }""",
+        )
+        enqueueJson(
+            201,
+            """{ "linkMetadata": { "url": "https://example.com", "title": "Example",
+                "description": "A page" } }""",
+        )
+        val repo = repository()
+        repo.refreshFeed()
+
+        val result = repo.fetchMetadata("m1")
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        val cached = repo.observeMessage("m1").first()
+        assertThat(cached?.linkPreview?.title).isEqualTo("Example")
     }
 }

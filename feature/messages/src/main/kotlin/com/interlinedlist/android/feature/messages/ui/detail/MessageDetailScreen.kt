@@ -37,7 +37,9 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.interlinedlist.android.core.designsystem.theme.InterlinedListTheme
 import com.interlinedlist.android.feature.messages.domain.Message
+import com.interlinedlist.android.feature.messages.domain.ReportReason
 import com.interlinedlist.android.feature.messages.ui.components.MessageCard
+import com.interlinedlist.android.feature.messages.ui.components.ReportDialog
 
 /** Stable test tags for the detail screen. */
 object MessageDetailTags {
@@ -73,6 +75,10 @@ fun MessageDetailRoute(
         onReplyTextChange = viewModel::onReplyTextChange,
         onPostReply = viewModel::postReply,
         onRetry = viewModel::load,
+        onReport = viewModel::openReport,
+        onFetchMetadata = { viewModel.onFetchMetadata() },
+        onDismissReport = viewModel::dismissReport,
+        onSubmitReport = viewModel::submitReport,
         modifier = modifier,
     )
 }
@@ -89,6 +95,10 @@ fun MessageDetailScreen(
     onPostReply: () -> Unit,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
+    onReport: (Message) -> Unit = {},
+    onFetchMetadata: (Message) -> Unit = {},
+    onDismissReport: () -> Unit = {},
+    onSubmitReport: (ReportReason, String) -> Unit = { _, _ -> },
 ) {
     Scaffold(
         modifier = modifier
@@ -117,8 +127,18 @@ fun MessageDetailScreen(
                 onDig = onDig,
                 onReplyTextChange = onReplyTextChange,
                 onPostReply = onPostReply,
+                onReport = onReport,
+                onFetchMetadata = onFetchMetadata,
             )
         }
+    }
+
+    state.reportTarget?.let {
+        ReportDialog(
+            onDismiss = onDismissReport,
+            onSubmit = onSubmitReport,
+            isSubmitting = state.isReporting,
+        )
     }
 }
 
@@ -130,6 +150,8 @@ private fun Content(
     onDig: () -> Unit,
     onReplyTextChange: (String) -> Unit,
     onPostReply: () -> Unit,
+    onReport: (Message) -> Unit,
+    onFetchMetadata: (Message) -> Unit,
 ) {
     val message = state.message
     Column(
@@ -149,6 +171,8 @@ private fun Content(
                         onClick = {},
                         onDig = onDig,
                         onDelete = {},
+                        onReport = { onReport(message) },
+                        onOpenLink = { onFetchMetadata(message) },
                     )
                     HorizontalDivider(thickness = 2.dp, color = MaterialTheme.colorScheme.outlineVariant)
                     Text(
@@ -164,6 +188,8 @@ private fun Content(
                     onClick = { onOpenMessage(reply.id) },
                     onDig = {},
                     onDelete = {},
+                    onReport = { onReport(reply) },
+                    onOpenLink = { onFetchMetadata(reply) },
                 )
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             }

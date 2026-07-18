@@ -1,5 +1,6 @@
 package com.interlinedlist.android.feature.messages.data.remote.dto
 
+import com.interlinedlist.android.feature.messages.domain.LinkPreview
 import com.interlinedlist.android.feature.messages.domain.Message
 import kotlinx.serialization.Serializable
 
@@ -9,7 +10,7 @@ import kotlinx.serialization.Serializable
  * The OpenAPI extract does not pin the response schema, so this mirrors the web
  * feed's shape: an author sub-object plus body/timestamp/engagement fields. The
  * shared [kotlinx.serialization.json.Json] is configured with `ignoreUnknownKeys`,
- * so extra fields (crossposting, metadata, media, …) are tolerated and dropped.
+ * so extra fields (crossposting, …) are tolerated and dropped.
  */
 @Serializable
 data class MessageDto(
@@ -23,6 +24,13 @@ data class MessageDto(
     val parentId: String? = null,
     /** Present on some payloads; used to flag the message as the caller's own. */
     val isOwn: Boolean = false,
+    /** Attached media (uploaded via the image/video upload endpoints). */
+    val imageUrls: List<String> = emptyList(),
+    val videoUrls: List<String> = emptyList(),
+    /** Fetched link-preview metadata for the first URL in the body, if any. */
+    val linkMetadata: LinkMetadataDto? = null,
+    /** Future send time for a scheduled message; null once published. */
+    val scheduledAt: String? = null,
 )
 
 /** Author identity embedded in a message. */
@@ -32,6 +40,19 @@ data class MessageAuthorDto(
     val username: String = "",
     val displayName: String? = null,
     val avatar: String? = null,
+)
+
+/**
+ * Link-preview metadata attached to a message. Populated by the metadata endpoint;
+ * mirrors the OpenGraph-style fields the web feed renders in its preview card.
+ */
+@Serializable
+data class LinkMetadataDto(
+    val url: String? = null,
+    val title: String? = null,
+    val description: String? = null,
+    val image: String? = null,
+    val siteName: String? = null,
 )
 
 /**
@@ -51,4 +72,22 @@ fun MessageDto.toDomain(currentUserId: String?): Message = Message(
     dugByMe = dugByCurrentUser,
     parentId = parentId,
     mine = isOwn || (currentUserId != null && author?.id == currentUserId),
+    imageUrls = imageUrls,
+    videoUrls = videoUrls,
+    linkPreview = linkMetadata?.toDomain(),
+    scheduledAt = scheduledAt,
 )
+
+/** Maps link-preview metadata into the domain, dropping empty previews. */
+fun LinkMetadataDto.toDomain(): LinkPreview? {
+    val link = url?.takeIf { it.isNotBlank() } ?: return null
+    // A preview with no title/description/image carries no useful content.
+    if (title.isNullOrBlank() && description.isNullOrBlank() && image.isNullOrBlank()) return null
+    return LinkPreview(
+        url = link,
+        title = title,
+        description = description,
+        imageUrl = image,
+        siteName = siteName,
+    )
+}

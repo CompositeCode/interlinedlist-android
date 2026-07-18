@@ -28,6 +28,8 @@ data class ListDetailUiState(
     val subscriptionRequired: Boolean = false,
     val isSaving: Boolean = false,
     val deleted: Boolean = false,
+    val isRefreshing: Boolean = false,
+    val refreshMessage: String? = null,
 ) {
     val title: String get() = summary?.title.orEmpty()
     val isEmpty: Boolean get() = rows.isEmpty() && !isLoading && errorMessage == null
@@ -123,6 +125,52 @@ class ListDetailViewModel @Inject constructor(
             }
         }
     }
+
+    /**
+     * Manually re-syncs a GitHub-backed list. On success the detail is reloaded so
+     * the new rows appear, and a short summary is surfaced for the UI to toast.
+     */
+    fun refreshFromGithub() {
+        if (_uiState.value.isRefreshing) return
+        _uiState.update { it.copy(isRefreshing = true, errorMessage = null, refreshMessage = null) }
+        viewModelScope.launch {
+            when (val result = repository.refreshGithubList(listId)) {
+                is ApiResult.Success -> {
+                    _uiState.update {
+                        it.copy(
+                            isRefreshing = false,
+                            refreshMessage = result.data.summary
+                                ?: result.data.message
+                                ?: "List refreshed.",
+                        )
+                    }
+                    // Pull the freshly-synced rows into view.
+                    reload()
+                }
+                is ApiResult.Failure -> _uiState.update {
+                    it.copy(isRefreshing = false, errorMessage = result.error.toUserMessage())
+                }
+            }
+        }
+    }
+
+    /** Reloads detail without toggling the top-level loading spinner (post-refresh). */
+    private fun reload() {
+        viewModelScope.launch {
+            when (val result = repository.getListDetail(listId)) {
+                is ApiResult.Success -> _uiState.update {
+                    it.copy(
+                        summary = result.data.summary,
+                        schema = result.data.schema,
+                        rows = result.data.rows,
+                    )
+                }
+                is ApiResult.Failure -> Unit // Keep the existing rows; refresh already succeeded.
+            }
+        }
+    }
+
+    fun clearRefreshMessage() = _uiState.update { it.copy(refreshMessage = null) }
 
     fun deleteList(onDeleted: () -> Unit = {}) {
         viewModelScope.launch {

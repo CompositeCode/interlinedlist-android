@@ -7,6 +7,7 @@ import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
 import com.interlinedlist.android.feature.messages.data.MessagesRepository
 import com.interlinedlist.android.feature.messages.domain.Message
+import com.interlinedlist.android.feature.messages.domain.ReportReason
 import com.interlinedlist.android.feature.messages.ui.isSubscriptionGate
 import com.interlinedlist.android.feature.messages.ui.toUserMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -31,6 +32,9 @@ data class MessageDetailUiState(
     val subscriptionRequired: Boolean = false,
     val replyText: String = "",
     val isPostingReply: Boolean = false,
+    /** The message (root or a reply) being reported, if any. */
+    val reportTarget: Message? = null,
+    val isReporting: Boolean = false,
 ) {
     val canReply: Boolean get() = replyText.isNotBlank() && !isPostingReply
 }
@@ -41,6 +45,8 @@ private data class DetailTransientState(
     val subscriptionRequired: Boolean = false,
     val replyText: String = "",
     val isPostingReply: Boolean = false,
+    val reportTarget: Message? = null,
+    val isReporting: Boolean = false,
 )
 
 @HiltViewModel
@@ -69,6 +75,8 @@ class MessageDetailViewModel @Inject constructor(
                 subscriptionRequired = t.subscriptionRequired,
                 replyText = t.replyText,
                 isPostingReply = t.isPostingReply,
+                reportTarget = t.reportTarget,
+                isReporting = t.isReporting,
             )
         }.stateIn(
             scope = viewModelScope,
@@ -121,6 +129,38 @@ class MessageDetailViewModel @Inject constructor(
                 is ApiResult.Failure -> transient.update {
                     it.copy(isPostingReply = false).withError(result.error)
                 }
+            }
+        }
+    }
+
+    // --- report ------------------------------------------------------------
+
+    fun openReport(message: Message) = transient.update { it.copy(reportTarget = message, errorMessage = null) }
+
+    fun dismissReport() = transient.update { it.copy(reportTarget = null, isReporting = false) }
+
+    fun submitReport(reason: ReportReason, detail: String) {
+        val target = transient.value.reportTarget ?: return
+        transient.update { it.copy(isReporting = true, errorMessage = null) }
+        viewModelScope.launch {
+            when (val result = repository.report(target.id, reason, detail)) {
+                is ApiResult.Success -> transient.update { it.copy(isReporting = false, reportTarget = null) }
+                is ApiResult.Failure -> transient.update {
+                    it.copy(isReporting = false, reportTarget = null).withError(result.error)
+                }
+            }
+        }
+    }
+
+    // --- link metadata -----------------------------------------------------
+
+    /** Fetches link-preview metadata for the current message; cache re-emits it. */
+    fun onFetchMetadata() {
+        val current = uiState.value.message ?: return
+        viewModelScope.launch {
+            val result = repository.fetchMetadata(current.id)
+            if (result is ApiResult.Failure) {
+                transient.update { it.withError(result.error) }
             }
         }
     }

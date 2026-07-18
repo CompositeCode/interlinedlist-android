@@ -120,6 +120,36 @@ class DocumentEditorViewModelTest {
     }
 
     @Test
+    fun `uploadImage appends a markdown reference and marks unsaved changes`() = runTest(dispatcher) {
+        repo.refreshDocumentResult = ApiResult.Success(testDocument("d1", content = "start"))
+        repo.uploadResult = ApiResult.Success(Unit)
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.uploadImage(fileName = "photo.png", mimeType = "image/png", bytes = byteArrayOf(1, 2))
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.content).contains("photo.png")
+        assertThat(vm.uiState.value.hasUnsavedChanges).isTrue()
+        assertThat(vm.uiState.value.isUploadingImage).isFalse()
+    }
+
+    @Test
+    fun `uploadImage surfaces an error on failure`() = runTest(dispatcher) {
+        repo.refreshDocumentResult = ApiResult.Success(testDocument("d1", content = "start"))
+        repo.uploadResult = ApiResult.Failure(AppError.Server("boom"))
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.uploadImage(fileName = "photo.png", mimeType = "image/png", bytes = byteArrayOf(1))
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.errorMessage)
+            .isEqualTo("InterlinedList is having trouble right now. Try again shortly.")
+        assertThat(vm.uiState.value.isUploadingImage).isFalse()
+    }
+
+    @Test
     fun `refresh does not overwrite in-progress edits`() = runTest(dispatcher) {
         repo.refreshDocumentResult = ApiResult.Success(testDocument("d1", content = "server"))
         val vm = viewModel()

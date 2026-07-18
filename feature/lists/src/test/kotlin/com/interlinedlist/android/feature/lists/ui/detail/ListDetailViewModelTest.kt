@@ -9,6 +9,7 @@ import com.interlinedlist.android.feature.lists.domain.ListDetail
 import com.interlinedlist.android.feature.lists.domain.ListRow
 import com.interlinedlist.android.feature.lists.domain.ListSchema
 import com.interlinedlist.android.feature.lists.domain.ListSummary
+import com.interlinedlist.android.feature.lists.domain.RefreshResult
 import com.interlinedlist.android.feature.lists.domain.SchemaField
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -132,5 +133,44 @@ class ListDetailViewModelTest {
 
         assertThat(vm.uiState.value.subscriptionRequired).isTrue()
         assertThat(vm.uiState.value.isLoading).isFalse()
+    }
+
+    @Test
+    fun `refreshFromGithub surfaces a summary and reloads the rows`() = runTest(dispatcher) {
+        val repo = FakeListsRepository().apply {
+            detailResult = ApiResult.Success(detail(emptyList()))
+            refreshGithubResult = ApiResult.Success(
+                RefreshResult(message = null, added = 2, updated = 0, removed = 0),
+            )
+        }
+        val vm = viewModel(repo)
+        advanceUntilIdle()
+
+        // After the refresh, the reload returns freshly-synced rows.
+        repo.detailResult = ApiResult.Success(detail(listOf(ListRow("r1", mapOf("title" to "Synced")))))
+        vm.refreshFromGithub()
+        advanceUntilIdle()
+
+        assertThat(repo.refreshGithubCount).isEqualTo(1)
+        assertThat(vm.uiState.value.isRefreshing).isFalse()
+        assertThat(vm.uiState.value.refreshMessage).isEqualTo("2 added")
+        assertThat(vm.uiState.value.rows.single().valueFor("title")).isEqualTo("Synced")
+    }
+
+    @Test
+    fun `refreshFromGithub failure surfaces an error and clears the spinner`() = runTest(dispatcher) {
+        val repo = FakeListsRepository().apply {
+            detailResult = ApiResult.Success(detail(emptyList()))
+            refreshGithubResult = FakeListsRepository.subscriptionFailure()
+        }
+        val vm = viewModel(repo)
+        advanceUntilIdle()
+
+        vm.refreshFromGithub()
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.isRefreshing).isFalse()
+        assertThat(vm.uiState.value.errorMessage).isNotNull()
+        assertThat(vm.uiState.value.refreshMessage).isNull()
     }
 }

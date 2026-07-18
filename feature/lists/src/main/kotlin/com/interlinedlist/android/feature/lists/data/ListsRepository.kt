@@ -1,11 +1,17 @@
 package com.interlinedlist.android.feature.lists.data
 
 import com.interlinedlist.android.core.common.result.ApiResult
+import com.interlinedlist.android.feature.lists.domain.ListConnection
 import com.interlinedlist.android.feature.lists.domain.ListDetail
 import com.interlinedlist.android.feature.lists.domain.ListFolder
 import com.interlinedlist.android.feature.lists.domain.ListRow
+import com.interlinedlist.android.feature.lists.domain.ListSchema
 import com.interlinedlist.android.feature.lists.domain.ListSummary
 import com.interlinedlist.android.feature.lists.domain.Paged
+import com.interlinedlist.android.feature.lists.domain.RefreshResult
+import com.interlinedlist.android.feature.lists.domain.Watcher
+import com.interlinedlist.android.feature.lists.domain.WatcherCandidate
+import com.interlinedlist.android.feature.lists.domain.WatcherRole
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -45,6 +51,47 @@ interface ListsRepository {
     suspend fun getFolders(): ApiResult<List<ListFolder>>
 
     suspend fun createFolder(name: String, parentId: String?): ApiResult<ListFolder>
+
+    /** Replaces a list's schema (add/edit/remove columns) and returns the parsed result. */
+    suspend fun updateSchema(listId: String, schema: ListSchema): ApiResult<ListSchema>
+
+    /** Manually re-syncs a GitHub-backed list and reports what changed. */
+    suspend fun refreshGithubList(listId: String): ApiResult<RefreshResult>
+
+    /** Watchers of a list (users granted access), with their roles. */
+    suspend fun getWatchers(listId: String, limit: Int = DEFAULT_PAGE_SIZE): ApiResult<List<Watcher>>
+
+    /** Whether the current user is watching [listId]. */
+    suspend fun isWatching(listId: String): ApiResult<Boolean>
+
+    /** Searches users who could be added as watchers (excludes existing watchers). */
+    suspend fun searchWatcherCandidates(
+        listId: String,
+        query: String,
+        limit: Int = DEFAULT_PAGE_SIZE,
+    ): ApiResult<List<WatcherCandidate>>
+
+    /** Adds a user as a watcher with the given role. */
+    suspend fun addWatcher(listId: String, userId: String, role: WatcherRole): ApiResult<Unit>
+
+    /** Changes an existing watcher's role. */
+    suspend fun updateWatcherRole(listId: String, userId: String, role: WatcherRole): ApiResult<Unit>
+
+    /** Removes a user's access to the list. */
+    suspend fun removeWatcher(listId: String, userId: String): ApiResult<Unit>
+
+    /** All connections between the user's lists. */
+    suspend fun getConnections(): ApiResult<List<ListConnection>>
+
+    /** Creates a labelled link from one list to another. */
+    suspend fun createConnection(
+        fromListId: String,
+        toListId: String,
+        label: String?,
+    ): ApiResult<ListConnection>
+
+    /** Removes a connection between lists. */
+    suspend fun deleteConnection(id: String): ApiResult<Unit>
 
     companion object {
         const val DEFAULT_PAGE_SIZE = 20

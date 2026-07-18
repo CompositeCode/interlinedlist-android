@@ -10,6 +10,10 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface DocumentDao {
 
+    /** Emits every cached document. The browser groups these by folder to build the tree. */
+    @Query("SELECT * FROM document ORDER BY sortOrder ASC")
+    fun observeAllDocuments(): Flow<List<DocumentEntity>>
+
     /** Emits root-level documents (no folder), ordered by their server sequence. */
     @Query("SELECT * FROM document WHERE folderId IS NULL ORDER BY sortOrder ASC")
     fun observeRootDocuments(): Flow<List<DocumentEntity>>
@@ -43,4 +47,8 @@ interface DocumentDao {
 
     @Query("DELETE FROM document WHERE folderId = :folderId")
     suspend fun clearFolder(folderId: String)
+
+    /** Wipes all documents before a full-tree refresh from `/folders` + `/documents`. */
+    @Query("DELETE FROM document")
+    suspend fun clearAll()
 }

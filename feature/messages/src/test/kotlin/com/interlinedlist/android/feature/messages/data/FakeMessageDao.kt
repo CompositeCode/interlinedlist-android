@@ -19,13 +19,18 @@ class FakeMessageDao : MessageDao {
         rows.value.values.filter(predicate).sortedBy { it.feedOrder }
 
     override fun observeFeed(): Flow<List<MessageEntity>> =
-        rows.map { map -> map.values.filter { it.parentId == null }.sortedBy { it.feedOrder } }
+        rows.map { map ->
+            map.values.filter { it.parentId == null && it.scheduledAt == null }.sortedBy { it.feedOrder }
+        }
 
     override fun observeReplies(parentId: String): Flow<List<MessageEntity>> =
         rows.map { map -> map.values.filter { it.parentId == parentId }.sortedBy { it.feedOrder } }
 
     override fun observeMessage(id: String): Flow<MessageEntity?> =
         rows.map { it[id] }
+
+    override fun observeScheduled(): Flow<List<MessageEntity>> =
+        rows.map { map -> map.values.filter { it.scheduledAt != null }.sortedBy { it.scheduledAt } }
 
     override suspend fun insertAll(messages: List<MessageEntity>) {
         rows.value = rows.value.toMutableMap().apply {
@@ -42,12 +47,16 @@ class FakeMessageDao : MessageDao {
     }
 
     override suspend fun clearFeed() {
-        rows.value = rows.value.filterValues { it.parentId != null }
+        rows.value = rows.value.filterValues { it.parentId != null || it.scheduledAt != null }
+    }
+
+    override suspend fun clearScheduled() {
+        rows.value = rows.value.filterValues { it.scheduledAt == null }
     }
 
     override suspend fun maxFeedOrder(): Long? =
-        sorted { it.parentId == null }.maxOfOrNull { it.feedOrder }
+        sorted { it.parentId == null && it.scheduledAt == null }.maxOfOrNull { it.feedOrder }
 
     /** Test helper: current feed snapshot. */
-    fun feedSnapshot(): List<MessageEntity> = sorted { it.parentId == null }
+    fun feedSnapshot(): List<MessageEntity> = sorted { it.parentId == null && it.scheduledAt == null }
 }

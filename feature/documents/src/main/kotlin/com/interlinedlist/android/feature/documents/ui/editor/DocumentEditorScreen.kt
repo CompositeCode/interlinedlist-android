@@ -9,10 +9,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -43,6 +47,7 @@ object DocumentEditorTestTags {
     const val PREVIEW = "editorPreview"
     const val SAVE = "editorSave"
     const val DELETE = "editorDelete"
+    const val UPLOAD_IMAGE = "editorUploadImage"
     const val TOGGLE_PREVIEW = "editorTogglePreview"
     const val PROGRESS = "editorProgress"
     const val ERROR = "editorError"
@@ -61,6 +66,25 @@ fun DocumentEditorRoute(
     viewModel: DocumentEditorViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    // Android Photo Picker: reads the picked image's bytes and hands them to the VM.
+    val pickImage = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        if (uri != null) {
+            val resolver = context.contentResolver
+            val mime = resolver.getType(uri) ?: "image/*"
+            val bytes = runCatching {
+                resolver.openInputStream(uri)?.use { it.readBytes() }
+            }.getOrNull()
+            if (bytes != null) {
+                val name = uri.lastPathSegment?.substringAfterLast('/') ?: "image"
+                viewModel.uploadImage(fileName = name, mimeType = mime, bytes = bytes)
+            }
+        }
+    }
+
     DocumentEditorScreen(
         state = state,
         onTitleChange = viewModel::onTitleChange,
@@ -68,6 +92,11 @@ fun DocumentEditorRoute(
         onTogglePreview = viewModel::togglePreview,
         onSave = { viewModel.save() },
         onDelete = { viewModel.delete(onDeleted) },
+        onPickImage = {
+            pickImage.launch(
+                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+            )
+        },
         onBack = onBack,
         modifier = modifier,
     )
@@ -85,6 +114,7 @@ fun DocumentEditorScreen(
     onDelete: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    onPickImage: () -> Unit = {},
 ) {
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -103,6 +133,17 @@ fun DocumentEditorScreen(
                     }
                 },
                 actions = {
+                    IconButton(
+                        onClick = onPickImage,
+                        enabled = !state.isUploadingImage && !state.isSaving,
+                        modifier = Modifier.testTag(DocumentEditorTestTags.UPLOAD_IMAGE),
+                    ) {
+                        if (state.isUploadingImage) {
+                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Default.Image, contentDescription = "Insert image")
+                        }
+                    }
                     IconButton(
                         onClick = onTogglePreview,
                         modifier = Modifier.testTag(DocumentEditorTestTags.TOGGLE_PREVIEW),

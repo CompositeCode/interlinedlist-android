@@ -4,42 +4,46 @@ import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.feature.documents.domain.Document
 import com.interlinedlist.android.feature.documents.domain.DocumentFolder
 import com.interlinedlist.android.feature.documents.domain.DocumentTemplate
-import com.interlinedlist.android.feature.documents.domain.Pagination
+import com.interlinedlist.android.feature.documents.domain.FolderContents
+import com.interlinedlist.android.feature.documents.domain.FolderSummary
 import kotlinx.coroutines.flow.Flow
 
 /**
- * Offline-first access to documents and folders. List/detail reads are served as
- * [Flow]s from Room (the source of truth); [refreshDocuments]/[loadMore] pull from
- * the API and upsert into the cache. Mutations write through to the API and update
- * the cache so the observing UI reflects the change immediately.
+ * Offline-first access to the document folder tree. The browser observes a
+ * folder's [FolderContents] (subfolders + documents + breadcrumb) as a [Flow]
+ * derived from Room — the source of truth — while [refreshTree] pulls the whole
+ * tree from the API (`/folders` nests everything, `/documents` supplies unfiled
+ * root docs) and writes it through the cache. Mutations write to the API and
+ * update the cache so observers react immediately.
  */
 interface DocumentsRepository {
 
-    /** Root-level documents (no folder), or a folder's contents when [folderId] is set. */
-    fun observeDocuments(folderId: String?): Flow<List<Document>>
+    /**
+     * Reactive contents of the folder identified by [folderId] (null / the root id
+     * resolves to the top-level "Documents" node). Rebuilds from Room on any change.
+     */
+    fun observeFolderContents(folderId: String?): Flow<FolderContents>
+
+    /** All folders flattened to summaries — used by the "move document" picker. */
+    fun observeFolderSummaries(): Flow<List<FolderSummary>>
 
     /** A single cached document (null until first loaded). */
     fun observeDocument(id: String): Flow<Document?>
 
-    /** All cached folders. */
-    fun observeFolders(): Flow<List<DocumentFolder>>
-
-    /**
-     * Fetches the first page for [folderId] from the API and replaces the cached
-     * listing for that scope. Returns paging metadata for load-more.
-     */
-    suspend fun refreshDocuments(folderId: String?): ApiResult<Pagination>
-
-    /** Appends the next page for [folderId] into the cache. */
-    suspend fun loadMore(folderId: String?, pagination: Pagination): ApiResult<Pagination>
+    /** Refreshes the entire folder tree + root documents from the API into Room. */
+    suspend fun refreshTree(): ApiResult<Unit>
 
     /** Fetches a document detail (with body) and caches it. */
     suspend fun refreshDocument(id: String): ApiResult<Document>
 
+    // --- Document mutations ------------------------------------------------
+
+    /** Creates a document, optionally inside [folderId] (null == root). */
     suspend fun createDocument(
         title: String,
         content: String,
         isPublic: Boolean,
+        folderId: String?,
     ): ApiResult<Document>
 
     suspend fun updateDocument(
@@ -50,11 +54,30 @@ interface DocumentsRepository {
         folderId: String?,
     ): ApiResult<Document>
 
+    /** Moves a document into [folderId] (null == root/unfiled). */
+    suspend fun moveDocument(id: String, folderId: String?): ApiResult<Unit>
+
     suspend fun deleteDocument(id: String): ApiResult<Unit>
 
-    suspend fun refreshFolders(): ApiResult<List<DocumentFolder>>
+    suspend fun uploadImage(
+        documentId: String,
+        fileName: String,
+        mimeType: String,
+        bytes: ByteArray,
+    ): ApiResult<Unit>
+
+    // --- Folder mutations --------------------------------------------------
 
     suspend fun createFolder(name: String, parentId: String?): ApiResult<DocumentFolder>
+
+    suspend fun renameFolder(id: String, name: String): ApiResult<DocumentFolder>
+
+    suspend fun moveFolder(id: String, newParentId: String?): ApiResult<DocumentFolder>
+
+    /** Deletes a folder (server cascades to children + docs); prunes the cache. */
+    suspend fun deleteFolder(id: String): ApiResult<Unit>
+
+    // --- Templates & search ------------------------------------------------
 
     suspend fun getTemplates(): ApiResult<List<DocumentTemplate>>
 

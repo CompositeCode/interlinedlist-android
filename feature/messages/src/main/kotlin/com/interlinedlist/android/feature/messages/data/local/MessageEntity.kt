@@ -2,6 +2,7 @@ package com.interlinedlist.android.feature.messages.data.local
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import com.interlinedlist.android.feature.messages.domain.LinkPreview
 import com.interlinedlist.android.feature.messages.domain.Message
 
 /**
@@ -25,6 +26,14 @@ data class MessageEntity(
     val mine: Boolean,
     /** Server-relative ordering position captured at fetch time (feed order). */
     val feedOrder: Long,
+    /** Attached image URLs, stored via [MessageConverters]. */
+    val imageUrls: List<String> = emptyList(),
+    /** Attached video URLs, stored via [MessageConverters]. */
+    val videoUrls: List<String> = emptyList(),
+    /** Link-preview card, stored via [MessageConverters]; null when none. */
+    val linkPreview: LinkPreview? = null,
+    /** Future send time for a scheduled message; null for a normal message. */
+    val scheduledAt: String? = null,
 )
 
 fun MessageEntity.toDomain(): Message = Message(
@@ -40,6 +49,10 @@ fun MessageEntity.toDomain(): Message = Message(
     dugByMe = dugByMe,
     parentId = parentId,
     mine = mine,
+    imageUrls = imageUrls,
+    videoUrls = videoUrls,
+    linkPreview = linkPreview,
+    scheduledAt = scheduledAt,
 )
 
 fun Message.toEntity(feedOrder: Long): MessageEntity = MessageEntity(
@@ -56,4 +69,8 @@ fun Message.toEntity(feedOrder: Long): MessageEntity = MessageEntity(
     parentId = parentId,
     mine = mine,
     feedOrder = feedOrder,
+    imageUrls = imageUrls,
+    videoUrls = videoUrls,
+    linkPreview = linkPreview,
+    scheduledAt = scheduledAt,
 )

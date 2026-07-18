@@ -2,6 +2,7 @@ package com.interlinedlist.android.feature.messages.data
 
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.feature.messages.domain.Message
+import com.interlinedlist.android.feature.messages.domain.ReportReason
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -20,6 +21,9 @@ interface MessagesRepository {
     /** A single cached message (or null), re-emitting on change. */
     fun observeMessage(messageId: String): Flow<Message?>
 
+    /** Cached scheduled (not-yet-published) messages, soonest-first. */
+    fun observeScheduled(): Flow<List<Message>>
+
     /**
      * Refreshes the first page of the feed from the API and replaces the cached
      * feed. Returns whether more pages are available.
@@ -32,8 +36,23 @@ interface MessagesRepository {
      */
     suspend fun loadMoreFeed(currentCount: Int): ApiResult<Boolean>
 
-    /** Creates a new top-level message and caches it. */
-    suspend fun createMessage(content: String): ApiResult<Message>
+    /**
+     * Creates a new top-level message and caches it. Optionally attaches already
+     * uploaded [imageUrls] / [videoUrls] and defers publishing to [scheduledAt]
+     * (ISO-8601). A scheduled message does not enter the feed cache.
+     */
+    suspend fun createMessage(
+        content: String,
+        imageUrls: List<String> = emptyList(),
+        videoUrls: List<String> = emptyList(),
+        scheduledAt: String? = null,
+    ): ApiResult<Message>
+
+    /** Uploads image [bytes] and returns the hosted URL to attach on compose. */
+    suspend fun uploadImage(bytes: ByteArray, fileName: String, mimeType: String): ApiResult<String>
+
+    /** Uploads video [bytes] and returns the hosted URL to attach on compose. */
+    suspend fun uploadVideo(bytes: ByteArray, fileName: String, mimeType: String): ApiResult<String>
 
     /** Fetches a single message and caches it (for the detail screen). */
     suspend fun fetchMessage(messageId: String): ApiResult<Message>
@@ -49,6 +68,21 @@ interface MessagesRepository {
 
     /** Deletes one of the caller's own messages, removing it from the cache. */
     suspend fun deleteMessage(messageId: String): ApiResult<Unit>
+
+    /** Refreshes the caller's scheduled messages from the API into the cache. */
+    suspend fun refreshScheduled(): ApiResult<Unit>
+
+    /** Cancels a scheduled message (deletes it), removing it from the cache. */
+    suspend fun cancelScheduled(messageId: String): ApiResult<Unit>
+
+    /** Reports a message with a [reason] and optional free-text [detail]. */
+    suspend fun report(messageId: String, reason: ReportReason, detail: String? = null): ApiResult<Unit>
+
+    /**
+     * Fetches link-preview metadata for [messageId]'s links and updates the cached
+     * message so the feed/detail can render a preview card.
+     */
+    suspend fun fetchMetadata(messageId: String): ApiResult<Message>
 
     /** Full-text search over top-level messages (does not touch the feed cache). */
     suspend fun search(query: String): ApiResult<List<Message>>

@@ -17,6 +17,9 @@ class FakeDocumentDao : DocumentDao {
 
     fun snapshot(): List<DocumentEntity> = rows.value.sortedBy { it.sortOrder }
 
+    override fun observeAllDocuments(): Flow<List<DocumentEntity>> =
+        rows.map { list -> list.sortedBy { it.sortOrder } }
+
     override fun observeRootDocuments(): Flow<List<DocumentEntity>> =
         rows.map { list -> list.filter { it.folderId == null }.sortedBy { it.sortOrder } }
 
@@ -50,6 +53,10 @@ class FakeDocumentDao : DocumentDao {
     override suspend fun clearFolder(folderId: String) {
         rows.value = rows.value.filterNot { it.folderId == folderId }
     }
+
+    override suspend fun clearAll() {
+        rows.value = emptyList()
+    }
 }
 
 class FakeFolderDao : FolderDao {
@@ -60,12 +67,21 @@ class FakeFolderDao : FolderDao {
     override fun observeFolders(): Flow<List<FolderEntity>> =
         rows.map { list -> list.sortedBy { it.sortOrder } }
 
+    override suspend fun getFolder(id: String): FolderEntity? =
+        rows.value.firstOrNull { it.id == id }
+
+    override suspend fun maxSortOrder(): Int = rows.value.maxOfOrNull { it.sortOrder } ?: -1
+
     override suspend fun upsertAll(folders: List<FolderEntity>) {
         folders.forEach { upsert(it) }
     }
 
     override suspend fun upsert(folder: FolderEntity) {
         rows.value = rows.value.filterNot { it.id == folder.id } + folder
+    }
+
+    override suspend fun deleteById(id: String) {
+        rows.value = rows.value.filterNot { it.id == id }
     }
 
     override suspend fun clear() {

@@ -10,27 +10,36 @@ import com.interlinedlist.android.feature.documents.data.local.FolderDao
 import com.interlinedlist.android.feature.documents.data.local.toDomain
 import com.interlinedlist.android.feature.documents.data.local.toEntity
 import com.interlinedlist.android.feature.documents.data.mapper.toDomain
-import com.interlinedlist.android.feature.documents.data.mapper.toPaginationDomain
 import com.interlinedlist.android.feature.documents.data.mapper.toTemplate
 import com.interlinedlist.android.feature.documents.data.remote.DocumentsApi
 import com.interlinedlist.android.feature.documents.data.remote.dto.CreateDocumentRequest
 import com.interlinedlist.android.feature.documents.data.remote.dto.CreateFolderRequest
-import com.interlinedlist.android.feature.documents.data.remote.dto.DocumentListResponse
 import com.interlinedlist.android.feature.documents.data.remote.dto.FromTemplateRequest
 import com.interlinedlist.android.feature.documents.data.remote.dto.UpdateDocumentRequest
+import com.interlinedlist.android.feature.documents.data.remote.dto.UpdateFolderRequest
 import com.interlinedlist.android.feature.documents.domain.Document
 import com.interlinedlist.android.feature.documents.domain.DocumentFolder
 import com.interlinedlist.android.feature.documents.domain.DocumentTemplate
-import com.interlinedlist.android.feature.documents.domain.Pagination
+import com.interlinedlist.android.feature.documents.domain.FolderContents
+import com.interlinedlist.android.feature.documents.domain.FolderNode
+import com.interlinedlist.android.feature.documents.domain.FolderSummary
+import com.interlinedlist.android.feature.documents.domain.FolderTree
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import kotlinx.serialization.json.Json
 import javax.inject.Inject
 
 /**
- * Room-backed, offline-first implementation. Reads observe Room; refreshes and
- * mutations call the API and write through to Room so the UI updates reactively.
+ * Room-backed, offline-first implementation. The browser observes a folder's
+ * contents built from ALL cached folders + documents (so drilling in/out never
+ * hits the network); [refreshTree] pulls the whole tree once and writes it
+ * through. Mutations call the API then patch the cache so observers react.
  */
 class DefaultDocumentsRepository @Inject constructor(
     private val api: DocumentsApi,
@@ -40,58 +49,58 @@ class DefaultDocumentsRepository @Inject constructor(
     private val dispatchers: DispatcherProvider,
 ) : DocumentsRepository {
 
-    override fun observeDocuments(folderId: String?): Flow<List<Document>> {
-        val source = if (folderId == null) {
-            documentDao.observeRootDocuments()
-        } else {
-            documentDao.observeDocumentsInFolder(folderId)
-        }
-        return source.map { rows -> rows.map { it.toDomain() } }
+    /** The current tree, recomputed whenever folders or documents change in Room. */
+    private val treeFlow: Flow<FolderNode> = combine(
+        folderDao.observeFolders(),
+        documentDao.observeAllDocuments(),
+    ) { folders, documents ->
+        buildTree(folders.map { it.toDomain() }, documents.map { it.toDomain() })
     }
+
+    override fun observeFolderContents(folderId: String?): Flow<FolderContents> =
+        treeFlow.map { tree -> FolderTree.contentsOf(tree, folderId) }
+
+    override fun observeFolderSummaries(): Flow<List<FolderSummary>> =
+        treeFlow.map { tree -> flattenSummaries(tree) }
 
     override fun observeDocument(id: String): Flow<Document?> =
         documentDao.observeDocument(id).map { it?.toDomain() }
 
-    override fun observeFolders(): Flow<List<DocumentFolder>> =
-        folderDao.observeFolders().map { rows -> rows.map { it.toDomain() } }
-
-    override suspend fun refreshDocuments(folderId: String?): ApiResult<Pagination> =
-        withContext(dispatchers.io) {
-            val result = safeApiCall(json) {
-                if (folderId == null) {
-                    api.getDocuments(limit = Pagination.DEFAULT_LIMIT, offset = 0)
-                } else {
-                    api.getFolderDocuments(folderId, limit = Pagination.DEFAULT_LIMIT, offset = 0)
-                }
-            }
-            when (result) {
-                is ApiResult.Success -> {
-                    // Replace the listing for this scope so server-side deletions drop out.
-                    if (folderId == null) documentDao.clearRoot() else documentDao.clearFolder(folderId)
-                    ApiResult.Success(cachePage(result.data, folderId, startOrder = 0))
-                }
-                is ApiResult.Failure -> result
-            }
+    override suspend fun refreshTree(): ApiResult<Unit> = withContext(dispatchers.io) {
+        // One call returns the nested folder tree with embedded docs; a second returns
+        // the unfiled root documents. We replace the whole cache so deletions drop out.
+        val foldersResult = safeApiCall(json) { api.getFolders() }
+        val folders = when (foldersResult) {
+            is ApiResult.Success -> foldersResult.data.foldersOrEmpty
+            is ApiResult.Failure -> return@withContext foldersResult
+        }
+        val rootResult = safeApiCall(json) { api.getRootDocuments() }
+        val rootDocs = when (rootResult) {
+            is ApiResult.Success -> rootResult.data.documentsOrEmpty
+            is ApiResult.Failure -> return@withContext rootResult
         }
 
-    override suspend fun loadMore(
-        folderId: String?,
-        pagination: Pagination,
-    ): ApiResult<Pagination> = withContext(dispatchers.io) {
-        if (!pagination.hasMore) return@withContext ApiResult.Success(pagination)
-        val nextOffset = pagination.nextOffset
-        val result = safeApiCall(json) {
-            if (folderId == null) {
-                api.getDocuments(limit = pagination.limit, offset = nextOffset)
-            } else {
-                api.getFolderDocuments(folderId, limit = pagination.limit, offset = nextOffset)
+        folderDao.clear()
+        documentDao.clearAll()
+
+        folderDao.upsertAll(
+            folders.mapIndexed { i, dto -> dto.toDomain().toEntity(sortOrder = i) },
+        )
+
+        var order = 0
+        val docEntities = buildList {
+            // Root/unfiled documents first, then each folder's embedded documents.
+            rootDocs.forEach { dto ->
+                add(dto.toDomain().copy(folderId = null).toEntity(sortOrder = order++))
+            }
+            folders.forEach { folder ->
+                folder.documentsOrEmpty.forEach { dto ->
+                    add(dto.toDomain().copy(folderId = folder.id).toEntity(sortOrder = order++))
+                }
             }
         }
-        when (result) {
-            is ApiResult.Success ->
-                ApiResult.Success(cachePage(result.data, folderId, startOrder = documentDao.maxSortOrder() + 1))
-            is ApiResult.Failure -> result
-        }
+        documentDao.upsertAll(docEntities)
+        ApiResult.Success(Unit)
     }
 
     override suspend fun refreshDocument(id: String): ApiResult<Document> =
@@ -112,6 +121,7 @@ class DefaultDocumentsRepository @Inject constructor(
         title: String,
         content: String,
         isPublic: Boolean,
+        folderId: String?,
     ): ApiResult<Document> = withContext(dispatchers.io) {
         val result = safeApiCall(json) {
             api.createDocument(CreateDocumentRequest(title, content, isPublic)).documentOrSelf
@@ -120,8 +130,14 @@ class DefaultDocumentsRepository @Inject constructor(
             is ApiResult.Success -> {
                 val dto = result.data
                     ?: return@withContext ApiResult.Failure(AppError.Unknown("Document create returned no body"))
-                val domain = dto.toDomain()
+                // The root create endpoint always yields an unfiled doc; assign it to the
+                // requested folder if one was given so it lands in the right place.
+                val domain = dto.toDomain().let { if (folderId != null) it.copy(folderId = folderId) else it }
                 documentDao.upsert(domain.toEntity(sortOrder = documentDao.maxSortOrder() + 1))
+                if (folderId != null) {
+                    // Best-effort move so the server record matches the cache.
+                    safeApiCall(json) { api.updateDocument(domain.id, UpdateDocumentRequest(folderId = folderId)) }
+                }
                 ApiResult.Success(domain)
             }
             is ApiResult.Failure -> result
@@ -143,7 +159,6 @@ class DefaultDocumentsRepository @Inject constructor(
         }
         when (result) {
             is ApiResult.Success -> {
-                // Fall back to the locally-known values if the server echoes a thin body.
                 val domain = result.data?.toDomain()?.let {
                     it.copy(content = it.content ?: content)
                 } ?: Document(
@@ -163,6 +178,23 @@ class DefaultDocumentsRepository @Inject constructor(
         }
     }
 
+    override suspend fun moveDocument(id: String, folderId: String?): ApiResult<Unit> =
+        withContext(dispatchers.io) {
+            val result = safeApiCall(json) {
+                api.updateDocument(id, UpdateDocumentRequest(folderId = folderId))
+            }
+            when (result) {
+                is ApiResult.Success -> {
+                    // Patch the cached row's folder so the browser reflects the move offline.
+                    documentDao.getDocument(id)?.let { cached ->
+                        documentDao.upsert(cached.copy(folderId = folderId))
+                    }
+                    ApiResult.Success(Unit)
+                }
+                is ApiResult.Failure -> result
+            }
+        }
+
     override suspend fun deleteDocument(id: String): ApiResult<Unit> =
         withContext(dispatchers.io) {
             when (val result = safeApiCall(json) { api.deleteDocument(id) }) {
@@ -174,31 +206,80 @@ class DefaultDocumentsRepository @Inject constructor(
             }
         }
 
-    override suspend fun refreshFolders(): ApiResult<List<DocumentFolder>> =
-        withContext(dispatchers.io) {
-            when (val result = safeApiCall(json) { api.getFolders() }) {
-                is ApiResult.Success -> {
-                    val folders = result.data.foldersOrEmpty.map { it.toDomain() }
-                    folderDao.clear()
-                    folderDao.upsertAll(folders.mapIndexed { i, f -> f.toEntity(sortOrder = i) })
-                    ApiResult.Success(folders)
-                }
-                is ApiResult.Failure -> result
-            }
-        }
+    override suspend fun uploadImage(
+        documentId: String,
+        fileName: String,
+        mimeType: String,
+        bytes: ByteArray,
+    ): ApiResult<Unit> = withContext(dispatchers.io) {
+        val part = MultipartBody.Part.createFormData(
+            name = "image",
+            filename = fileName,
+            body = bytes.toRequestBody(mimeType.toMediaTypeOrNull()),
+        )
+        safeApiCall(json) { api.uploadImage(documentId, part) }.map { }
+    }
 
     override suspend fun createFolder(name: String, parentId: String?): ApiResult<DocumentFolder> =
         withContext(dispatchers.io) {
             val result = safeApiCall(json) {
-                api.createFolder(CreateFolderRequest(name, parentId)).folderOrSelf
+                api.createFolder(CreateFolderRequest(name, parentId?.realOrNull())).folderOrSelf
             }
             when (result) {
                 is ApiResult.Success -> {
                     val dto = result.data
                         ?: return@withContext ApiResult.Failure(AppError.Unknown("Folder create returned no body"))
-                    val domain = dto.toDomain()
-                    folderDao.upsert(domain.toEntity(sortOrder = Int.MAX_VALUE))
+                    val domain = dto.toDomain().copy(parentId = parentId?.realOrNull())
+                    folderDao.upsert(domain.toEntity(sortOrder = folderDao.maxSortOrder() + 1))
                     ApiResult.Success(domain)
+                }
+                is ApiResult.Failure -> result
+            }
+        }
+
+    override suspend fun renameFolder(id: String, name: String): ApiResult<DocumentFolder> =
+        withContext(dispatchers.io) {
+            val result = safeApiCall(json) {
+                api.updateFolder(id, UpdateFolderRequest(name = name)).folderOrSelf
+            }
+            when (result) {
+                is ApiResult.Success -> {
+                    val cached = folderDao.getFolder(id)
+                    val dto = result.data
+                    val domain = dto?.toDomain()?.copy(
+                        parentId = dto.parentId ?: cached?.parentId,
+                    ) ?: DocumentFolder(id = id, name = name, parentId = cached?.parentId)
+                    folderDao.upsert(domain.toEntity(sortOrder = cached?.sortOrder ?: (folderDao.maxSortOrder() + 1)))
+                    ApiResult.Success(domain)
+                }
+                is ApiResult.Failure -> result
+            }
+        }
+
+    override suspend fun moveFolder(id: String, newParentId: String?): ApiResult<DocumentFolder> =
+        withContext(dispatchers.io) {
+            val result = safeApiCall(json) {
+                api.updateFolder(id, UpdateFolderRequest(parentId = newParentId?.realOrNull())).folderOrSelf
+            }
+            when (result) {
+                is ApiResult.Success -> {
+                    val cached = folderDao.getFolder(id)
+                    val domain = (result.data?.toDomain() ?: DocumentFolder(id, cached?.name ?: "Untitled folder", null))
+                        .copy(parentId = newParentId?.realOrNull())
+                    folderDao.upsert(domain.toEntity(sortOrder = cached?.sortOrder ?: (folderDao.maxSortOrder() + 1)))
+                    ApiResult.Success(domain)
+                }
+                is ApiResult.Failure -> result
+            }
+        }
+
+    override suspend fun deleteFolder(id: String): ApiResult<Unit> =
+        withContext(dispatchers.io) {
+            when (val result = safeApiCall(json) { api.deleteFolder(id) }) {
+                is ApiResult.Success -> {
+                    // Server cascades; mirror that locally so the tree updates offline.
+                    pruneFolderCascade(id)
+                    ApiResult.Success(Unit)
                 }
                 is ApiResult.Failure -> result
             }
@@ -215,13 +296,15 @@ class DefaultDocumentsRepository @Inject constructor(
         targetFolderId: String?,
     ): ApiResult<Document> = withContext(dispatchers.io) {
         val result = safeApiCall(json) {
-            api.createFromTemplate(FromTemplateRequest(templateId, targetFolderId)).documentOrSelf
+            api.createFromTemplate(FromTemplateRequest(templateId, targetFolderId?.realOrNull())).documentOrSelf
         }
         when (result) {
             is ApiResult.Success -> {
                 val dto = result.data
                     ?: return@withContext ApiResult.Failure(AppError.Unknown("Template create returned no body"))
-                val domain = dto.toDomain()
+                val domain = dto.toDomain().let {
+                    if (targetFolderId != null) it.copy(folderId = targetFolderId.realOrNull()) else it
+                }
                 documentDao.upsert(domain.toEntity(sortOrder = documentDao.maxSortOrder() + 1))
                 ApiResult.Success(domain)
             }
@@ -235,22 +318,40 @@ class DefaultDocumentsRepository @Inject constructor(
                 .map { response -> response.documentsOrEmpty.map { it.toDomain() } }
         }
 
-    /** Upserts a page of documents starting at [startOrder]; returns its paging metadata. */
-    private suspend fun cachePage(
-        response: DocumentListResponse,
-        folderId: String?,
-        startOrder: Int,
-    ): Pagination {
-        val documents = response.documentsOrEmpty.map { it.toDomain() }
-        val entities = documents.mapIndexed { i, doc ->
-            // Root refreshes clear the table, so folderId on a root doc is honoured as-is.
-            doc.copy(folderId = doc.folderId ?: folderId)
-                .toEntity(sortOrder = startOrder + i)
+    // --- Helpers -----------------------------------------------------------
+
+    private fun buildTree(folders: List<DocumentFolder>, documents: List<Document>): FolderNode {
+        val byFolder = documents.filter { it.folderId != null }.groupBy { it.folderId!! }
+        val root = documents.filter { it.folderId == null }
+        return FolderTree.build(folders, byFolder, root)
+    }
+
+    private fun flattenSummaries(node: FolderNode): List<FolderSummary> = buildList {
+        node.children.forEach { child ->
+            add(FolderSummary(child.id, child.name, child.documents.size, child.children.size))
+            addAll(flattenSummaries(child))
         }
-        documentDao.upsertAll(entities)
-        return response.pagination.toPaginationDomain(fallbackCount = documents.size)
+    }
+
+    /** Recursively removes a folder, its descendants, and their documents from Room. */
+    private suspend fun pruneFolderCascade(folderId: String) {
+        val snapshot = folderDao.observeFolders().first()
+        val toRemove = mutableListOf(folderId)
+        var i = 0
+        while (i < toRemove.size) {
+            val current = toRemove[i]
+            snapshot.filter { it.parentId == current }.forEach { toRemove.add(it.id) }
+            i++
+        }
+        toRemove.forEach { id ->
+            documentDao.clearFolder(id)
+            folderDao.deleteById(id)
+        }
     }
 
     private suspend fun existingOrder(id: String): Int =
         documentDao.getDocument(id)?.sortOrder ?: (documentDao.maxSortOrder() + 1)
+
+    /** Treats the synthetic root id as "no parent" for API calls. */
+    private fun String.realOrNull(): String? = takeUnless { it == FolderNode.ROOT_ID }
 }

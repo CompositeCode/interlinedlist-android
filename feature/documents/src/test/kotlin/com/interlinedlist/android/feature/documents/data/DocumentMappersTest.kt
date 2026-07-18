@@ -2,11 +2,9 @@ package com.interlinedlist.android.feature.documents.data
 
 import com.google.common.truth.Truth.assertThat
 import com.interlinedlist.android.feature.documents.data.mapper.toDomain
-import com.interlinedlist.android.feature.documents.data.mapper.toPaginationDomain
 import com.interlinedlist.android.feature.documents.data.mapper.toTemplate
 import com.interlinedlist.android.feature.documents.data.remote.dto.DocumentDto
 import com.interlinedlist.android.feature.documents.data.remote.dto.FolderDto
-import com.interlinedlist.android.feature.documents.data.remote.dto.PaginationDto
 import com.interlinedlist.android.feature.documents.domain.Document
 import org.junit.Test
 
@@ -74,17 +72,18 @@ class DocumentMappersTest {
     }
 
     @Test
-    fun `null pagination falls back to a single page over the item count`() {
-        val page = (null as PaginationDto?).toPaginationDomain(fallbackCount = 3)
-        assertThat(page.hasMore).isFalse()
-        assertThat(page.total).isEqualTo(3)
-        assertThat(page.offset).isEqualTo(0)
-    }
-
-    @Test
-    fun `pagination maps through and computes next offset`() {
-        val page = PaginationDto(total = 40, limit = 20, offset = 0, hasMore = true).toPaginationDomain(0)
-        assertThat(page.hasMore).isTrue()
-        assertThat(page.nextOffset).isEqualTo(20)
+    fun `folder maps embedded documents count and timestamps`() {
+        val dto = FolderDto(
+            id = "f1",
+            name = "Work",
+            parentId = null,
+            documents = listOf(DocumentDto(id = "d1", title = "A")),
+            createdAt = "2026-01-01",
+            updatedAt = "2026-02-02",
+        )
+        assertThat(dto.documentsOrEmpty.map { it.id }).containsExactly("d1")
+        val folder = dto.toDomain()
+        assertThat(folder.createdAt).isEqualTo("2026-01-01")
+        assertThat(folder.updatedAt).isEqualTo("2026-02-02")
     }
 }

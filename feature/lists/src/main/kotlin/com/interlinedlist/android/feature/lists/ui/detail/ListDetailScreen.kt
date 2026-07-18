@@ -19,8 +19,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -28,10 +32,13 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -60,19 +67,26 @@ object ListDetailTestTags {
     const val ERROR = "listDetailError"
     const val SUBSCRIPTION = "listDetailSubscription"
     const val DELETE_LIST = "listDetailDeleteList"
+    const val REFRESH = "listDetailRefresh"
+    const val OVERFLOW = "listDetailOverflow"
+    const val EDIT_SCHEMA = "listDetailEditSchema"
+    const val WATCHERS = "listDetailWatchers"
     fun row(id: String) = "listDetailRow_$id"
 }
 
 /**
  * Hilt-wired entry for a single list. Reads its `listId` from the nav
  * SavedStateHandle (see [LIST_ID_ARG]); [onBack] and [onListDeleted] let the app
- * pop navigation.
+ * pop navigation. [onEditSchema] and [onOpenWatchers] push the drill-down routes
+ * for the list's columns and watchers (both keyed by the same list id).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ListDetailRoute(
     onBack: () -> Unit,
     onListDeleted: () -> Unit,
+    onEditSchema: () -> Unit,
+    onOpenWatchers: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: ListDetailViewModel = hiltViewModel(),
 ) {
@@ -80,6 +94,15 @@ fun ListDetailRoute(
 
     var editing by remember { mutableStateOf<EditorTarget?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    // Surface the refresh outcome as a transient snackbar, then clear it.
+    LaunchedEffect(state.refreshMessage) {
+        state.refreshMessage?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.clearRefreshMessage()
+        }
+    }
 
     ListDetailScreen(
         state = state,
@@ -88,6 +111,10 @@ fun ListDetailRoute(
         onEditRow = { editing = EditorTarget.Existing(it) },
         onDeleteRow = viewModel::deleteRow,
         onDeleteList = { viewModel.deleteList(onListDeleted) },
+        onRefresh = viewModel::refreshFromGithub,
+        onEditSchema = onEditSchema,
+        onOpenWatchers = onOpenWatchers,
+        snackbarHostState = snackbarHostState,
         modifier = modifier,
     )
 
@@ -126,9 +153,15 @@ fun ListDetailScreen(
     onDeleteRow: (String) -> Unit,
     onDeleteList: () -> Unit,
     modifier: Modifier = Modifier,
+    onRefresh: () -> Unit = {},
+    onEditSchema: () -> Unit = {},
+    onOpenWatchers: () -> Unit = {},
+    snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
 ) {
+    var menuOpen by remember { mutableStateOf(false) }
     Scaffold(
         modifier = modifier.fillMaxSize(),
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text(state.title.ifBlank { "List" }, maxLines = 1, overflow = TextOverflow.Ellipsis) },
@@ -138,8 +171,38 @@ fun ListDetailScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = onDeleteList, modifier = Modifier.testTag(ListDetailTestTags.DELETE_LIST)) {
-                        Icon(Icons.Default.Delete, contentDescription = "Delete list")
+                    if (state.isRefreshing) {
+                        CircularProgressIndicator(
+                            Modifier
+                                .padding(horizontal = 12.dp)
+                                .height(20.dp)
+                                .width(20.dp),
+                        )
+                    } else {
+                        IconButton(onClick = onRefresh, modifier = Modifier.testTag(ListDetailTestTags.REFRESH)) {
+                            Icon(Icons.Default.Refresh, contentDescription = "Refresh from source")
+                        }
+                    }
+                    IconButton(
+                        onClick = { menuOpen = true },
+                        modifier = Modifier.testTag(ListDetailTestTags.OVERFLOW),
+                    ) { Icon(Icons.Default.MoreVert, contentDescription = "More actions") }
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Edit columns") },
+                            onClick = { menuOpen = false; onEditSchema() },
+                            modifier = Modifier.testTag(ListDetailTestTags.EDIT_SCHEMA),
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Watchers") },
+                            onClick = { menuOpen = false; onOpenWatchers() },
+                            modifier = Modifier.testTag(ListDetailTestTags.WATCHERS),
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Delete list") },
+                            onClick = { menuOpen = false; onDeleteList() },
+                            modifier = Modifier.testTag(ListDetailTestTags.DELETE_LIST),
+                        )
                     }
                 },
             )

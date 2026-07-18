@@ -1,14 +1,25 @@
 package com.interlinedlist.android.feature.lists.data.remote
 
+import com.interlinedlist.android.feature.lists.data.remote.dto.AddWatcherRequest
+import com.interlinedlist.android.feature.lists.data.remote.dto.ConnectionEnvelope
+import com.interlinedlist.android.feature.lists.data.remote.dto.ConnectionsResponse
+import com.interlinedlist.android.feature.lists.data.remote.dto.CreateConnectionRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.CreateFolderRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.CreateListRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.FolderDto
 import com.interlinedlist.android.feature.lists.data.remote.dto.FoldersResponse
 import com.interlinedlist.android.feature.lists.data.remote.dto.ListEnvelope
 import com.interlinedlist.android.feature.lists.data.remote.dto.ListsResponse
+import com.interlinedlist.android.feature.lists.data.remote.dto.RefreshResultDto
 import com.interlinedlist.android.feature.lists.data.remote.dto.RowEnvelope
 import com.interlinedlist.android.feature.lists.data.remote.dto.RowWriteRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.RowsResponse
+import com.interlinedlist.android.feature.lists.data.remote.dto.SchemaEnvelope
+import com.interlinedlist.android.feature.lists.data.remote.dto.UpdateSchemaRequest
+import com.interlinedlist.android.feature.lists.data.remote.dto.UpdateWatcherRoleRequest
+import com.interlinedlist.android.feature.lists.data.remote.dto.WatcherUsersResponse
+import com.interlinedlist.android.feature.lists.data.remote.dto.WatchersResponse
+import com.interlinedlist.android.feature.lists.data.remote.dto.WatchingStatusDto
 import kotlinx.serialization.json.JsonElement
 import retrofit2.http.Body
 import retrofit2.http.DELETE
@@ -50,6 +61,64 @@ interface ListsApi {
     /** The schema DSL — shape is dynamic, so it is received as a raw element. */
     @GET("api/lists/{id}/schema")
     suspend fun getSchema(@Path("id") id: String): JsonElement
+
+    /** Replaces a list's schema with the serialised DSL in [body]. */
+    @PUT("api/lists/{id}/schema")
+    suspend fun updateSchema(
+        @Path("id") id: String,
+        @Body body: UpdateSchemaRequest,
+    ): SchemaEnvelope
+
+    /** Manual re-sync of a GitHub-backed list. */
+    @POST("api/lists/{id}/refresh")
+    suspend fun refreshList(@Path("id") id: String): RefreshResultDto
+
+    @GET("api/lists/{id}/watchers")
+    suspend fun getWatchers(
+        @Path("id") id: String,
+        @Query("limit") limit: Int,
+        @Query("offset") offset: Int,
+    ): WatchersResponse
+
+    @POST("api/lists/{id}/watchers")
+    suspend fun addWatcher(
+        @Path("id") id: String,
+        @Body body: AddWatcherRequest,
+    )
+
+    @GET("api/lists/{id}/watchers/me")
+    suspend fun getWatchingStatus(@Path("id") id: String): WatchingStatusDto
+
+    @GET("api/lists/{id}/watchers/users")
+    suspend fun searchWatcherUsers(
+        @Path("id") id: String,
+        @Query("search") search: String,
+        @Query("excludeWatchers") excludeWatchers: Boolean,
+        @Query("limit") limit: Int,
+        @Query("offset") offset: Int,
+    ): WatcherUsersResponse
+
+    @PUT("api/lists/{id}/watchers/{userId}")
+    suspend fun updateWatcherRole(
+        @Path("id") id: String,
+        @Path("userId") userId: String,
+        @Body body: UpdateWatcherRoleRequest,
+    )
+
+    @DELETE("api/lists/{id}/watchers/{userId}")
+    suspend fun removeWatcher(
+        @Path("id") id: String,
+        @Path("userId") userId: String,
+    )
+
+    @GET("api/lists/connections")
+    suspend fun getConnections(): ConnectionsResponse
+
+    @POST("api/lists/connections")
+    suspend fun createConnection(@Body body: CreateConnectionRequest): ConnectionEnvelope
+
+    @DELETE("api/lists/connections/{id}")
+    suspend fun deleteConnection(@Path("id") id: String)
 
     @GET("api/lists/{id}/data")
     suspend fun getRows(

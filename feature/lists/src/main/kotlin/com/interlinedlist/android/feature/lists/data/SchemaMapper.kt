@@ -8,7 +8,10 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.put
 
 /**
  * Interprets a list's user-defined schema DSL into a typed [ListSchema].
@@ -26,6 +29,43 @@ import kotlinx.serialization.json.contentOrNull
  * fall back to [FieldType.TEXT] (see [FieldType.fromDsl]) so no column is lost.
  */
 object SchemaMapper {
+
+    /** The DSL wire value for each [FieldType]; the inverse of [FieldType.fromDsl]. */
+    private fun FieldType.toDsl(): String = when (this) {
+        FieldType.TEXT -> "text"
+        FieldType.NUMBER -> "number"
+        FieldType.BOOLEAN -> "boolean"
+        FieldType.DATE -> "date"
+        FieldType.URL -> "url"
+        FieldType.SELECT -> "select"
+    }
+
+    /**
+     * Serialises a [ListSchema] back to the canonical array DSL the API accepts on
+     * `PUT /api/lists/{id}/schema`: `[{ "key", "label", "type", "required"?,
+     * "options"? }, ...]`. Blank keys are dropped so an empty editor row is not
+     * persisted; [required]/[options] are only emitted when meaningful.
+     */
+    fun toDsl(schema: ListSchema): JsonArray = buildJsonArray {
+        schema.fields
+            .filter { it.key.isNotBlank() }
+            .forEach { field ->
+                add(
+                    buildJsonObject {
+                        put("key", field.key)
+                        put("label", field.label)
+                        put("type", field.type.toDsl())
+                        if (field.required) put("required", true)
+                        if (field.options.isNotEmpty()) {
+                            put(
+                                "options",
+                                buildJsonArray { field.options.forEach { add(JsonPrimitive(it)) } },
+                            )
+                        }
+                    },
+                )
+            }
+    }
 
     /** Parses the (possibly null) schema element; returns [ListSchema.EMPTY] if unusable. */
     fun fromJson(element: JsonElement?): ListSchema {

@@ -40,6 +40,8 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
+    // Media picker (rememberLauncherForActivityResult).
+    implementation(libs.androidx.activity.compose)
 
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
@@ -48,6 +50,8 @@ dependencies {
     // Networking (DTOs are serialized via the shared Retrofit/Json).
     implementation(libs.retrofit.core)
     implementation(libs.kotlinx.serialization.json)
+    // Multipart bodies for image/video uploads.
+    implementation(libs.okhttp.core)
 
     // This module owns its own Room cache (does not touch :core:database).
     implementation(libs.room.runtime)

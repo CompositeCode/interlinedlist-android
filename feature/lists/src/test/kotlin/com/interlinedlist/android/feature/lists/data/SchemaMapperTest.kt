@@ -2,6 +2,8 @@ package com.interlinedlist.android.feature.lists.data
 
 import com.google.common.truth.Truth.assertThat
 import com.interlinedlist.android.feature.lists.domain.FieldType
+import com.interlinedlist.android.feature.lists.domain.ListSchema
+import com.interlinedlist.android.feature.lists.domain.SchemaField
 import kotlinx.serialization.json.Json
 import org.junit.Test
 
@@ -92,5 +94,40 @@ class SchemaMapperTest {
     fun `null and primitive schemas yield an empty schema`() {
         assertThat(SchemaMapper.fromJson(null).isEmpty).isTrue()
         assertThat(parse("\"nope\"").isEmpty).isTrue()
+    }
+
+    @Test
+    fun `toDsl serialises fields to the canonical array DSL`() {
+        val schema = ListSchema(
+            listOf(
+                SchemaField("title", "Title", FieldType.TEXT),
+                SchemaField("status", "Status", FieldType.SELECT, required = true, options = listOf("open", "done")),
+            ),
+        )
+
+        val dsl = SchemaMapper.toDsl(schema)
+
+        assertThat(dsl).hasSize(2)
+        // The result round-trips back through fromJson unchanged in key/label/type.
+        val reparsed = SchemaMapper.fromJson(dsl)
+        assertThat(reparsed.fields.map { it.key }).containsExactly("title", "status").inOrder()
+        val status = reparsed.fields[1]
+        assertThat(status.type).isEqualTo(FieldType.SELECT)
+        assertThat(status.required).isTrue()
+        assertThat(status.options).containsExactly("open", "done").inOrder()
+    }
+
+    @Test
+    fun `toDsl drops columns with a blank key`() {
+        val schema = ListSchema(
+            listOf(
+                SchemaField("kept", "Kept", FieldType.TEXT),
+                SchemaField("", "Ignored", FieldType.TEXT),
+            ),
+        )
+
+        val reparsed = SchemaMapper.fromJson(SchemaMapper.toDsl(schema))
+
+        assertThat(reparsed.fields.map { it.key }).containsExactly("kept")
     }
 }

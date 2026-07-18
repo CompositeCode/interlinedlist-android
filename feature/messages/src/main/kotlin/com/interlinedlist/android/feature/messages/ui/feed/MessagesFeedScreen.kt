@@ -1,5 +1,8 @@
 package com.interlinedlist.android.feature.messages.ui.feed
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,17 +14,24 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -36,6 +46,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
@@ -44,7 +55,12 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.interlinedlist.android.core.designsystem.theme.InterlinedListTheme
 import com.interlinedlist.android.feature.messages.domain.Message
+import com.interlinedlist.android.feature.messages.domain.ReportReason
 import com.interlinedlist.android.feature.messages.ui.components.MessageCard
+import com.interlinedlist.android.feature.messages.ui.components.ReportDialog
+import com.interlinedlist.android.feature.messages.ui.readMediaBytes
+import java.time.Instant
+import java.time.temporal.ChronoUnit
 
 /** Stable test tags for the feed screen. */
 object MessagesFeedTags {
@@ -56,31 +72,52 @@ object MessagesFeedTags {
     const val FAB = "messagesFeedFab"
     const val COMPOSE_INPUT = "messagesComposeInput"
     const val COMPOSE_SUBMIT = "messagesComposeSubmit"
+    const val COMPOSE_ADD_IMAGE = "messagesComposeAddImage"
+    const val COMPOSE_ADD_VIDEO = "messagesComposeAddVideo"
+    const val COMPOSE_SCHEDULE = "messagesComposeSchedule"
+    const val SCHEDULED_ACTION = "messagesFeedScheduledAction"
 }
 
 /**
  * Hilt-wired feed entry point. The app's NavHost hosts this as the Messages tab.
  *
  * @param onOpenMessage navigates to the detail screen for the given message id.
+ * @param onOpenScheduled navigates to the Scheduled messages screen.
  */
 @Composable
 fun MessagesRoute(
     onOpenMessage: (String) -> Unit,
+    onOpenScheduled: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: MessagesFeedViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     MessagesFeedScreen(
         state = state,
         onRefresh = viewModel::refresh,
         onLoadMore = viewModel::loadMore,
         onOpenMessage = onOpenMessage,
+        onOpenScheduled = onOpenScheduled,
         onDig = viewModel::onDig,
         onDelete = viewModel::onDelete,
+        onReport = viewModel::openReport,
+        onFetchMetadata = viewModel::onFetchMetadata,
         onOpenCompose = viewModel::openCompose,
         onDismissCompose = viewModel::dismissCompose,
         onComposeTextChange = viewModel::onComposeTextChange,
         onPost = viewModel::post,
+        onAttachMedia = { uri, isVideo ->
+            // Read the picked media at the UI layer; the ViewModel stays URI-free.
+            val media = readMediaBytes(context, uri, isVideo)
+            if (media != null) {
+                viewModel.onAttachMedia(media.bytes, media.fileName, media.mimeType, isVideo)
+            }
+        },
+        onRemoveAttachment = viewModel::onRemoveAttachment,
+        onScheduleChange = viewModel::onScheduleChange,
+        onDismissReport = viewModel::dismissReport,
+        onSubmitReport = viewModel::submitReport,
         modifier = modifier,
     )
 }
@@ -100,10 +137,30 @@ fun MessagesFeedScreen(
     onComposeTextChange: (String) -> Unit,
     onPost: () -> Unit,
     modifier: Modifier = Modifier,
+    onOpenScheduled: () -> Unit = {},
+    onReport: (Message) -> Unit = {},
+    onFetchMetadata: (Message) -> Unit = {},
+    onAttachMedia: (Uri, Boolean) -> Unit = { _, _ -> },
+    onRemoveAttachment: (PendingAttachment) -> Unit = {},
+    onScheduleChange: (String?) -> Unit = {},
+    onDismissReport: () -> Unit = {},
+    onSubmitReport: (ReportReason, String) -> Unit = { _, _ -> },
 ) {
     Scaffold(
         modifier = modifier.fillMaxSize(),
-        topBar = { TopAppBar(title = { Text("Messages") }) },
+        topBar = {
+            TopAppBar(
+                title = { Text("Messages") },
+                actions = {
+                    IconButton(
+                        onClick = onOpenScheduled,
+                        modifier = Modifier.testTag(MessagesFeedTags.SCHEDULED_ACTION),
+                    ) {
+                        Icon(Icons.Filled.Schedule, contentDescription = "Scheduled messages")
+                    }
+                },
+            )
+        },
         floatingActionButton = {
             if (!state.subscriptionRequired) {
                 FloatingActionButton(
@@ -128,18 +185,29 @@ fun MessagesFeedScreen(
                 onOpenMessage = onOpenMessage,
                 onDig = onDig,
                 onDelete = onDelete,
+                onReport = onReport,
+                onFetchMetadata = onFetchMetadata,
             )
         }
     }
 
     if (state.isComposeOpen) {
         ComposeSheet(
-            text = state.composeText,
-            isPosting = state.isPosting,
-            canPost = state.canPost,
+            state = state,
             onTextChange = onComposeTextChange,
             onDismiss = onDismissCompose,
             onPost = onPost,
+            onAttachMedia = onAttachMedia,
+            onRemoveAttachment = onRemoveAttachment,
+            onScheduleChange = onScheduleChange,
+        )
+    }
+
+    state.reportTarget?.let {
+        ReportDialog(
+            onDismiss = onDismissReport,
+            onSubmit = onSubmitReport,
+            isSubmitting = state.isReporting,
         )
     }
 }
@@ -154,6 +222,8 @@ private fun FeedContent(
     onOpenMessage: (String) -> Unit,
     onDig: (Message) -> Unit,
     onDelete: (Message) -> Unit,
+    onReport: (Message) -> Unit,
+    onFetchMetadata: (Message) -> Unit,
 ) {
     PullToRefreshBox(
         isRefreshing = state.isRefreshing,
@@ -172,6 +242,8 @@ private fun FeedContent(
                 onOpenMessage = onOpenMessage,
                 onDig = onDig,
                 onDelete = onDelete,
+                onReport = onReport,
+                onFetchMetadata = onFetchMetadata,
             )
         }
     }
@@ -184,6 +256,8 @@ private fun FeedList(
     onOpenMessage: (String) -> Unit,
     onDig: (Message) -> Unit,
     onDelete: (Message) -> Unit,
+    onReport: (Message) -> Unit,
+    onFetchMetadata: (Message) -> Unit,
 ) {
     val listState = rememberLazyListState()
     // Trigger load-more when the last item scrolls into view.
@@ -207,6 +281,8 @@ private fun FeedList(
                 onClick = { onOpenMessage(message.id) },
                 onDig = { onDig(message) },
                 onDelete = { onDelete(message) },
+                onReport = { onReport(message) },
+                onOpenLink = { onFetchMetadata(message) },
             )
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         }
@@ -284,13 +360,21 @@ private fun LockedState(message: String?, modifier: Modifier = Modifier) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ComposeSheet(
-    text: String,
-    isPosting: Boolean,
-    canPost: Boolean,
+    state: MessagesFeedUiState,
     onTextChange: (String) -> Unit,
     onDismiss: () -> Unit,
     onPost: () -> Unit,
+    onAttachMedia: (Uri, Boolean) -> Unit,
+    onRemoveAttachment: (PendingAttachment) -> Unit,
+    onScheduleChange: (String?) -> Unit,
 ) {
+    val imagePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent(),
+    ) { uri -> uri?.let { onAttachMedia(it, false) } }
+    val videoPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent(),
+    ) { uri -> uri?.let { onAttachMedia(it, true) } }
+
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier
@@ -298,41 +382,140 @@ private fun ComposeSheet(
                 .imePadding()
                 .padding(horizontal = 20.dp, vertical = 12.dp),
         ) {
-            Text("New message", style = MaterialTheme.typography.titleMedium)
+            Text(
+                text = if (state.isScheduled) "Schedule message" else "New message",
+                style = MaterialTheme.typography.titleMedium,
+            )
             Spacer(Modifier.height(12.dp))
             OutlinedTextField(
-                value = text,
+                value = state.composeText,
                 onValueChange = onTextChange,
                 placeholder = { Text("What's on your mind?") },
-                enabled = !isPosting,
+                enabled = !state.isPosting,
                 minLines = 3,
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag(MessagesFeedTags.COMPOSE_INPUT),
             )
+
+            if (state.hasAttachments) {
+                Spacer(Modifier.height(8.dp))
+                AttachmentRow(state.attachments, onRemoveAttachment)
+            }
+
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                IconButton(
+                    onClick = { imagePicker.launch("image/*") },
+                    enabled = !state.isPosting,
+                    modifier = Modifier.testTag(MessagesFeedTags.COMPOSE_ADD_IMAGE),
+                ) {
+                    Icon(Icons.Filled.Image, contentDescription = "Attach image")
+                }
+                IconButton(
+                    onClick = { videoPicker.launch("video/*") },
+                    enabled = !state.isPosting,
+                    modifier = Modifier.testTag(MessagesFeedTags.COMPOSE_ADD_VIDEO),
+                ) {
+                    Icon(Icons.Filled.Videocam, contentDescription = "Attach video")
+                }
+                ScheduleChip(
+                    scheduledAt = state.scheduledAt,
+                    enabled = !state.isPosting,
+                    onSchedule = onScheduleChange,
+                )
+            }
+
             Spacer(Modifier.height(12.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = onDismiss, enabled = !isPosting) { Text("Cancel") }
+                TextButton(onClick = onDismiss, enabled = !state.isPosting) { Text("Cancel") }
                 Spacer(Modifier.height(8.dp))
                 Button(
                     onClick = onPost,
-                    enabled = canPost,
+                    enabled = state.canPost,
                     modifier = Modifier.testTag(MessagesFeedTags.COMPOSE_SUBMIT),
                 ) {
-                    if (isPosting) {
+                    if (state.isPosting || state.isUploading) {
                         CircularProgressIndicator(
                             modifier = Modifier.height(20.dp),
                             strokeWidth = 2.dp,
                             color = MaterialTheme.colorScheme.onPrimary,
                         )
                     } else {
-                        Text("Post")
+                        Text(if (state.isScheduled) "Schedule" else "Post")
                     }
                 }
             }
             Spacer(Modifier.height(12.dp))
         }
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AttachmentRow(
+    attachments: List<PendingAttachment>,
+    onRemove: (PendingAttachment) -> Unit,
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        attachments.forEach { attachment ->
+            AssistChip(
+                onClick = { onRemove(attachment) },
+                label = {
+                    Text(
+                        text = when {
+                            attachment.isUploading -> "Uploading…"
+                            attachment.isVideo -> "Video"
+                            else -> "Image"
+                        },
+                    )
+                },
+                leadingIcon = {
+                    if (attachment.isUploading) {
+                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(
+                            if (attachment.isVideo) Icons.Filled.Videocam else Icons.Filled.Image,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                },
+                trailingIcon = {
+                    Icon(Icons.Filled.Close, contentDescription = "Remove", modifier = Modifier.size(16.dp))
+                },
+            )
+        }
+    }
+}
+
+/**
+ * Toggle chip for scheduling. To stay device- and dialog-independent (and easily
+ * testable), tapping sets a fixed "1 hour from now" ISO time; tapping again clears
+ * it. A full date/time picker can replace this without touching the ViewModel.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ScheduleChip(
+    scheduledAt: String?,
+    enabled: Boolean,
+    onSchedule: (String?) -> Unit,
+) {
+    AssistChip(
+        onClick = {
+            if (scheduledAt != null) {
+                onSchedule(null)
+            } else {
+                onSchedule(Instant.now().plus(1, ChronoUnit.HOURS).toString())
+            }
+        },
+        enabled = enabled,
+        label = { Text(if (scheduledAt != null) "Scheduled" else "Schedule") },
+        leadingIcon = {
+            Icon(Icons.Filled.Schedule, contentDescription = null, modifier = Modifier.size(16.dp))
+        },
+        modifier = Modifier.testTag(MessagesFeedTags.COMPOSE_SCHEDULE),
+    )
 }
 
 @Preview(showBackground = true)

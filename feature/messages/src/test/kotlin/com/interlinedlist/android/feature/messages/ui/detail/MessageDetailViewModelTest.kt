@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import com.google.common.truth.Truth.assertThat
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
+import com.interlinedlist.android.feature.messages.domain.ReportReason
 import com.interlinedlist.android.feature.messages.ui.FakeMessagesRepository
 import com.interlinedlist.android.feature.messages.ui.sampleMessage
 import kotlinx.coroutines.Dispatchers
@@ -123,5 +124,44 @@ class MessageDetailViewModelTest {
         advanceUntilIdle()
 
         assertThat(repo.lastSetDug).isEqualTo("m1" to true)
+    }
+
+    @Test
+    fun `report opens the dialog and submits via the repository`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            fetchResult = ApiResult.Success(sampleMessage(id = "m1"))
+        }
+        val vm = MessageDetailViewModel(repo, handle("m1"))
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        val reply = sampleMessage(id = "r1", parentId = "m1")
+        vm.openReport(reply)
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.reportTarget?.id).isEqualTo("r1")
+
+        vm.submitReport(ReportReason.SPAM, "")
+        advanceUntilIdle()
+
+        assertThat(repo.lastReport?.messageId).isEqualTo("r1")
+        assertThat(repo.lastReport?.reason).isEqualTo(ReportReason.SPAM)
+        assertThat(vm.uiState.value.reportTarget).isNull()
+    }
+
+    @Test
+    fun `fetchMetadata delegates for the current message`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            fetchResult = ApiResult.Success(sampleMessage(id = "m1"))
+            metadataResult = ApiResult.Success(sampleMessage(id = "m1"))
+        }
+        repo.emitMessage(sampleMessage(id = "m1"))
+        val vm = MessageDetailViewModel(repo, handle("m1"))
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.onFetchMetadata()
+        advanceUntilIdle()
+
+        assertThat(repo.metadataFetchedIds).containsExactly("m1")
     }
 }
