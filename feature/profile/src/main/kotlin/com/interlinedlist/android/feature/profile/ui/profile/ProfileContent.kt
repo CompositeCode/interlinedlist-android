@@ -70,10 +70,12 @@ fun ProfileContent(
     isFollowActionInProgress: Boolean = false,
     onToggleFollow: () -> Unit = {},
 ) {
+    // A content block, not a scroll container: the caller owns scrolling so the
+    // Account hub can scroll this header together with its menu rows (nesting
+    // two verticalScroll containers throws an infinite-height measure error).
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
             .padding(horizontal = 24.dp, vertical = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Top,
