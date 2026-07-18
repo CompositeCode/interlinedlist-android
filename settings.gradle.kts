@@ -35,3 +35,6 @@ include(":core:datastore")
 
 // Feature modules (added per roadmap phase)
 include(":feature:auth")
+include(":feature:lists")
+include(":feature:messages")
+include(":feature:documents")
