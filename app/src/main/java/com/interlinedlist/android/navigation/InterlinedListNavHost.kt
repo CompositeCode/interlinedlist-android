@@ -82,10 +82,13 @@ object Routes {
     fun userProfile(username: String) = "user/$username"
 }
 
-/** The four post-login home tabs shown in the bottom navigation bar. */
+/**
+ * The four post-login home tabs shown in the bottom navigation bar. Order
+ * mirrors the web app: Messages, Lists, Documents (then Account).
+ */
 private enum class HomeTab(val route: String, val label: String, val icon: ImageVector) {
-    Lists(Routes.LISTS, "Lists", Icons.AutoMirrored.Filled.List),
     Messages(Routes.MESSAGES, "Messages", Icons.Filled.Forum),
+    Lists(Routes.LISTS, "Lists", Icons.AutoMirrored.Filled.List),
     Documents(Routes.DOCUMENTS, "Documents", Icons.Filled.Description),
     Account(Routes.ACCOUNT, "Account", Icons.Filled.AccountCircle),
 }
@@ -162,7 +165,7 @@ private fun MainShell(onLoggedOut: () -> Unit) {
     ) { padding ->
         NavHost(
             navController = tabNav,
-            startDestination = Routes.LISTS,
+            startDestination = Routes.MESSAGES,
             modifier = Modifier.padding(padding),
         ) {
             // ---- Lists ----
