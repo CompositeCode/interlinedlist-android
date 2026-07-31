@@ -4,6 +4,7 @@ import com.interlinedlist.android.feature.documents.data.remote.dto.Collaborator
 import com.interlinedlist.android.feature.documents.data.remote.dto.CollaboratorUsersResponse
 import com.interlinedlist.android.feature.documents.data.remote.dto.CollaboratorsResponse
 import com.interlinedlist.android.feature.documents.data.remote.dto.CreateDocumentRequest
+import com.interlinedlist.android.feature.documents.data.remote.dto.CreateFolderDocumentRequest
 import com.interlinedlist.android.feature.documents.data.remote.dto.CreateFolderRequest
 import com.interlinedlist.android.feature.documents.data.remote.dto.CreateShareLinkRequest
 import com.interlinedlist.android.feature.documents.data.remote.dto.DocumentListResponse
@@ -117,6 +118,13 @@ interface DocumentsApi {
     @GET("api/documents/folders/{id}/documents")
     suspend fun getFolderDocuments(@Path("id") folderId: String): DocumentListResponse
 
+    /** Creates a new document directly inside [folderId]. */
+    @POST("api/documents/folders/{id}/documents")
+    suspend fun createFolderDocument(
+        @Path("id") folderId: String,
+        @Body body: CreateFolderDocumentRequest,
+    ): DocumentResponse
+
     // --- Templates ---------------------------------------------------------
 
     @GET("api/documents/templates")
@@ -124,6 +132,10 @@ interface DocumentsApi {
 
     @POST("api/documents/from-template")
     suspend fun createFromTemplate(@Body body: FromTemplateRequest): DocumentResponse
+
+    /** Seeds the built-in default template documents for the current user. */
+    @POST("api/documents/templates/seed-defaults")
+    suspend fun seedDefaultTemplates()
 
     // --- Sharing -----------------------------------------------------------
 

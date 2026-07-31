@@ -19,6 +19,7 @@ import com.interlinedlist.android.feature.documents.data.mapper.toSharedDocument
 import com.interlinedlist.android.feature.documents.data.mapper.toTemplate
 import com.interlinedlist.android.feature.documents.data.remote.DocumentsApi
 import com.interlinedlist.android.feature.documents.data.remote.dto.CreateDocumentRequest
+import com.interlinedlist.android.feature.documents.data.remote.dto.CreateFolderDocumentRequest
 import com.interlinedlist.android.feature.documents.data.remote.dto.CreateFolderRequest
 import com.interlinedlist.android.feature.documents.data.remote.dto.CreateShareLinkRequest
 import com.interlinedlist.android.feature.documents.data.remote.dto.FromTemplateRequest
@@ -160,6 +161,34 @@ class DefaultDocumentsRepository @Inject constructor(
                     // Best-effort move so the server record matches the cache.
                     safeApiCall(json) { api.updateDocument(domain.id, UpdateDocumentRequest(folderId = folderId)) }
                 }
+                ApiResult.Success(domain)
+            }
+            is ApiResult.Failure -> result
+        }
+    }
+
+    override suspend fun createDocumentInFolder(
+        folderId: String,
+        title: String,
+        content: String,
+        isPublic: Boolean,
+    ): ApiResult<Document> = withContext(dispatchers.io) {
+        val result = safeApiCall(json) {
+            api.createFolderDocument(
+                folderId,
+                CreateFolderDocumentRequest(title = title, content = content, isPublic = isPublic),
+            ).documentOrSelf
+        }
+        when (result) {
+            is ApiResult.Success -> {
+                val dto = result.data
+                    ?: return@withContext ApiResult.Failure(
+                        AppError.Unknown("Document create returned no body"),
+                    )
+                // The endpoint files the doc in the folder; ensure the cached row agrees
+                // even if the response omitted (or differed on) the folderId.
+                val domain = dto.toDomain().copy(folderId = folderId)
+                documentDao.upsert(domain.toEntity(sortOrder = documentDao.maxSortOrder() + 1))
                 ApiResult.Success(domain)
             }
             is ApiResult.Failure -> result
@@ -311,6 +340,15 @@ class DefaultDocumentsRepository @Inject constructor(
         withContext(dispatchers.io) {
             safeApiCall(json) { api.getTemplates() }
                 .map { response -> response.documentsOrEmpty.map { it.toTemplate() } }
+        }
+
+    override suspend fun seedDefaultTemplates(): ApiResult<List<DocumentTemplate>> =
+        withContext(dispatchers.io) {
+            when (val seed = safeApiCall(json) { api.seedDefaultTemplates() }) {
+                // Re-fetch so the surface shows the freshly seeded templates.
+                is ApiResult.Success -> getTemplates()
+                is ApiResult.Failure -> seed
+            }
         }
 
     override suspend fun createFromTemplate(

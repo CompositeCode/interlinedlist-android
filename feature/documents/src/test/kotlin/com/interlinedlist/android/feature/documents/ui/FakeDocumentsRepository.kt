@@ -44,6 +44,7 @@ class FakeDocumentsRepository : DocumentsRepository {
     var moveFolderResult: ApiResult<DocumentFolder>? = null
     var deleteFolderResult: ApiResult<Unit> = ApiResult.Success(Unit)
     var templatesResult: ApiResult<List<DocumentTemplate>> = ApiResult.Success(emptyList())
+    var seedTemplatesResult: ApiResult<List<DocumentTemplate>>? = null
     var fromTemplateResult: ApiResult<Document>? = null
     var searchResult: ApiResult<List<Document>> = ApiResult.Success(emptyList())
 
@@ -79,7 +80,9 @@ class FakeDocumentsRepository : DocumentsRepository {
     data class RoleChange(val documentId: String, val userId: String, val role: CollaboratorRole)
 
     var refreshTreeCount = 0
+    var seedTemplatesCount = 0
     var lastCreate: Create? = null
+    var lastCreateInFolder: Create? = null
     var lastUpdate: Update? = null
     var lastMove: Move? = null
     var lastDeletedDocId: String? = null
@@ -132,6 +135,16 @@ class FakeDocumentsRepository : DocumentsRepository {
         folderId: String?,
     ): ApiResult<Document> {
         lastCreate = Create(title, content, isPublic, folderId)
+        return createResult ?: ApiResult.Failure(AppError.Unknown("not set"))
+    }
+
+    override suspend fun createDocumentInFolder(
+        folderId: String,
+        title: String,
+        content: String,
+        isPublic: Boolean,
+    ): ApiResult<Document> {
+        lastCreateInFolder = Create(title, content, isPublic, folderId)
         return createResult ?: ApiResult.Failure(AppError.Unknown("not set"))
     }
 
@@ -194,6 +207,11 @@ class FakeDocumentsRepository : DocumentsRepository {
     }
 
     override suspend fun getTemplates(): ApiResult<List<DocumentTemplate>> = templatesResult
+
+    override suspend fun seedDefaultTemplates(): ApiResult<List<DocumentTemplate>> {
+        seedTemplatesCount++
+        return seedTemplatesResult ?: templatesResult
+    }
 
     override suspend fun createFromTemplate(templateId: String, targetFolderId: String?): ApiResult<Document> =
         fromTemplateResult ?: ApiResult.Failure(AppError.Unknown("not set"))

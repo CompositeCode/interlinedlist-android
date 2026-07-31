@@ -100,7 +100,7 @@ class DocumentsBrowserViewModelTest {
     }
 
     @Test
-    fun `create document uses the current folder and invokes onCreated with the new id`() =
+    fun `create document in a folder uses the create-in-folder endpoint and opens the new doc`() =
         runTest(dispatcher) {
             repo.createResult = ApiResult.Success(testDocument("new-id", title = "Untitled", folderId = "f1"))
 
@@ -112,8 +112,26 @@ class DocumentsBrowserViewModelTest {
             advanceUntilIdle()
 
             assertThat(createdId).isEqualTo("new-id")
-            assertThat(repo.lastCreate?.folderId).isEqualTo("f1")
+            // Routed through the dedicated create-in-folder call (not the plain create).
+            assertThat(repo.lastCreateInFolder?.folderId).isEqualTo("f1")
+            assertThat(repo.lastCreate).isNull()
         }
+
+    @Test
+    fun `create document at the root uses the plain create endpoint`() = runTest(dispatcher) {
+        repo.createResult = ApiResult.Success(testDocument("root-doc", title = "Untitled"))
+
+        val vm = rootViewModel()
+        advanceUntilIdle()
+
+        var createdId: String? = null
+        vm.createDocument(title = "Untitled") { createdId = it }
+        advanceUntilIdle()
+
+        assertThat(createdId).isEqualTo("root-doc")
+        assertThat(repo.lastCreate?.folderId).isNull()
+        assertThat(repo.lastCreateInFolder).isNull()
+    }
 
     @Test
     fun `move document delegates to the repository with the target folder`() = runTest(dispatcher) {

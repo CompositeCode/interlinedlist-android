@@ -120,16 +120,29 @@ class DocumentsBrowserViewModel @Inject constructor(
 
     // --- Document actions --------------------------------------------------
 
-    /** Creates a document in this folder; invokes [onCreated] with its id to open it. */
+    /**
+     * Creates a document in this folder; invokes [onCreated] with its id to open it.
+     * Inside a folder this hits the dedicated "create in folder" endpoint (a single
+     * call that files the doc directly); at the root it uses the plain create.
+     */
     fun createDocument(title: String, onCreated: (String) -> Unit) {
         val trimmed = title.trim().ifBlank { "Untitled" }
         viewModelScope.launch {
-            val result = repository.createDocument(
-                title = trimmed,
-                content = "",
-                isPublic = false,
-                folderId = folderId,
-            )
+            val result = if (folderId != null) {
+                repository.createDocumentInFolder(
+                    folderId = folderId,
+                    title = trimmed,
+                    content = "",
+                    isPublic = false,
+                )
+            } else {
+                repository.createDocument(
+                    title = trimmed,
+                    content = "",
+                    isPublic = false,
+                    folderId = null,
+                )
+            }
             when (result) {
                 is ApiResult.Success -> onCreated(result.data.id)
                 is ApiResult.Failure -> showError(result.error.toUserMessage())

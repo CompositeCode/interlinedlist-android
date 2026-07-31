@@ -59,6 +59,18 @@ interface DocumentsRepository {
         folderId: String?,
     ): ApiResult<Document>
 
+    /**
+     * Creates a document directly inside [folderId] via
+     * `POST /api/documents/folders/{id}/documents` (a single call, no follow-up move),
+     * then caches it so the folder listing updates immediately.
+     */
+    suspend fun createDocumentInFolder(
+        folderId: String,
+        title: String,
+        content: String,
+        isPublic: Boolean,
+    ): ApiResult<Document>
+
     suspend fun updateDocument(
         id: String,
         title: String,
@@ -109,6 +121,13 @@ interface DocumentsRepository {
     // --- Templates & search ------------------------------------------------
 
     suspend fun getTemplates(): ApiResult<List<DocumentTemplate>>
+
+    /**
+     * Seeds the built-in default template documents for the user via
+     * `POST /api/documents/templates/seed-defaults`, then returns the refreshed
+     * template list so the surface can render the newly created templates.
+     */
+    suspend fun seedDefaultTemplates(): ApiResult<List<DocumentTemplate>>
 
     suspend fun createFromTemplate(
         templateId: String,
