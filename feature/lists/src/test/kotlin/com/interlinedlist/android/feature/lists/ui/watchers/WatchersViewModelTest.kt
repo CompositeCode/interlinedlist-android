@@ -5,6 +5,7 @@ import app.cash.turbine.test
 import com.google.common.truth.Truth.assertThat
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.feature.lists.FakeListsRepository
+import com.interlinedlist.android.feature.lists.domain.Contributor
 import com.interlinedlist.android.feature.lists.domain.Watcher
 import com.interlinedlist.android.feature.lists.domain.WatcherCandidate
 import com.interlinedlist.android.feature.lists.domain.WatcherRole
@@ -50,6 +51,21 @@ class WatchersViewModelTest {
             assertThat(loaded.watchers.map { it.userId }).containsExactly("1", "2").inOrder()
             assertThat(loaded.isWatching).isTrue()
         }
+    }
+
+    @Test
+    fun `loads contributors alongside watchers on init`() = runTest(dispatcher) {
+        val repo = FakeListsRepository().apply {
+            watchersResult = ApiResult.Success(listOf(watcher("1")))
+            contributorsResult = ApiResult.Success(
+                listOf(Contributor("u1", "ada", "Ada", null, addedCount = 5, editedCount = 2, score = 7)),
+            )
+        }
+        val vm = viewModel(repo)
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.contributors.map { it.userId }).containsExactly("u1")
+        assertThat(vm.uiState.value.contributors.single().addedCount).isEqualTo(5)
     }
 
     @Test

@@ -112,6 +112,68 @@ class ListDetailViewModelTest {
     }
 
     @Test
+    fun `editMetadata optimistically updates the summary then confirms from the server`() = runTest(dispatcher) {
+        val repo = FakeListsRepository().apply {
+            detailResult = ApiResult.Success(detail(emptyList()))
+            updateListResult = ApiResult.Success(
+                ListSummary("L1", "Reading v2", "Updated", 0, null, isPublic = true, updatedAt = null),
+            )
+        }
+        val vm = viewModel(repo)
+        advanceUntilIdle()
+
+        var done = false
+        vm.editMetadata(title = "Reading v2", description = "Updated", isPublic = true) { done = true }
+        advanceUntilIdle()
+
+        assertThat(done).isTrue()
+        assertThat(repo.updateListCount).isEqualTo(1)
+        val state = vm.uiState.value
+        assertThat(state.summary?.title).isEqualTo("Reading v2")
+        assertThat(state.summary?.description).isEqualTo("Updated")
+        assertThat(state.summary?.isPublic).isTrue()
+        assertThat(state.isSaving).isFalse()
+        assertThat(state.isEditingMetadata).isFalse()
+    }
+
+    @Test
+    fun `editMetadata rolls back the summary and surfaces the error on failure`() = runTest(dispatcher) {
+        val repo = FakeListsRepository().apply {
+            detailResult = ApiResult.Success(detail(emptyList()))
+            updateListResult = FakeListsRepository.subscriptionFailure()
+        }
+        val vm = viewModel(repo)
+        advanceUntilIdle()
+        val original = vm.uiState.value.summary
+
+        vm.editMetadata(title = "Broken", description = "x", isPublic = true)
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        // Rolled back to the pre-edit summary.
+        assertThat(state.summary).isEqualTo(original)
+        assertThat(state.summary?.title).isEqualTo("Reading")
+        assertThat(state.summary?.isPublic).isFalse()
+        assertThat(state.errorMessage).isNotNull()
+        assertThat(state.isSaving).isFalse()
+    }
+
+    @Test
+    fun `loadRow merges the freshest server copy into state`() = runTest(dispatcher) {
+        val repo = FakeListsRepository().apply {
+            detailResult = ApiResult.Success(detail(listOf(ListRow("r1", mapOf("title" to "Stale")))))
+            getRowResult = ApiResult.Success(ListRow("r1", mapOf("title" to "Fresh")))
+        }
+        val vm = viewModel(repo)
+        advanceUntilIdle()
+
+        vm.loadRow("r1")
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.rows.single().valueFor("title")).isEqualTo("Fresh")
+    }
+
+    @Test
     fun `deleteList flags deleted and invokes callback`() = runTest(dispatcher) {
         val repo = FakeListsRepository().apply { detailResult = ApiResult.Success(detail(emptyList())) }
         val vm = viewModel(repo)

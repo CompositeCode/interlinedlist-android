@@ -30,6 +30,7 @@ data class ListDetailUiState(
     val deleted: Boolean = false,
     val isRefreshing: Boolean = false,
     val refreshMessage: String? = null,
+    val isEditingMetadata: Boolean = false,
 ) {
     val title: String get() = summary?.title.orEmpty()
     val isEmpty: Boolean get() = rows.isEmpty() && !isLoading && errorMessage == null
@@ -113,6 +114,23 @@ class ListDetailViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Fetches the freshest copy of a single row from the server and merges it into
+     * state, so a row-detail/edit view always seeds from current server data rather
+     * than a possibly-stale cached page. Failures are silent — the cached row still
+     * shows and edits still work.
+     */
+    fun loadRow(rowId: String) {
+        viewModelScope.launch {
+            when (val result = repository.getRow(listId, rowId)) {
+                is ApiResult.Success -> _uiState.update { state ->
+                    state.copy(rows = state.rows.map { if (it.id == rowId) result.data else it })
+                }
+                is ApiResult.Failure -> Unit
+            }
+        }
+    }
+
     fun deleteRow(rowId: String) {
         viewModelScope.launch {
             when (val result = repository.deleteRow(listId, rowId)) {
@@ -171,6 +189,50 @@ class ListDetailViewModel @Inject constructor(
     }
 
     fun clearRefreshMessage() = _uiState.update { it.copy(refreshMessage = null) }
+
+    /**
+     * Renames / re-describes / toggles the visibility of the list. The summary is
+     * updated optimistically so the change shows instantly; a failure rolls it back
+     * to the previous summary and surfaces the error.
+     */
+    fun editMetadata(
+        title: String,
+        description: String?,
+        isPublic: Boolean,
+        onDone: () -> Unit = {},
+    ) {
+        val previous = _uiState.value.summary ?: return
+        val trimmedTitle = title.trim().ifBlank { previous.title }
+        val trimmedDescription = description?.trim()?.ifBlank { null }
+        val optimistic = previous.copy(
+            title = trimmedTitle,
+            description = trimmedDescription,
+            isPublic = isPublic,
+        )
+        // Optimistic: reflect the edit immediately.
+        _uiState.update { it.copy(summary = optimistic, isSaving = true) }
+        viewModelScope.launch {
+            when (val result = repository.updateList(
+                id = listId,
+                title = trimmedTitle,
+                description = trimmedDescription,
+                isPublic = isPublic,
+            )) {
+                is ApiResult.Success -> {
+                    _uiState.update { it.copy(summary = result.data, isSaving = false, isEditingMetadata = false) }
+                    onDone()
+                }
+                is ApiResult.Failure -> _uiState.update {
+                    // Rollback to the pre-edit summary.
+                    it.copy(summary = previous, isSaving = false, errorMessage = result.error.toUserMessage())
+                }
+            }
+        }
+    }
+
+    fun startEditingMetadata() = _uiState.update { it.copy(isEditingMetadata = true) }
+
+    fun stopEditingMetadata() = _uiState.update { it.copy(isEditingMetadata = false) }
 
     fun deleteList(onDeleted: () -> Unit = {}) {
         viewModelScope.launch {

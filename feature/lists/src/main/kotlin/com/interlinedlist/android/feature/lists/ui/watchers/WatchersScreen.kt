@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.interlinedlist.android.core.designsystem.theme.InterlinedListTheme
+import com.interlinedlist.android.feature.lists.domain.Contributor
 import com.interlinedlist.android.feature.lists.domain.Watcher
 import com.interlinedlist.android.feature.lists.domain.WatcherCandidate
 import com.interlinedlist.android.feature.lists.domain.WatcherRole
@@ -51,9 +52,11 @@ object WatchersTestTags {
     const val EMPTY = "watchersEmpty"
     const val PROGRESS = "watchersProgress"
     const val ERROR = "watchersError"
+    const val CONTRIBUTORS = "watchersContributors"
     fun watcher(userId: String) = "watcher_$userId"
     fun remove(userId: String) = "watcherRemove_$userId"
     fun candidate(userId: String) = "watcherCandidate_$userId"
+    fun contributor(userId: String) = "contributor_$userId"
 }
 
 /**
@@ -161,6 +164,21 @@ fun WatchersScreen(
                             )
                         }
                     }
+
+                    if (state.contributors.isNotEmpty()) {
+                        item {
+                            Text(
+                                text = "Contributors",
+                                style = MaterialTheme.typography.labelLarge,
+                                modifier = Modifier
+                                    .padding(top = 8.dp)
+                                    .testTag(WatchersTestTags.CONTRIBUTORS),
+                            )
+                        }
+                        items(state.contributors, key = { "contributor-${it.userId}" }) { contributor ->
+                            ContributorRow(contributor = contributor)
+                        }
+                    }
                 }
             }
         }
@@ -241,6 +259,41 @@ private fun CandidateRow(candidate: WatcherCandidate, onAdd: () -> Unit) {
                 onClick = onAdd,
                 label = { Text("Add") },
                 leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ContributorRow(contributor: Contributor) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(WatchersTestTags.contributor(contributor.userId)),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = contributor.label,
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = "@${contributor.username}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(
+                text = "${contributor.addedCount} added · ${contributor.editedCount} edited",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
