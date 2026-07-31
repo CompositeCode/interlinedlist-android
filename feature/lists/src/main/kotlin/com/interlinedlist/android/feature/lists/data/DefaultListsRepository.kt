@@ -10,6 +10,7 @@ import com.interlinedlist.android.feature.lists.data.remote.dto.AddWatcherReques
 import com.interlinedlist.android.feature.lists.data.remote.dto.CreateConnectionRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.CreateFolderRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.CreateListRequest
+import com.interlinedlist.android.feature.lists.data.remote.dto.CreateShareLinkRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.ListDto
 import com.interlinedlist.android.feature.lists.data.remote.dto.RowDto
 import com.interlinedlist.android.feature.lists.data.remote.dto.RowWriteRequest
@@ -23,6 +24,10 @@ import com.interlinedlist.android.feature.lists.domain.ListSchema
 import com.interlinedlist.android.feature.lists.domain.ListSummary
 import com.interlinedlist.android.feature.lists.domain.Paged
 import com.interlinedlist.android.feature.lists.domain.RefreshResult
+import com.interlinedlist.android.feature.lists.domain.ShareLink
+import com.interlinedlist.android.feature.lists.domain.ShareRole
+import com.interlinedlist.android.feature.lists.domain.SharedList
+import com.interlinedlist.android.feature.lists.domain.SharedListResolution
 import com.interlinedlist.android.feature.lists.domain.Watcher
 import com.interlinedlist.android.feature.lists.domain.WatcherCandidate
 import com.interlinedlist.android.feature.lists.domain.WatcherRole
@@ -287,6 +292,52 @@ class DefaultListsRepository @Inject constructor(
     override suspend fun deleteConnection(id: String): ApiResult<Unit> =
         withContext(dispatchers.io) {
             safeApiCall(json) { api.deleteConnection(id) }.map { }
+        }
+
+    override suspend fun getShareLinks(listId: String): ApiResult<List<ShareLink>> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.getShareLinks(listId) }
+                .map { response -> response.items.map(ShareMapper::linkFromDto) }
+        }
+
+    override suspend fun createShareLink(listId: String, role: ShareRole): ApiResult<ShareLink> =
+        withContext(dispatchers.io) {
+            when (val result = safeApiCall(json) {
+                api.createShareLink(listId, CreateShareLinkRequest(role = role.apiValue))
+            }) {
+                is ApiResult.Success -> {
+                    val dto = result.data.linkOrSelf
+                        ?: return@withContext ApiResult.Failure(
+                            com.interlinedlist.android.core.common.result.AppError.Unknown(
+                                "Share link create returned no token",
+                            ),
+                        )
+                    ApiResult.Success(ShareMapper.linkFromDto(dto))
+                }
+                is ApiResult.Failure -> result
+            }
+        }
+
+    override suspend fun revokeShareLink(listId: String, token: String): ApiResult<Unit> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.revokeShareLink(listId, token) }.map { }
+        }
+
+    override suspend fun getSharedWithMe(): ApiResult<List<SharedList>> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.getWatchingLists() }
+                .map { response -> response.items.map(ShareMapper::sharedFromDto) }
+        }
+
+    override suspend fun resolveSharedList(token: String): ApiResult<SharedListResolution> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.resolveSharedList(token) }
+                .map { response -> ShareMapper.resolutionFromResponse(token, response) }
+        }
+
+    override suspend fun claimSharedList(token: String): ApiResult<Unit> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.claimSharedList(token) }.map { }
         }
 
     /** Blank form fields are dropped so we don't overwrite server values with empty strings. */

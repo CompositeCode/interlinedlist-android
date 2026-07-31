@@ -6,6 +6,9 @@ import com.interlinedlist.android.feature.documents.domain.DocumentFolder
 import com.interlinedlist.android.feature.documents.domain.DocumentTemplate
 import com.interlinedlist.android.feature.documents.domain.FolderContents
 import com.interlinedlist.android.feature.documents.domain.FolderSummary
+import com.interlinedlist.android.feature.documents.domain.ShareLink
+import com.interlinedlist.android.feature.documents.domain.ShareRole
+import com.interlinedlist.android.feature.documents.domain.SharedDocument
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -88,4 +91,21 @@ interface DocumentsRepository {
 
     /** One-shot search against the API (not cached). */
     suspend fun searchDocuments(query: String): ApiResult<List<Document>>
+
+    // --- Sharing -----------------------------------------------------------
+
+    /** Existing public share links for a document. */
+    suspend fun getShareLinks(documentId: String): ApiResult<List<ShareLink>>
+
+    /** Creates a share link granting [role]; returns the created link. */
+    suspend fun createShareLink(documentId: String, role: ShareRole): ApiResult<ShareLink>
+
+    /** Revokes a share link by its token. */
+    suspend fun revokeShareLink(documentId: String, token: String): ApiResult<Unit>
+
+    /** Resolves a public `documents/shared/{token}` link to a read-only preview. */
+    suspend fun resolveSharedDocument(token: String): ApiResult<SharedDocument>
+
+    /** Claims edit/admin access to a shared document via its token. */
+    suspend fun claimSharedDocument(token: String): ApiResult<Unit>
 }

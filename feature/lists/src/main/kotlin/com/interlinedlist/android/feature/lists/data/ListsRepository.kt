@@ -9,6 +9,10 @@ import com.interlinedlist.android.feature.lists.domain.ListSchema
 import com.interlinedlist.android.feature.lists.domain.ListSummary
 import com.interlinedlist.android.feature.lists.domain.Paged
 import com.interlinedlist.android.feature.lists.domain.RefreshResult
+import com.interlinedlist.android.feature.lists.domain.ShareLink
+import com.interlinedlist.android.feature.lists.domain.ShareRole
+import com.interlinedlist.android.feature.lists.domain.SharedList
+import com.interlinedlist.android.feature.lists.domain.SharedListResolution
 import com.interlinedlist.android.feature.lists.domain.Watcher
 import com.interlinedlist.android.feature.lists.domain.WatcherCandidate
 import com.interlinedlist.android.feature.lists.domain.WatcherRole
@@ -92,6 +96,26 @@ interface ListsRepository {
 
     /** Removes a connection between lists. */
     suspend fun deleteConnection(id: String): ApiResult<Unit>
+
+    // --- Sharing -----------------------------------------------------------
+
+    /** Existing public share links for a list. */
+    suspend fun getShareLinks(listId: String): ApiResult<List<ShareLink>>
+
+    /** Creates a share link granting [role]; returns the created link. */
+    suspend fun createShareLink(listId: String, role: ShareRole): ApiResult<ShareLink>
+
+    /** Revokes a share link by its token. */
+    suspend fun revokeShareLink(listId: String, token: String): ApiResult<Unit>
+
+    /** Lists shared with the current user by other owners, with the granted role. */
+    suspend fun getSharedWithMe(): ApiResult<List<SharedList>>
+
+    /** Resolves a public `…/shared/{token}` link to a read-only preview. */
+    suspend fun resolveSharedList(token: String): ApiResult<SharedListResolution>
+
+    /** Claims edit/admin access to a shared list via its token. */
+    suspend fun claimSharedList(token: String): ApiResult<Unit>
 
     companion object {
         const val DEFAULT_PAGE_SIZE = 20

@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -48,6 +49,7 @@ object DocumentEditorTestTags {
     const val SAVE = "editorSave"
     const val DELETE = "editorDelete"
     const val UPLOAD_IMAGE = "editorUploadImage"
+    const val SHARE = "editorShare"
     const val TOGGLE_PREVIEW = "editorTogglePreview"
     const val PROGRESS = "editorProgress"
     const val ERROR = "editorError"
@@ -63,6 +65,7 @@ fun DocumentEditorRoute(
     onBack: () -> Unit,
     onDeleted: () -> Unit,
     modifier: Modifier = Modifier,
+    onOpenShare: () -> Unit = {},
     viewModel: DocumentEditorViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -98,6 +101,7 @@ fun DocumentEditorRoute(
             )
         },
         onBack = onBack,
+        onOpenShare = onOpenShare,
         modifier = modifier,
     )
 }
@@ -115,6 +119,7 @@ fun DocumentEditorScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     onPickImage: () -> Unit = {},
+    onOpenShare: () -> Unit = {},
 ) {
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -143,6 +148,12 @@ fun DocumentEditorScreen(
                         } else {
                             Icon(Icons.Default.Image, contentDescription = "Insert image")
                         }
+                    }
+                    IconButton(
+                        onClick = onOpenShare,
+                        modifier = Modifier.testTag(DocumentEditorTestTags.SHARE),
+                    ) {
+                        Icon(Icons.Outlined.Share, contentDescription = "Share")
                     }
                     IconButton(
                         onClick = onTogglePreview,

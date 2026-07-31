@@ -11,6 +11,10 @@ import com.interlinedlist.android.feature.lists.domain.ListSchema
 import com.interlinedlist.android.feature.lists.domain.ListSummary
 import com.interlinedlist.android.feature.lists.domain.Paged
 import com.interlinedlist.android.feature.lists.domain.RefreshResult
+import com.interlinedlist.android.feature.lists.domain.ShareLink
+import com.interlinedlist.android.feature.lists.domain.ShareRole
+import com.interlinedlist.android.feature.lists.domain.SharedList
+import com.interlinedlist.android.feature.lists.domain.SharedListResolution
 import com.interlinedlist.android.feature.lists.domain.Watcher
 import com.interlinedlist.android.feature.lists.domain.WatcherCandidate
 import com.interlinedlist.android.feature.lists.domain.WatcherRole
@@ -51,14 +55,29 @@ class FakeListsRepository : ListsRepository {
     var createConnectionResult: ApiResult<ListConnection>? = null
     var deleteConnectionResult: ApiResult<Unit> = ApiResult.Success(Unit)
 
+    // Sharing.
+    var shareLinksResult: ApiResult<List<ShareLink>> = ApiResult.Success(emptyList())
+    var createShareLinkResult: ApiResult<ShareLink>? = null
+    var revokeShareLinkResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var sharedWithMeResult: ApiResult<List<SharedList>> = ApiResult.Success(emptyList())
+    var resolveSharedResult: ApiResult<SharedListResolution>? = null
+    var claimSharedResult: ApiResult<Unit> = ApiResult.Success(Unit)
+
     var refreshCount = 0
     var loadMoreCount = 0
     var updateSchemaCount = 0
     var refreshGithubCount = 0
     var addWatcherCount = 0
     var removeWatcherCount = 0
+    var createShareLinkCount = 0
+    var revokeShareLinkCount = 0
+    var claimSharedCount = 0
     var lastSchemaUpdate: ListSchema? = null
     var lastWatcherSearch: String? = null
+    var lastCreatedShareRole: ShareRole? = null
+    var lastRevokedToken: String? = null
+    var lastResolvedToken: String? = null
+    var lastClaimedToken: String? = null
 
     override fun observeLists(): Flow<List<ListSummary>> = cache
 
@@ -158,6 +177,37 @@ class FakeListsRepository : ListsRepository {
         ?: ApiResult.Success(ListConnection("c-new", fromListId, toListId, label, fromListId, toListId))
 
     override suspend fun deleteConnection(id: String): ApiResult<Unit> = deleteConnectionResult
+
+    override suspend fun getShareLinks(listId: String): ApiResult<List<ShareLink>> = shareLinksResult
+
+    override suspend fun createShareLink(listId: String, role: ShareRole): ApiResult<ShareLink> {
+        createShareLinkCount++
+        lastCreatedShareRole = role
+        return createShareLinkResult ?: ApiResult.Success(
+            ShareLink("link-new", "token-new", role, null, null, null),
+        )
+    }
+
+    override suspend fun revokeShareLink(listId: String, token: String): ApiResult<Unit> {
+        revokeShareLinkCount++
+        lastRevokedToken = token
+        return revokeShareLinkResult
+    }
+
+    override suspend fun getSharedWithMe(): ApiResult<List<SharedList>> = sharedWithMeResult
+
+    override suspend fun resolveSharedList(token: String): ApiResult<SharedListResolution> {
+        lastResolvedToken = token
+        return resolveSharedResult ?: ApiResult.Success(
+            SharedListResolution(token, "L", "Untitled", null, null, ShareRole.VIEW, emptyList()),
+        )
+    }
+
+    override suspend fun claimSharedList(token: String): ApiResult<Unit> {
+        claimSharedCount++
+        lastClaimedToken = token
+        return claimSharedResult
+    }
 
     companion object {
         fun subscriptionFailure(): ApiResult.Failure =

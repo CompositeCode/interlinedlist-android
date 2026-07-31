@@ -71,6 +71,7 @@ object ListDetailTestTags {
     const val OVERFLOW = "listDetailOverflow"
     const val EDIT_SCHEMA = "listDetailEditSchema"
     const val WATCHERS = "listDetailWatchers"
+    const val SHARE = "listDetailShare"
     fun row(id: String) = "listDetailRow_$id"
 }
 
@@ -88,6 +89,7 @@ fun ListDetailRoute(
     onEditSchema: () -> Unit,
     onOpenWatchers: () -> Unit,
     modifier: Modifier = Modifier,
+    onOpenShare: () -> Unit = {},
     viewModel: ListDetailViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -114,6 +116,7 @@ fun ListDetailRoute(
         onRefresh = viewModel::refreshFromGithub,
         onEditSchema = onEditSchema,
         onOpenWatchers = onOpenWatchers,
+        onOpenShare = onOpenShare,
         snackbarHostState = snackbarHostState,
         modifier = modifier,
     )
@@ -156,6 +159,7 @@ fun ListDetailScreen(
     onRefresh: () -> Unit = {},
     onEditSchema: () -> Unit = {},
     onOpenWatchers: () -> Unit = {},
+    onOpenShare: () -> Unit = {},
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
 ) {
     var menuOpen by remember { mutableStateOf(false) }
@@ -197,6 +201,11 @@ fun ListDetailScreen(
                             text = { Text("Watchers") },
                             onClick = { menuOpen = false; onOpenWatchers() },
                             modifier = Modifier.testTag(ListDetailTestTags.WATCHERS),
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Share") },
+                            onClick = { menuOpen = false; onOpenShare() },
+                            modifier = Modifier.testTag(ListDetailTestTags.SHARE),
                         )
                         DropdownMenuItem(
                             text = { Text("Delete list") },

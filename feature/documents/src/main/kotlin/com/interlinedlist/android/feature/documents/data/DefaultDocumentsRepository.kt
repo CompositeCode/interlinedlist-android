@@ -10,10 +10,12 @@ import com.interlinedlist.android.feature.documents.data.local.FolderDao
 import com.interlinedlist.android.feature.documents.data.local.toDomain
 import com.interlinedlist.android.feature.documents.data.local.toEntity
 import com.interlinedlist.android.feature.documents.data.mapper.toDomain
+import com.interlinedlist.android.feature.documents.data.mapper.toSharedDocument
 import com.interlinedlist.android.feature.documents.data.mapper.toTemplate
 import com.interlinedlist.android.feature.documents.data.remote.DocumentsApi
 import com.interlinedlist.android.feature.documents.data.remote.dto.CreateDocumentRequest
 import com.interlinedlist.android.feature.documents.data.remote.dto.CreateFolderRequest
+import com.interlinedlist.android.feature.documents.data.remote.dto.CreateShareLinkRequest
 import com.interlinedlist.android.feature.documents.data.remote.dto.FromTemplateRequest
 import com.interlinedlist.android.feature.documents.data.remote.dto.UpdateDocumentRequest
 import com.interlinedlist.android.feature.documents.data.remote.dto.UpdateFolderRequest
@@ -24,6 +26,9 @@ import com.interlinedlist.android.feature.documents.domain.FolderContents
 import com.interlinedlist.android.feature.documents.domain.FolderNode
 import com.interlinedlist.android.feature.documents.domain.FolderSummary
 import com.interlinedlist.android.feature.documents.domain.FolderTree
+import com.interlinedlist.android.feature.documents.domain.ShareLink
+import com.interlinedlist.android.feature.documents.domain.ShareRole
+import com.interlinedlist.android.feature.documents.domain.SharedDocument
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
@@ -316,6 +321,44 @@ class DefaultDocumentsRepository @Inject constructor(
         withContext(dispatchers.io) {
             safeApiCall(json) { api.searchDocuments(query) }
                 .map { response -> response.documentsOrEmpty.map { it.toDomain() } }
+        }
+
+    override suspend fun getShareLinks(documentId: String): ApiResult<List<ShareLink>> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.getShareLinks(documentId) }
+                .map { response -> response.items.map { it.toDomain() } }
+        }
+
+    override suspend fun createShareLink(documentId: String, role: ShareRole): ApiResult<ShareLink> =
+        withContext(dispatchers.io) {
+            when (val result = safeApiCall(json) {
+                api.createShareLink(documentId, CreateShareLinkRequest(role = role.apiValue))
+            }) {
+                is ApiResult.Success -> {
+                    val dto = result.data.linkOrSelf
+                        ?: return@withContext ApiResult.Failure(
+                            AppError.Unknown("Share link create returned no token"),
+                        )
+                    ApiResult.Success(dto.toDomain())
+                }
+                is ApiResult.Failure -> result
+            }
+        }
+
+    override suspend fun revokeShareLink(documentId: String, token: String): ApiResult<Unit> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.revokeShareLink(documentId, token) }.map { }
+        }
+
+    override suspend fun resolveSharedDocument(token: String): ApiResult<SharedDocument> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.resolveSharedDocument(token) }
+                .map { response -> response.toSharedDocument(token) }
+        }
+
+    override suspend fun claimSharedDocument(token: String): ApiResult<Unit> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.claimSharedDocument(token) }.map { }
         }
 
     // --- Helpers -----------------------------------------------------------

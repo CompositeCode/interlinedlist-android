@@ -10,6 +10,9 @@ import com.interlinedlist.android.feature.documents.domain.FolderContents
 import com.interlinedlist.android.feature.documents.domain.FolderNode
 import com.interlinedlist.android.feature.documents.domain.FolderSummary
 import com.interlinedlist.android.feature.documents.domain.FolderTree
+import com.interlinedlist.android.feature.documents.domain.ShareLink
+import com.interlinedlist.android.feature.documents.domain.ShareRole
+import com.interlinedlist.android.feature.documents.domain.SharedDocument
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
 
@@ -39,6 +42,13 @@ class FakeDocumentsRepository : DocumentsRepository {
     var fromTemplateResult: ApiResult<Document>? = null
     var searchResult: ApiResult<List<Document>> = ApiResult.Success(emptyList())
 
+    // Sharing.
+    var shareLinksResult: ApiResult<List<ShareLink>> = ApiResult.Success(emptyList())
+    var createShareLinkResult: ApiResult<ShareLink>? = null
+    var revokeShareLinkResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var resolveSharedResult: ApiResult<SharedDocument>? = null
+    var claimSharedResult: ApiResult<Unit> = ApiResult.Success(Unit)
+
     var refreshTreeCount = 0
     var lastCreate: Create? = null
     var lastUpdate: Update? = null
@@ -48,6 +58,13 @@ class FakeDocumentsRepository : DocumentsRepository {
     var lastFolderRename: FolderRename? = null
     var lastDeletedFolderId: String? = null
     var lastSearchQuery: String? = null
+    var createShareLinkCount = 0
+    var revokeShareLinkCount = 0
+    var claimSharedCount = 0
+    var lastCreatedShareRole: ShareRole? = null
+    var lastRevokedToken: String? = null
+    var lastResolvedToken: String? = null
+    var lastClaimedToken: String? = null
 
     data class Create(val title: String, val content: String, val isPublic: Boolean, val folderId: String?)
     data class Update(val id: String, val title: String, val content: String, val isPublic: Boolean, val folderId: String?)
@@ -141,6 +158,35 @@ class FakeDocumentsRepository : DocumentsRepository {
     override suspend fun searchDocuments(query: String): ApiResult<List<Document>> {
         lastSearchQuery = query
         return searchResult
+    }
+
+    override suspend fun getShareLinks(documentId: String): ApiResult<List<ShareLink>> = shareLinksResult
+
+    override suspend fun createShareLink(documentId: String, role: ShareRole): ApiResult<ShareLink> {
+        createShareLinkCount++
+        lastCreatedShareRole = role
+        return createShareLinkResult ?: ApiResult.Success(
+            ShareLink("link-new", "token-new", role, null, null, null),
+        )
+    }
+
+    override suspend fun revokeShareLink(documentId: String, token: String): ApiResult<Unit> {
+        revokeShareLinkCount++
+        lastRevokedToken = token
+        return revokeShareLinkResult
+    }
+
+    override suspend fun resolveSharedDocument(token: String): ApiResult<SharedDocument> {
+        lastResolvedToken = token
+        return resolveSharedResult ?: ApiResult.Success(
+            SharedDocument(token, "D", "Untitled", null, null, ShareRole.VIEW),
+        )
+    }
+
+    override suspend fun claimSharedDocument(token: String): ApiResult<Unit> {
+        claimSharedCount++
+        lastClaimedToken = token
+        return claimSharedResult
     }
 
     private fun flatten(node: FolderNode): List<FolderSummary> = buildList {

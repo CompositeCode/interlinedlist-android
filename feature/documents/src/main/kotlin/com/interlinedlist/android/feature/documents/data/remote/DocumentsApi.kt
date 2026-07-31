@@ -2,11 +2,15 @@ package com.interlinedlist.android.feature.documents.data.remote
 
 import com.interlinedlist.android.feature.documents.data.remote.dto.CreateDocumentRequest
 import com.interlinedlist.android.feature.documents.data.remote.dto.CreateFolderRequest
+import com.interlinedlist.android.feature.documents.data.remote.dto.CreateShareLinkRequest
 import com.interlinedlist.android.feature.documents.data.remote.dto.DocumentListResponse
 import com.interlinedlist.android.feature.documents.data.remote.dto.DocumentResponse
 import com.interlinedlist.android.feature.documents.data.remote.dto.FolderListResponse
 import com.interlinedlist.android.feature.documents.data.remote.dto.FolderResponse
 import com.interlinedlist.android.feature.documents.data.remote.dto.FromTemplateRequest
+import com.interlinedlist.android.feature.documents.data.remote.dto.ShareLinkEnvelope
+import com.interlinedlist.android.feature.documents.data.remote.dto.ShareLinksResponse
+import com.interlinedlist.android.feature.documents.data.remote.dto.SharedDocumentResponse
 import com.interlinedlist.android.feature.documents.data.remote.dto.UpdateDocumentRequest
 import com.interlinedlist.android.feature.documents.data.remote.dto.UpdateFolderRequest
 import okhttp3.MultipartBody
@@ -97,4 +101,32 @@ interface DocumentsApi {
 
     @POST("api/documents/from-template")
     suspend fun createFromTemplate(@Body body: FromTemplateRequest): DocumentResponse
+
+    // --- Sharing -----------------------------------------------------------
+
+    /** Existing public share links for a document. */
+    @GET("api/documents/{id}/share-links")
+    suspend fun getShareLinks(@Path("id") id: String): ShareLinksResponse
+
+    /** Creates a share link granting the requested role (optionally expiring). */
+    @POST("api/documents/{id}/share-links")
+    suspend fun createShareLink(
+        @Path("id") id: String,
+        @Body body: CreateShareLinkRequest,
+    ): ShareLinkEnvelope
+
+    /** Revokes (deletes) a share link by its token. */
+    @DELETE("api/documents/{id}/share-links/{token}")
+    suspend fun revokeShareLink(
+        @Path("id") id: String,
+        @Path("token") token: String,
+    )
+
+    /** Resolves a public share link to a read-only preview of the shared document. */
+    @GET("api/documents/shared/{token}")
+    suspend fun resolveSharedDocument(@Path("token") token: String): SharedDocumentResponse
+
+    /** Claims edit/admin access to a shared document as the logged-in user. */
+    @POST("api/documents/shared/{token}")
+    suspend fun claimSharedDocument(@Path("token") token: String)
 }

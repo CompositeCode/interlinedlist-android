@@ -4,6 +4,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.interlinedlist.android.core.designsystem.theme.InterlinedListTheme
 import com.interlinedlist.android.feature.lists.domain.FieldType
@@ -33,7 +34,7 @@ class ListDetailScreenTest {
         ),
     )
 
-    private fun setScreen(state: ListDetailUiState) {
+    private fun setScreen(state: ListDetailUiState, onOpenShare: () -> Unit = {}) {
         composeRule.setContent {
             InterlinedListTheme {
                 ListDetailScreen(
@@ -43,6 +44,7 @@ class ListDetailScreenTest {
                     onEditRow = {},
                     onDeleteRow = {},
                     onDeleteList = {},
+                    onOpenShare = onOpenShare,
                 )
             }
         }
@@ -80,5 +82,23 @@ class ListDetailScreenTest {
         )
 
         composeRule.onNodeWithTag(ListDetailTestTags.EMPTY).assertIsDisplayed()
+    }
+
+    @Test
+    fun overflowMenu_exposesShare_andInvokesCallback() {
+        var shared = false
+        setScreen(
+            ListDetailUiState(
+                summary = ListSummary("L1", "Reading", null, 1, null, false, null),
+                schema = schema,
+                rows = listOf(ListRow("r1", mapOf("title" to "Dune"))),
+                isLoading = false,
+            ),
+            onOpenShare = { shared = true },
+        )
+
+        composeRule.onNodeWithTag(ListDetailTestTags.OVERFLOW).performClick()
+        composeRule.onNodeWithTag(ListDetailTestTags.SHARE).assertIsDisplayed().performClick()
+        assert(shared)
     }
 }

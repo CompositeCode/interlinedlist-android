@@ -13,10 +13,15 @@ import com.interlinedlist.android.feature.lists.data.remote.dto.ListsResponse
 import com.interlinedlist.android.feature.lists.data.remote.dto.RefreshResultDto
 import com.interlinedlist.android.feature.lists.data.remote.dto.RowEnvelope
 import com.interlinedlist.android.feature.lists.data.remote.dto.RowWriteRequest
+import com.interlinedlist.android.feature.lists.data.remote.dto.CreateShareLinkRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.RowsResponse
 import com.interlinedlist.android.feature.lists.data.remote.dto.SchemaEnvelope
+import com.interlinedlist.android.feature.lists.data.remote.dto.ShareLinkEnvelope
+import com.interlinedlist.android.feature.lists.data.remote.dto.ShareLinksResponse
+import com.interlinedlist.android.feature.lists.data.remote.dto.SharedListResponse
 import com.interlinedlist.android.feature.lists.data.remote.dto.UpdateSchemaRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.UpdateWatcherRoleRequest
+import com.interlinedlist.android.feature.lists.data.remote.dto.WatchingResponse
 import com.interlinedlist.android.feature.lists.data.remote.dto.WatcherUsersResponse
 import com.interlinedlist.android.feature.lists.data.remote.dto.WatchersResponse
 import com.interlinedlist.android.feature.lists.data.remote.dto.WatchingStatusDto
@@ -151,4 +156,36 @@ interface ListsApi {
 
     @POST("api/folders")
     suspend fun createFolder(@Body body: CreateFolderRequest): FolderDto
+
+    // --- Sharing -----------------------------------------------------------
+
+    /** Existing public share links for a list. */
+    @GET("api/lists/{id}/share-links")
+    suspend fun getShareLinks(@Path("id") id: String): ShareLinksResponse
+
+    /** Creates a share link granting the requested role (optionally expiring). */
+    @POST("api/lists/{id}/share-links")
+    suspend fun createShareLink(
+        @Path("id") id: String,
+        @Body body: CreateShareLinkRequest,
+    ): ShareLinkEnvelope
+
+    /** Revokes (deletes) a share link by its token. */
+    @DELETE("api/lists/{id}/share-links/{token}")
+    suspend fun revokeShareLink(
+        @Path("id") id: String,
+        @Path("token") token: String,
+    )
+
+    /** Lists owned by other users that the current user has access to ("Shared with me"). */
+    @GET("api/lists/watching")
+    suspend fun getWatchingLists(): WatchingResponse
+
+    /** Resolves a public share link to a read-only preview of the shared list. */
+    @GET("api/lists/shared/{token}")
+    suspend fun resolveSharedList(@Path("token") token: String): SharedListResponse
+
+    /** Claims edit/admin access to a shared list as the logged-in user. */
+    @POST("api/lists/shared/{token}")
+    suspend fun claimSharedList(@Path("token") token: String)
 }
