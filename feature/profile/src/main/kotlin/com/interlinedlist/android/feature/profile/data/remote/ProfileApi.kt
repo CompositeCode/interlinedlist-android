@@ -2,11 +2,15 @@ package com.interlinedlist.android.feature.profile.data.remote
 
 import com.interlinedlist.android.feature.profile.data.remote.dto.AvatarFromUrlRequest
 import com.interlinedlist.android.feature.profile.data.remote.dto.AvatarResponse
+import com.interlinedlist.android.feature.profile.data.remote.dto.ChangeEmailRequest
+import com.interlinedlist.android.feature.profile.data.remote.dto.DeleteAccountRequest
 import com.interlinedlist.android.feature.profile.data.remote.dto.FollowCountsResponse
 import com.interlinedlist.android.feature.profile.data.remote.dto.FollowListResponse
 import com.interlinedlist.android.feature.profile.data.remote.dto.FollowRequestsResponse
 import com.interlinedlist.android.feature.profile.data.remote.dto.FollowStatusResponse
+import com.interlinedlist.android.feature.profile.data.remote.dto.IdentitiesResponse
 import com.interlinedlist.android.feature.profile.data.remote.dto.ProfileResponse
+import com.interlinedlist.android.feature.profile.data.remote.dto.SessionsResponse
 import com.interlinedlist.android.feature.profile.data.remote.dto.UpdateProfileRequest
 import com.interlinedlist.android.feature.profile.data.remote.dto.UserSearchResponse
 import okhttp3.MultipartBody
@@ -105,4 +109,33 @@ interface ProfileApi {
     /** Removes a follower (only callable by the user being followed). */
     @DELETE("api/follow/{userId}/remove")
     suspend fun removeFollower(@Path("userId") userId: String)
+
+    // --- Account & Security ---
+
+    /** The current user's active login sessions (sync tokens / devices). */
+    @GET("api/user/sessions")
+    suspend fun getSessions(): SessionsResponse
+
+    /** Revokes (signs out) a single session by id. */
+    @DELETE("api/user/sessions/{id}")
+    suspend fun revokeSession(@Path("id") id: String)
+
+    /** The current user's linked social identities. */
+    @GET("api/user/identities")
+    suspend fun getIdentities(): IdentitiesResponse
+
+    /**
+     * Unlinks a social identity. The API keys on the `provider` query parameter
+     * (verified against the OpenAPI spec — it is a query param, not a body).
+     */
+    @DELETE("api/user/identities")
+    suspend fun unlinkIdentity(@Query("provider") provider: String)
+
+    /** Requests an email change; the server emails a verification link to the new address. */
+    @POST("api/user/change-email/request")
+    suspend fun requestEmailChange(@Body body: ChangeEmailRequest)
+
+    /** Deletes the current user's account (requires the username + email to confirm). */
+    @POST("api/user/delete")
+    suspend fun deleteAccount(@Body body: DeleteAccountRequest)
 }

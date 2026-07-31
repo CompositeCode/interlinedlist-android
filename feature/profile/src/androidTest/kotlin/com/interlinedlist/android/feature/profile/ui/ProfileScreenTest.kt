@@ -61,6 +61,9 @@ class ProfileScreenTest {
                     onOpenNotifications = {},
                     onOpenOrganizations = {},
                     onOpenIntegrations = {},
+                    onOpenSessions = {},
+                    onOpenConnectedAccounts = {},
+                    onOpenAccountSettings = {},
                     onSignOut = onSignOut,
                     onRetry = {},
                 )

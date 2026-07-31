@@ -16,9 +16,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Business
+import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.ManageAccounts
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Search
@@ -54,6 +57,9 @@ object AccountMenuTestTags {
     const val INTEGRATIONS = "accountMenuIntegrations"
     const val EDIT_PROFILE = "accountMenuEditProfile"
     const val SEARCH_USERS = "accountMenuSearchUsers"
+    const val SESSIONS = "accountMenuSessions"
+    const val CONNECTED_ACCOUNTS = "accountMenuConnectedAccounts"
+    const val ACCOUNT_SETTINGS = "accountMenuAccountSettings"
 }
 
 /**
@@ -73,6 +79,9 @@ object AccountMenuTestTags {
  * @param onOpenNotifications navigate to the notifications module.
  * @param onOpenOrganizations navigate to the organizations module.
  * @param onOpenIntegrations navigate to the integrations module.
+ * @param onOpenSessions navigate to the Active Sessions screen (within this module).
+ * @param onOpenConnectedAccounts navigate to the Connected Accounts screen (within this module).
+ * @param onOpenAccountSettings navigate to the Account settings screen (within this module).
  * @param onSignOut invoked after the caller performs sign-out; the profile module does
  *   not own session state, so the app wires this to the auth logout + navigation.
  */
@@ -86,6 +95,9 @@ fun ProfileRoute(
     onOpenNotifications: () -> Unit,
     onOpenOrganizations: () -> Unit,
     onOpenIntegrations: () -> Unit,
+    onOpenSessions: () -> Unit,
+    onOpenConnectedAccounts: () -> Unit,
+    onOpenAccountSettings: () -> Unit,
     onSignOut: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: ProfileViewModel = hiltViewModel(),
@@ -103,6 +115,9 @@ fun ProfileRoute(
         onOpenNotifications = onOpenNotifications,
         onOpenOrganizations = onOpenOrganizations,
         onOpenIntegrations = onOpenIntegrations,
+        onOpenSessions = onOpenSessions,
+        onOpenConnectedAccounts = onOpenConnectedAccounts,
+        onOpenAccountSettings = onOpenAccountSettings,
         onSignOut = onSignOut,
         onRetry = viewModel::refresh,
         modifier = modifier,
@@ -122,6 +137,9 @@ fun ProfileScreen(
     onOpenNotifications: () -> Unit,
     onOpenOrganizations: () -> Unit,
     onOpenIntegrations: () -> Unit,
+    onOpenSessions: () -> Unit,
+    onOpenConnectedAccounts: () -> Unit,
+    onOpenAccountSettings: () -> Unit,
     onSignOut: () -> Unit,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
@@ -195,6 +213,24 @@ fun ProfileScreen(
                     label = "Integrations",
                     onClick = onOpenIntegrations,
                     tag = AccountMenuTestTags.INTEGRATIONS,
+                )
+                AccountMenuRow(
+                    icon = Icons.Default.Devices,
+                    label = "Active sessions",
+                    onClick = onOpenSessions,
+                    tag = AccountMenuTestTags.SESSIONS,
+                )
+                AccountMenuRow(
+                    icon = Icons.Default.Link,
+                    label = "Connected accounts",
+                    onClick = onOpenConnectedAccounts,
+                    tag = AccountMenuTestTags.CONNECTED_ACCOUNTS,
+                )
+                AccountMenuRow(
+                    icon = Icons.Default.ManageAccounts,
+                    label = "Account settings",
+                    onClick = onOpenAccountSettings,
+                    tag = AccountMenuTestTags.ACCOUNT_SETTINGS,
                 )
                 AccountMenuRow(
                     icon = Icons.Default.Edit,
@@ -302,6 +338,9 @@ private fun ProfileScreenPreview() {
             onOpenNotifications = {},
             onOpenOrganizations = {},
             onOpenIntegrations = {},
+            onOpenSessions = {},
+            onOpenConnectedAccounts = {},
+            onOpenAccountSettings = {},
             onSignOut = {},
             onRetry = {},
         )

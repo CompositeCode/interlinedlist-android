@@ -468,4 +468,170 @@ class DefaultProfileRepositoryTest {
         assertThat(result).isInstanceOf(ApiResult.Failure::class.java)
         assertThat((result as ApiResult.Failure).error).isInstanceOf(AppError.NotFound::class.java)
     }
+
+    // --- Account & Security ---
+
+    @Test
+    fun `getSessions parses the wrapped sessions list`() = runTest(testDispatcher) {
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """
+                {
+                  "sessions": [
+                    {
+                      "id": "s1",
+                      "deviceLabel": "Pixel 8",
+                      "createdAt": "2026-07-31T21:37:00.000Z",
+                      "lastUsedAt": "2026-07-31T21:49:00.000Z",
+                      "isCurrent": true
+                    },
+                    {
+                      "id": "s2",
+                      "deviceLabel": "Chrome on macOS",
+                      "createdAt": "2026-07-30T09:00:00.000Z",
+                      "lastUsedAt": null,
+                      "isCurrent": false
+                    }
+                  ]
+                }
+                """.trimIndent(),
+            ),
+        )
+
+        val result = repository.getSessions()
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        val sessions = (result as ApiResult.Success).data
+        assertThat(sessions.map { it.id }).containsExactly("s1", "s2").inOrder()
+        assertThat(sessions.first().isCurrent).isTrue()
+        assertThat(sessions[1].lastUsedAt).isNull()
+
+        val recorded = server.takeRequest()
+        assertThat(recorded.method).isEqualTo("GET")
+        assertThat(recorded.path).isEqualTo("/api/user/sessions")
+    }
+
+    @Test
+    fun `getSessions maps a 401 to Unauthorized`() = runTest(testDispatcher) {
+        server.enqueue(MockResponse().setResponseCode(401).setBody("""{ "error": "Session expired." }"""))
+
+        val result = repository.getSessions()
+
+        assertThat((result as ApiResult.Failure).error).isInstanceOf(AppError.Unauthorized::class.java)
+    }
+
+    @Test
+    fun `revokeSession deletes the session by id`() = runTest(testDispatcher) {
+        server.enqueue(MockResponse().setResponseCode(200))
+
+        val result = repository.revokeSession("s2")
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        val recorded = server.takeRequest()
+        assertThat(recorded.method).isEqualTo("DELETE")
+        assertThat(recorded.path).isEqualTo("/api/user/sessions/s2")
+    }
+
+    @Test
+    fun `getIdentities parses the wrapped identities list`() = runTest(testDispatcher) {
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """
+                {
+                  "identities": [
+                    {
+                      "id": "i1",
+                      "provider": "mastodon:techhub.social",
+                      "providerUsername": "crew@techhub.social",
+                      "profileUrl": "https://techhub.social/@crew",
+                      "avatarUrl": null,
+                      "connectedAt": "2026-04-07T16:35:32.476Z",
+                      "lastVerifiedAt": null
+                    },
+                    {
+                      "id": "i2",
+                      "provider": "linkedin",
+                      "providerUsername": "Adron Hall",
+                      "profileUrl": null,
+                      "avatarUrl": null,
+                      "connectedAt": "2026-06-12T07:33:42.447Z",
+                      "lastVerifiedAt": "2026-07-07T07:47:48.121Z"
+                    }
+                  ]
+                }
+                """.trimIndent(),
+            ),
+        )
+
+        val result = repository.getIdentities()
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        val identities = (result as ApiResult.Success).data
+        assertThat(identities.map { it.provider }).containsExactly("mastodon:techhub.social", "linkedin").inOrder()
+        // Mastodon host is stripped to the leading provider token for display.
+        assertThat(identities.first().providerLabel).isEqualTo("Mastodon")
+
+        val recorded = server.takeRequest()
+        assertThat(recorded.method).isEqualTo("GET")
+        assertThat(recorded.path).isEqualTo("/api/user/identities")
+    }
+
+    @Test
+    fun `unlinkIdentity deletes with the provider as a query parameter`() = runTest(testDispatcher) {
+        server.enqueue(MockResponse().setResponseCode(200))
+
+        val result = repository.unlinkIdentity("mastodon:techhub.social")
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        val recorded = server.takeRequest()
+        assertThat(recorded.method).isEqualTo("DELETE")
+        // The API keys on ?provider=... (verified against the OpenAPI spec).
+        assertThat(recorded.path).isEqualTo("/api/user/identities?provider=mastodon%3Atechhub.social")
+    }
+
+    @Test
+    fun `requestEmailChange posts the new email`() = runTest(testDispatcher) {
+        server.enqueue(MockResponse().setResponseCode(201))
+
+        val result = repository.requestEmailChange("new@example.com")
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        val recorded = server.takeRequest()
+        assertThat(recorded.method).isEqualTo("POST")
+        assertThat(recorded.path).isEqualTo("/api/user/change-email/request")
+        assertThat(recorded.body.readUtf8()).contains("\"newEmail\":\"new@example.com\"")
+    }
+
+    @Test
+    fun `requestEmailChange maps a 400 to a failure`() = runTest(testDispatcher) {
+        server.enqueue(MockResponse().setResponseCode(400).setBody("""{ "error": "Email already in use." }"""))
+
+        val result = repository.requestEmailChange("taken@example.com")
+
+        assertThat(result).isInstanceOf(ApiResult.Failure::class.java)
+    }
+
+    @Test
+    fun `deleteAccount posts the username and email confirmation`() = runTest(testDispatcher) {
+        server.enqueue(MockResponse().setResponseCode(201))
+
+        val result = repository.deleteAccount(username = "adron", email = "adron@example.com")
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        val recorded = server.takeRequest()
+        assertThat(recorded.method).isEqualTo("POST")
+        assertThat(recorded.path).isEqualTo("/api/user/delete")
+        val body = recorded.body.readUtf8()
+        assertThat(body).contains("\"username\":\"adron\"")
+        assertThat(body).contains("\"email\":\"adron@example.com\"")
+    }
+
+    @Test
+    fun `deleteAccount maps a 400 to a failure`() = runTest(testDispatcher) {
+        server.enqueue(MockResponse().setResponseCode(400).setBody("""{ "error": "Confirmation did not match." }"""))
+
+        val result = repository.deleteAccount(username = "adron", email = "wrong@example.com")
+
+        assertThat(result).isInstanceOf(ApiResult.Failure::class.java)
+    }
 }

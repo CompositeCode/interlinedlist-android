@@ -7,6 +7,8 @@ import com.interlinedlist.android.feature.profile.data.ProfileRepository
 import com.interlinedlist.android.feature.profile.domain.FollowCounts
 import com.interlinedlist.android.feature.profile.domain.FollowStatus
 import com.interlinedlist.android.feature.profile.domain.FollowUser
+import com.interlinedlist.android.feature.profile.domain.LinkedIdentity
+import com.interlinedlist.android.feature.profile.domain.LoginSession
 import com.interlinedlist.android.feature.profile.domain.ProfileUser
 import com.interlinedlist.android.feature.profile.domain.UserSearchResult
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -146,6 +148,52 @@ class FakeProfileRepository : ProfileRepository {
         removedFollowerUserId = userId
         return removeFollowerResult
     }
+
+    // --- Account & Security ---
+
+    var sessionsResult: ApiResult<List<LoginSession>> = ApiResult.Success(emptyList())
+    var revokeSessionResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var identitiesResult: ApiResult<List<LinkedIdentity>> = ApiResult.Success(emptyList())
+    var unlinkIdentityResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var requestEmailChangeResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var deleteAccountResult: ApiResult<Unit> = ApiResult.Success(Unit)
+
+    var sessionsCount = 0
+    var revokedSessionId: String? = null
+    var identitiesCount = 0
+    var unlinkedProvider: String? = null
+    var requestedEmail: String? = null
+    var deleteAccountArgs: Pair<String, String>? = null
+
+    override suspend fun getSessions(): ApiResult<List<LoginSession>> {
+        sessionsCount++
+        return sessionsResult
+    }
+
+    override suspend fun revokeSession(sessionId: String): ApiResult<Unit> {
+        revokedSessionId = sessionId
+        return revokeSessionResult
+    }
+
+    override suspend fun getIdentities(): ApiResult<List<LinkedIdentity>> {
+        identitiesCount++
+        return identitiesResult
+    }
+
+    override suspend fun unlinkIdentity(provider: String): ApiResult<Unit> {
+        unlinkedProvider = provider
+        return unlinkIdentityResult
+    }
+
+    override suspend fun requestEmailChange(newEmail: String): ApiResult<Unit> {
+        requestedEmail = newEmail
+        return requestEmailChangeResult
+    }
+
+    override suspend fun deleteAccount(username: String, email: String): ApiResult<Unit> {
+        deleteAccountArgs = username to email
+        return deleteAccountResult
+    }
 }
 
 /** Shorthand for building a follow-list/request user in tests. */
@@ -181,3 +229,33 @@ fun testSearchResult(
     username: String = "user$id",
     displayName: String? = "User $id",
 ) = UserSearchResult(id = id, username = username, displayName = displayName, avatarUrl = null)
+
+/** Shorthand for building a login session in tests. */
+fun testSession(
+    id: String = "s1",
+    deviceLabel: String = "Pixel 8",
+    createdAt: String? = "2026-07-31T21:37:00.000Z",
+    lastUsedAt: String? = "2026-07-31T21:49:00.000Z",
+    isCurrent: Boolean = false,
+) = LoginSession(
+    id = id,
+    deviceLabel = deviceLabel,
+    createdAt = createdAt,
+    lastUsedAt = lastUsedAt,
+    isCurrent = isCurrent,
+)
+
+/** Shorthand for building a linked identity in tests. */
+fun testIdentity(
+    id: String = "i1",
+    provider: String = "linkedin",
+    providerUsername: String? = "Adron Hall",
+    connectedAt: String? = "2026-06-12T07:33:42.447Z",
+) = LinkedIdentity(
+    id = id,
+    provider = provider,
+    providerUsername = providerUsername,
+    profileUrl = null,
+    avatarUrl = null,
+    connectedAt = connectedAt,
+)

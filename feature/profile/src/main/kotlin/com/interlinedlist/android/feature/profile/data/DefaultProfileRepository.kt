@@ -16,11 +16,15 @@ import com.interlinedlist.android.feature.profile.data.mapper.toProfileUser
 import com.interlinedlist.android.feature.profile.data.mapper.toSearchResult
 import com.interlinedlist.android.feature.profile.data.remote.ProfileApi
 import com.interlinedlist.android.feature.profile.data.remote.dto.AvatarFromUrlRequest
+import com.interlinedlist.android.feature.profile.data.remote.dto.ChangeEmailRequest
+import com.interlinedlist.android.feature.profile.data.remote.dto.DeleteAccountRequest
 import com.interlinedlist.android.feature.profile.data.remote.dto.ProfileUserDto
 import com.interlinedlist.android.feature.profile.data.remote.dto.UpdateProfileRequest
 import com.interlinedlist.android.feature.profile.domain.FollowCounts
 import com.interlinedlist.android.feature.profile.domain.FollowStatus
 import com.interlinedlist.android.feature.profile.domain.FollowUser
+import com.interlinedlist.android.feature.profile.domain.LinkedIdentity
+import com.interlinedlist.android.feature.profile.domain.LoginSession
 import com.interlinedlist.android.feature.profile.domain.ProfileUser
 import com.interlinedlist.android.feature.profile.domain.UserSearchResult
 import kotlinx.coroutines.flow.Flow
@@ -185,6 +189,34 @@ class DefaultProfileRepository @Inject constructor(
 
     override suspend fun removeFollower(userId: String): ApiResult<Unit> =
         withContext(dispatchers.io) { safeApiCall(json) { api.removeFollower(userId) } }
+
+    // --- Account & Security (always fresh, nothing cached) ---
+
+    override suspend fun getSessions(): ApiResult<List<LoginSession>> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.getSessions().sessionsOrEmpty.map { it.toDomain() } }
+        }
+
+    override suspend fun revokeSession(sessionId: String): ApiResult<Unit> =
+        withContext(dispatchers.io) { safeApiCall(json) { api.revokeSession(sessionId) } }
+
+    override suspend fun getIdentities(): ApiResult<List<LinkedIdentity>> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.getIdentities().identitiesOrEmpty.map { it.toDomain() } }
+        }
+
+    override suspend fun unlinkIdentity(provider: String): ApiResult<Unit> =
+        withContext(dispatchers.io) { safeApiCall(json) { api.unlinkIdentity(provider) } }
+
+    override suspend fun requestEmailChange(newEmail: String): ApiResult<Unit> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.requestEmailChange(ChangeEmailRequest(newEmail)) }
+        }
+
+    override suspend fun deleteAccount(username: String, email: String): ApiResult<Unit> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.deleteAccount(DeleteAccountRequest(username = username, email = email)) }
+        }
 
     /** Caches [dto] as the current user, clearing the flag from any stale row first. */
     private suspend fun cacheCurrentUser(dto: ProfileUserDto): ProfileUser {

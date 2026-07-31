@@ -4,6 +4,8 @@ import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.feature.profile.domain.FollowCounts
 import com.interlinedlist.android.feature.profile.domain.FollowStatus
 import com.interlinedlist.android.feature.profile.domain.FollowUser
+import com.interlinedlist.android.feature.profile.domain.LinkedIdentity
+import com.interlinedlist.android.feature.profile.domain.LoginSession
 import com.interlinedlist.android.feature.profile.domain.ProfileUser
 import com.interlinedlist.android.feature.profile.domain.UserSearchResult
 import kotlinx.coroutines.flow.Flow
@@ -90,4 +92,28 @@ interface ProfileRepository {
 
     /** Removes [userId] as a follower via `DELETE /api/follow/{userId}/remove`. */
     suspend fun removeFollower(userId: String): ApiResult<Unit>
+
+    // --- Account & Security ---
+    // These are always-fresh settings surfaces, so nothing is cached (YAGNI).
+
+    /** The current user's active login sessions via `GET /api/user/sessions`. */
+    suspend fun getSessions(): ApiResult<List<LoginSession>>
+
+    /** Revokes (signs out) the session [sessionId] via `DELETE /api/user/sessions/{id}`. */
+    suspend fun revokeSession(sessionId: String): ApiResult<Unit>
+
+    /** The current user's linked social identities via `GET /api/user/identities`. */
+    suspend fun getIdentities(): ApiResult<List<LinkedIdentity>>
+
+    /** Unlinks the identity for [provider] via `DELETE /api/user/identities?provider=...`. */
+    suspend fun unlinkIdentity(provider: String): ApiResult<Unit>
+
+    /** Requests an email change to [newEmail] via `POST /api/user/change-email/request`. */
+    suspend fun requestEmailChange(newEmail: String): ApiResult<Unit>
+
+    /**
+     * Deletes the current user's account via `POST /api/user/delete`, confirming with
+     * the account's [username] and [email]. On success the caller signs the user out.
+     */
+    suspend fun deleteAccount(username: String, email: String): ApiResult<Unit>
 }
