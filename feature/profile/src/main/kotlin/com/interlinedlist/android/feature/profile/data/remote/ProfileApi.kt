@@ -9,8 +9,16 @@ import com.interlinedlist.android.feature.profile.data.remote.dto.FollowListResp
 import com.interlinedlist.android.feature.profile.data.remote.dto.FollowRequestsResponse
 import com.interlinedlist.android.feature.profile.data.remote.dto.FollowStatusResponse
 import com.interlinedlist.android.feature.profile.data.remote.dto.IdentitiesResponse
+import com.interlinedlist.android.feature.profile.data.remote.dto.MutualConnectionsResponse
 import com.interlinedlist.android.feature.profile.data.remote.dto.ProfileResponse
+import com.interlinedlist.android.feature.profile.data.remote.dto.PublicDocumentDetailResponse
+import com.interlinedlist.android.feature.profile.data.remote.dto.PublicDocumentsResponse
+import com.interlinedlist.android.feature.profile.data.remote.dto.PublicListDataResponse
+import com.interlinedlist.android.feature.profile.data.remote.dto.PublicListDetailResponse
+import com.interlinedlist.android.feature.profile.data.remote.dto.PublicListsResponse
+import com.interlinedlist.android.feature.profile.data.remote.dto.PublicPostsResponse
 import com.interlinedlist.android.feature.profile.data.remote.dto.SessionsResponse
+import com.interlinedlist.android.feature.profile.data.remote.dto.UserLookupResponse
 import com.interlinedlist.android.feature.profile.data.remote.dto.UpdateProfileRequest
 import com.interlinedlist.android.feature.profile.data.remote.dto.UserSearchResponse
 import okhttp3.MultipartBody
@@ -59,6 +67,60 @@ interface ProfileApi {
         @Query("q") query: String,
         @Query("limit") limit: Int? = null,
     ): UserSearchResponse
+
+    /** Looks up a single user by handle (e.g. `@username`). */
+    @GET("api/users/lookup")
+    suspend fun lookupUser(@Query("handle") handle: String): UserLookupResponse
+
+    // --- Public content (another user's posts / lists / documents) ---
+
+    /**
+     * A user's public posts. Note the SINGULAR `user` path segment — confirmed
+     * against the OpenAPI spec and live calls (`/api/user/{username}/messages`),
+     * unlike the plural `users` used by the lists/documents endpoints below.
+     */
+    @GET("api/user/{username}/messages")
+    suspend fun getUserMessages(
+        @Path("username") username: String,
+        @Query("limit") limit: Int? = null,
+        @Query("offset") offset: Int? = null,
+    ): PublicPostsResponse
+
+    /** A user's public lists. */
+    @GET("api/users/{username}/lists")
+    suspend fun getUserLists(
+        @Path("username") username: String,
+        @Query("limit") limit: Int? = null,
+        @Query("offset") offset: Int? = null,
+    ): PublicListsResponse
+
+    /** A single public list's metadata. */
+    @GET("api/users/{username}/lists/{id}")
+    suspend fun getUserList(
+        @Path("username") username: String,
+        @Path("id") listId: String,
+    ): PublicListDetailResponse
+
+    /** A single public list's rows. */
+    @GET("api/users/{username}/lists/{id}/data")
+    suspend fun getUserListData(
+        @Path("username") username: String,
+        @Path("id") listId: String,
+        @Query("limit") limit: Int? = null,
+        @Query("offset") offset: Int? = null,
+    ): PublicListDataResponse
+
+    /** A user's public documents. */
+    @GET("api/users/{username}/documents")
+    suspend fun getUserDocuments(@Path("username") username: String): PublicDocumentsResponse
+
+    /** A single public document, including its content. */
+    @GET("api/documents/{id}")
+    suspend fun getDocument(@Path("id") documentId: String): PublicDocumentDetailResponse
+
+    /** Mutual-connection counts between the current user and [userId]. */
+    @GET("api/follow/{userId}/mutual")
+    suspend fun getMutualConnections(@Path("userId") userId: String): MutualConnectionsResponse
 
     // --- Following ---
 

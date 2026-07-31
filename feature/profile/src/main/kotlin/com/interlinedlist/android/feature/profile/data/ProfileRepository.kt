@@ -6,7 +6,13 @@ import com.interlinedlist.android.feature.profile.domain.FollowStatus
 import com.interlinedlist.android.feature.profile.domain.FollowUser
 import com.interlinedlist.android.feature.profile.domain.LinkedIdentity
 import com.interlinedlist.android.feature.profile.domain.LoginSession
+import com.interlinedlist.android.feature.profile.domain.MutualConnections
 import com.interlinedlist.android.feature.profile.domain.ProfileUser
+import com.interlinedlist.android.feature.profile.domain.PublicDocumentDetail
+import com.interlinedlist.android.feature.profile.domain.PublicDocumentSummary
+import com.interlinedlist.android.feature.profile.domain.PublicListDetail
+import com.interlinedlist.android.feature.profile.domain.PublicListSummary
+import com.interlinedlist.android.feature.profile.domain.PublicPost
 import com.interlinedlist.android.feature.profile.domain.UserSearchResult
 import kotlinx.coroutines.flow.Flow
 
@@ -92,6 +98,30 @@ interface ProfileRepository {
 
     /** Removes [userId] as a follower via `DELETE /api/follow/{userId}/remove`. */
     suspend fun removeFollower(userId: String): ApiResult<Unit>
+
+    // --- Public content (another user's posts / lists / documents) ---
+    // Read-only surfaces on the other-user profile; nothing is cached (YAGNI).
+
+    /** A user's public posts via `GET /api/user/{username}/messages` (singular `user`). */
+    suspend fun getUserPosts(username: String): ApiResult<List<PublicPost>>
+
+    /** A user's public lists via `GET /api/users/{username}/lists`. */
+    suspend fun getUserLists(username: String): ApiResult<List<PublicListSummary>>
+
+    /**
+     * A single public list (metadata + rows) via `GET /api/users/{username}/lists/{id}`
+     * and `.../data`, combined into a read-only [PublicListDetail].
+     */
+    suspend fun getUserList(username: String, listId: String): ApiResult<PublicListDetail>
+
+    /** A user's public documents via `GET /api/users/{username}/documents`. */
+    suspend fun getUserDocuments(username: String): ApiResult<List<PublicDocumentSummary>>
+
+    /** A single public document (title + content) via `GET /api/documents/{id}`. */
+    suspend fun getDocument(documentId: String): ApiResult<PublicDocumentDetail>
+
+    /** Mutual-connection counts with [userId] via `GET /api/follow/{userId}/mutual`. */
+    suspend fun getMutualConnections(userId: String): ApiResult<MutualConnections>
 
     // --- Account & Security ---
     // These are always-fresh settings surfaces, so nothing is cached (YAGNI).

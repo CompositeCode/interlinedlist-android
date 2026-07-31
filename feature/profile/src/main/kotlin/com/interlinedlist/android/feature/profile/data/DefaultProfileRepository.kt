@@ -12,7 +12,13 @@ import com.interlinedlist.android.feature.profile.data.mapper.toFollowCounts
 import com.interlinedlist.android.feature.profile.data.mapper.toFollowStatus
 import com.interlinedlist.android.feature.profile.data.mapper.toFollowUser
 import com.interlinedlist.android.feature.profile.data.mapper.toFollowUserOrNull
+import com.interlinedlist.android.feature.profile.data.mapper.toMutualConnections
 import com.interlinedlist.android.feature.profile.data.mapper.toProfileUser
+import com.interlinedlist.android.feature.profile.data.mapper.toPublicDocumentDetail
+import com.interlinedlist.android.feature.profile.data.mapper.toPublicDocumentSummary
+import com.interlinedlist.android.feature.profile.data.mapper.toPublicListRow
+import com.interlinedlist.android.feature.profile.data.mapper.toPublicListSummary
+import com.interlinedlist.android.feature.profile.data.mapper.toPublicPost
 import com.interlinedlist.android.feature.profile.data.mapper.toSearchResult
 import com.interlinedlist.android.feature.profile.data.remote.ProfileApi
 import com.interlinedlist.android.feature.profile.data.remote.dto.AvatarFromUrlRequest
@@ -25,7 +31,13 @@ import com.interlinedlist.android.feature.profile.domain.FollowStatus
 import com.interlinedlist.android.feature.profile.domain.FollowUser
 import com.interlinedlist.android.feature.profile.domain.LinkedIdentity
 import com.interlinedlist.android.feature.profile.domain.LoginSession
+import com.interlinedlist.android.feature.profile.domain.MutualConnections
 import com.interlinedlist.android.feature.profile.domain.ProfileUser
+import com.interlinedlist.android.feature.profile.domain.PublicDocumentDetail
+import com.interlinedlist.android.feature.profile.domain.PublicDocumentSummary
+import com.interlinedlist.android.feature.profile.domain.PublicListDetail
+import com.interlinedlist.android.feature.profile.domain.PublicListSummary
+import com.interlinedlist.android.feature.profile.domain.PublicPost
 import com.interlinedlist.android.feature.profile.domain.UserSearchResult
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -190,6 +202,74 @@ class DefaultProfileRepository @Inject constructor(
     override suspend fun removeFollower(userId: String): ApiResult<Unit> =
         withContext(dispatchers.io) { safeApiCall(json) { api.removeFollower(userId) } }
 
+    // --- Public content (read-only, nothing cached) ---
+
+    override suspend fun getUserPosts(username: String): ApiResult<List<PublicPost>> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) {
+                api.getUserMessages(username, limit = CONTENT_LIMIT).posts.map { it.toPublicPost() }
+            }
+        }
+
+    override suspend fun getUserLists(username: String): ApiResult<List<PublicListSummary>> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) {
+                api.getUserLists(username, limit = CONTENT_LIMIT).items.map { it.toPublicListSummary() }
+            }
+        }
+
+    override suspend fun getUserList(
+        username: String,
+        listId: String,
+    ): ApiResult<PublicListDetail> = withContext(dispatchers.io) {
+        // Metadata and rows come from two endpoints; fetch the list first so a missing
+        // or private list surfaces its error before we attempt the rows.
+        when (val meta = safeApiCall(json) { api.getUserList(username, listId).listOrSelf }) {
+            is ApiResult.Success -> {
+                val list = meta.data
+                    ?: return@withContext ApiResult.Failure(AppError.NotFound("List not found"))
+                when (val data = safeApiCall(json) {
+                    api.getUserListData(username, listId, limit = CONTENT_LIMIT).items
+                }) {
+                    is ApiResult.Success -> ApiResult.Success(
+                        PublicListDetail(
+                            id = list.id,
+                            title = list.title,
+                            description = list.description,
+                            rows = data.data.map { it.toPublicListRow() },
+                        ),
+                    )
+                    is ApiResult.Failure -> data
+                }
+            }
+            is ApiResult.Failure -> meta
+        }
+    }
+
+    override suspend fun getUserDocuments(username: String): ApiResult<List<PublicDocumentSummary>> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) {
+                api.getUserDocuments(username).items.map { it.toPublicDocumentSummary() }
+            }
+        }
+
+    override suspend fun getDocument(documentId: String): ApiResult<PublicDocumentDetail> =
+        withContext(dispatchers.io) {
+            when (val result = safeApiCall(json) { api.getDocument(documentId).documentOrSelf }) {
+                is ApiResult.Success -> {
+                    val doc = result.data
+                        ?: return@withContext ApiResult.Failure(AppError.NotFound("Document not found"))
+                    ApiResult.Success(doc.toPublicDocumentDetail())
+                }
+                is ApiResult.Failure -> result
+            }
+        }
+
+    override suspend fun getMutualConnections(userId: String): ApiResult<MutualConnections> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.getMutualConnections(userId).toMutualConnections() }
+        }
+
     // --- Account & Security (always fresh, nothing cached) ---
 
     override suspend fun getSessions(): ApiResult<List<LoginSession>> =
@@ -248,5 +328,6 @@ class DefaultProfileRepository @Inject constructor(
     private companion object {
         const val SEARCH_LIMIT = 20
         const val LIST_LIMIT = 50
+        const val CONTENT_LIMIT = 50
     }
 }

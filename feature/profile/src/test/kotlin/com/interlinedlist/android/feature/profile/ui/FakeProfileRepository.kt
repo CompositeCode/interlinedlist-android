@@ -9,7 +9,13 @@ import com.interlinedlist.android.feature.profile.domain.FollowStatus
 import com.interlinedlist.android.feature.profile.domain.FollowUser
 import com.interlinedlist.android.feature.profile.domain.LinkedIdentity
 import com.interlinedlist.android.feature.profile.domain.LoginSession
+import com.interlinedlist.android.feature.profile.domain.MutualConnections
 import com.interlinedlist.android.feature.profile.domain.ProfileUser
+import com.interlinedlist.android.feature.profile.domain.PublicDocumentDetail
+import com.interlinedlist.android.feature.profile.domain.PublicDocumentSummary
+import com.interlinedlist.android.feature.profile.domain.PublicListDetail
+import com.interlinedlist.android.feature.profile.domain.PublicListSummary
+import com.interlinedlist.android.feature.profile.domain.PublicPost
 import com.interlinedlist.android.feature.profile.domain.UserSearchResult
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
@@ -147,6 +153,60 @@ class FakeProfileRepository : ProfileRepository {
     override suspend fun removeFollower(userId: String): ApiResult<Unit> {
         removedFollowerUserId = userId
         return removeFollowerResult
+    }
+
+    // --- Public content ---
+
+    var postsResult: ApiResult<List<PublicPost>> = ApiResult.Success(emptyList())
+    var listsResult: ApiResult<List<PublicListSummary>> = ApiResult.Success(emptyList())
+    var listDetailResult: ApiResult<PublicListDetail> =
+        ApiResult.Failure(AppError.NotFound("not set"))
+    var documentsResult: ApiResult<List<PublicDocumentSummary>> = ApiResult.Success(emptyList())
+    var documentDetailResult: ApiResult<PublicDocumentDetail> =
+        ApiResult.Failure(AppError.NotFound("not set"))
+    var mutualResult: ApiResult<MutualConnections> = ApiResult.Success(MutualConnections())
+
+    var postsUsername: String? = null
+    var listsUsername: String? = null
+    var listDetailArgs: Pair<String, String>? = null
+    var documentsUsername: String? = null
+    var documentDetailId: String? = null
+    var mutualUserId: String? = null
+    var postsCount = 0
+    var listsCount = 0
+    var documentsCount = 0
+
+    override suspend fun getUserPosts(username: String): ApiResult<List<PublicPost>> {
+        postsUsername = username
+        postsCount++
+        return postsResult
+    }
+
+    override suspend fun getUserLists(username: String): ApiResult<List<PublicListSummary>> {
+        listsUsername = username
+        listsCount++
+        return listsResult
+    }
+
+    override suspend fun getUserList(username: String, listId: String): ApiResult<PublicListDetail> {
+        listDetailArgs = username to listId
+        return listDetailResult
+    }
+
+    override suspend fun getUserDocuments(username: String): ApiResult<List<PublicDocumentSummary>> {
+        documentsUsername = username
+        documentsCount++
+        return documentsResult
+    }
+
+    override suspend fun getDocument(documentId: String): ApiResult<PublicDocumentDetail> {
+        documentDetailId = documentId
+        return documentDetailResult
+    }
+
+    override suspend fun getMutualConnections(userId: String): ApiResult<MutualConnections> {
+        mutualUserId = userId
+        return mutualResult
     }
 
     // --- Account & Security ---

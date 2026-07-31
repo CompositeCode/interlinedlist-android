@@ -6,6 +6,7 @@ import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.feature.profile.data.ProfileRepository
 import com.interlinedlist.android.feature.profile.domain.FollowCounts
 import com.interlinedlist.android.feature.profile.domain.FollowStatus
+import com.interlinedlist.android.feature.profile.domain.MutualConnections
 import com.interlinedlist.android.feature.profile.domain.ProfileUser
 import com.interlinedlist.android.feature.profile.ui.common.toUserMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -31,6 +32,10 @@ data class ProfileUiState(
     val followStatus: FollowStatus = FollowStatus.SELF,
     val followCounts: FollowCounts = FollowCounts(),
     val isFollowActionInProgress: Boolean = false,
+    // Public-content tabs — populated only on another user's profile (Milestone L).
+    val selectedTab: ProfileContentTab = ProfileContentTab.POSTS,
+    val content: PublicContentState = PublicContentState(),
+    val mutualConnections: MutualConnections? = null,
 ) {
     /** No cached user and not loading — nothing to render yet. */
     val isEmpty: Boolean get() = user == null && !isLoading
