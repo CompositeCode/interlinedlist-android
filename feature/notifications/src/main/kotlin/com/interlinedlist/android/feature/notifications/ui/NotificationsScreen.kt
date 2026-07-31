@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
@@ -56,6 +57,7 @@ object NotificationsTags {
     const val BACK = "notificationsBack"
     const val MARK_ALL_READ = "notificationsMarkAllRead"
     const val UNREAD_BADGE = "notificationsUnreadBadge"
+    const val PREFERENCES = "notificationsPreferences"
 }
 
 /**
@@ -74,12 +76,14 @@ fun NotificationsRoute(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     onOpenTarget: (NotificationTarget) -> Unit = {},
+    onOpenPreferences: () -> Unit = {},
     viewModel: NotificationsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     NotificationsScreen(
         state = state,
         onBack = onBack,
+        onOpenPreferences = onOpenPreferences,
         onRefresh = viewModel::refresh,
         onLoadMore = viewModel::loadMore,
         onMarkAllRead = viewModel::onMarkAllRead,
@@ -105,6 +109,7 @@ fun NotificationsScreen(
     onOpen: (Notification) -> Unit,
     onDismiss: (Notification) -> Unit,
     modifier: Modifier = Modifier,
+    onOpenPreferences: () -> Unit = {},
 ) {
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -138,6 +143,12 @@ fun NotificationsScreen(
                         ) {
                             Icon(Icons.Filled.DoneAll, contentDescription = "Mark all read")
                         }
+                    }
+                    IconButton(
+                        onClick = onOpenPreferences,
+                        modifier = Modifier.testTag(NotificationsTags.PREFERENCES),
+                    ) {
+                        Icon(Icons.Filled.Settings, contentDescription = "Notification preferences")
                     }
                 },
             )

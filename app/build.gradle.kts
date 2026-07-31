@@ -51,6 +51,7 @@ dependencies {
     implementation(project(":feature:auth"))
     implementation(project(":feature:lists"))
     implementation(project(":feature:messages"))
+    implementation(project(":feature:directmessages"))
     implementation(project(":feature:documents"))
     implementation(project(":feature:profile"))
     implementation(project(":feature:notifications"))
