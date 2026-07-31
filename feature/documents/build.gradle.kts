@@ -53,6 +53,11 @@ dependencies {
     ksp(libs.hilt.compiler)
     implementation(libs.androidx.hilt.navigation.compose)
 
+    // Background delta-sync via WorkManager, with Hilt-injected workers.
+    implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.androidx.hilt.work)
+    ksp(libs.androidx.hilt.compiler)
+
     implementation(libs.coil.compose)
 
     implementation(libs.retrofit.core)

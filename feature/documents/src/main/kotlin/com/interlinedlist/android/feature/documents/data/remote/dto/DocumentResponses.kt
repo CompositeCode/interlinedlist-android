@@ -42,6 +42,7 @@ data class DocumentResponse(
     val isPublic: Boolean = false,
     val updatedAt: String? = null,
     val createdAt: String? = null,
+    val version: Int? = null,
 ) {
     /** The document payload, whether wrapped or inlined at the top level. */
     val documentOrSelf: DocumentDto?
@@ -57,6 +58,7 @@ data class DocumentResponse(
                 isPublic = isPublic,
                 updatedAt = updatedAt,
                 createdAt = createdAt,
+                version = version,
             )
         }
 }

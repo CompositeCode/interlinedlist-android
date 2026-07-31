@@ -21,6 +21,8 @@ data class DocumentEntity(
     val isPublic: Boolean,
     val updatedAt: String?,
     val sortOrder: Int,
+    /** Server row version (optimistic-concurrency token); null until a versioned fetch. */
+    val version: Int? = null,
 )
 
 fun DocumentEntity.toDomain(): Document = Document(
@@ -32,6 +34,7 @@ fun DocumentEntity.toDomain(): Document = Document(
     folderName = folderName,
     isPublic = isPublic,
     updatedAt = updatedAt,
+    version = version,
 )
 
 /**
@@ -50,4 +53,5 @@ fun Document.toEntity(sortOrder: Int, existingContent: String? = null): Document
         isPublic = isPublic,
         updatedAt = updatedAt,
         sortOrder = sortOrder,
+        version = version,
     )

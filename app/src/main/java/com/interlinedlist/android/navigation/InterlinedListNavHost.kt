@@ -38,6 +38,7 @@ import com.interlinedlist.android.feature.documents.ui.browser.DocumentsRoute
 import com.interlinedlist.android.feature.documents.ui.editor.DocumentEditorRoute
 import com.interlinedlist.android.feature.documents.ui.share.DocumentShareRoute
 import com.interlinedlist.android.feature.documents.ui.share.SharedDocumentRoute
+import com.interlinedlist.android.feature.documents.ui.collaborators.DocumentCollaboratorsRoute
 import com.interlinedlist.android.feature.integrations.ui.accounts.ConnectedAccountsRoute
 import com.interlinedlist.android.feature.integrations.ui.export.ExportRoute
 import com.interlinedlist.android.feature.integrations.ui.hub.IntegrationsRoute
@@ -104,6 +105,7 @@ object Routes {
     // Documents sharing (Milestone F).
     const val DOCUMENT_SHARE = "documents/{documentId}/share"
     const val DOCUMENT_SHARED = "documents/shared/{token}"
+    const val DOCUMENT_ACCESS = "documents/{documentId}/access"
 
     // Public read-only content (Milestone L).
     const val PUBLIC_LIST = "publicList/{username}/{listId}"
@@ -142,6 +144,7 @@ object Routes {
     fun documentEditor(id: String) = "documents/editor/$id"
     fun documentShare(id: String) = "documents/$id/share"
     fun documentShared(token: String) = "documents/shared/$token"
+    fun documentAccess(id: String) = "documents/$id/access"
     fun publicList(username: String, listId: String) = "publicList/$username/$listId"
     fun publicDocument(documentId: String) = "publicDocument/$documentId"
     fun userProfile(username: String) = "user/$username"
@@ -359,6 +362,7 @@ private fun MainShell(onLoggedOut: () -> Unit) {
                     onBack = { tabNav.popBackStack() },
                     onDeleted = { tabNav.popBackStack() },
                     onOpenShare = { tabNav.navigate(Routes.documentShare(documentId)) },
+                    onOpenManageAccess = { tabNav.navigate(Routes.documentAccess(documentId)) },
                 )
             }
             composable(
@@ -366,6 +370,12 @@ private fun MainShell(onLoggedOut: () -> Unit) {
                 arguments = listOf(navArgument("documentId") { type = NavType.StringType }),
             ) {
                 DocumentShareRoute(onDismiss = { tabNav.popBackStack() })
+            }
+            composable(
+                Routes.DOCUMENT_ACCESS,
+                arguments = listOf(navArgument("documentId") { type = NavType.StringType }),
+            ) {
+                DocumentCollaboratorsRoute(onDismiss = { tabNav.popBackStack() })
             }
             composable(
                 Routes.DOCUMENT_SHARED,

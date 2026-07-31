@@ -1,11 +1,15 @@
 package com.interlinedlist.android.feature.documents.data
 
 import com.interlinedlist.android.core.common.result.ApiResult
+import com.interlinedlist.android.feature.documents.domain.Collaborator
+import com.interlinedlist.android.feature.documents.domain.CollaboratorCandidate
+import com.interlinedlist.android.feature.documents.domain.CollaboratorRole
 import com.interlinedlist.android.feature.documents.domain.Document
 import com.interlinedlist.android.feature.documents.domain.DocumentFolder
 import com.interlinedlist.android.feature.documents.domain.DocumentTemplate
 import com.interlinedlist.android.feature.documents.domain.FolderContents
 import com.interlinedlist.android.feature.documents.domain.FolderSummary
+import com.interlinedlist.android.feature.documents.domain.Presence
 import com.interlinedlist.android.feature.documents.domain.ShareLink
 import com.interlinedlist.android.feature.documents.domain.ShareRole
 import com.interlinedlist.android.feature.documents.domain.SharedDocument
@@ -36,6 +40,12 @@ interface DocumentsRepository {
     /** Refreshes the entire folder tree + root documents from the API into Room. */
     suspend fun refreshTree(): ApiResult<Unit>
 
+    /**
+     * Number of local edits queued for the next push. The UI can surface an
+     * "unsynced changes" hint from this.
+     */
+    fun observePendingCount(): Flow<Int>
+
     /** Fetches a document detail (with body) and caches it. */
     suspend fun refreshDocument(id: String): ApiResult<Document>
 
@@ -56,6 +66,22 @@ interface DocumentsRepository {
         isPublic: Boolean,
         folderId: String?,
     ): ApiResult<Document>
+
+    /**
+     * Saves an edit via `PATCH /api/documents/{id}` carrying the given [expectedVersion]
+     * as the `If-Match` token. Returns [SaveOutcome.Conflict] when the server rejects
+     * the token (a concurrent write happened) so the editor can offer reload/retry
+     * instead of silently overwriting. On network failure the edit is queued for the
+     * next sync push and [SaveOutcome.Queued] is returned.
+     */
+    suspend fun patchDocument(
+        id: String,
+        title: String,
+        content: String,
+        isPublic: Boolean,
+        folderId: String?,
+        expectedVersion: Int?,
+    ): SaveOutcome
 
     /** Moves a document into [folderId] (null == root/unfiled). */
     suspend fun moveDocument(id: String, folderId: String?): ApiResult<Unit>
@@ -108,4 +134,59 @@ interface DocumentsRepository {
 
     /** Claims edit/admin access to a shared document via its token. */
     suspend fun claimSharedDocument(token: String): ApiResult<Unit>
+
+    // --- Delta sync --------------------------------------------------------
+
+    /**
+     * Pulls changes since the persisted cursor and reconciles them into Room
+     * (upserts by id + version, tombstones removed), then advances the cursor.
+     */
+    suspend fun pullDelta(): ApiResult<Unit>
+
+    /** Pushes any queued local edits/deletes via `POST /api/documents/sync`. */
+    suspend fun pushPendingOps(): ApiResult<Unit>
+
+    // --- Collaborators -----------------------------------------------------
+
+    suspend fun getCollaborators(documentId: String): ApiResult<List<Collaborator>>
+
+    /** Searches users who can be invited as collaborators on [documentId]. */
+    suspend fun searchCollaboratorUsers(
+        documentId: String,
+        query: String,
+    ): ApiResult<List<CollaboratorCandidate>>
+
+    suspend fun inviteCollaborator(
+        documentId: String,
+        userId: String,
+        role: CollaboratorRole,
+    ): ApiResult<Collaborator>
+
+    suspend fun updateCollaboratorRole(
+        documentId: String,
+        userId: String,
+        role: CollaboratorRole,
+    ): ApiResult<Unit>
+
+    suspend fun removeCollaborator(documentId: String, userId: String): ApiResult<Unit>
+
+    // --- Presence ----------------------------------------------------------
+
+    /** Sends a presence heartbeat; returns everyone currently on the document. */
+    suspend fun sendPresence(documentId: String): ApiResult<List<Presence>>
+
+    /** Leaves the document (stops presence). */
+    suspend fun leavePresence(documentId: String): ApiResult<Unit>
+}
+
+/**
+ * Outcome of a versioned save. [Success] carries the reconciled document; [Conflict]
+ * means the server rejected the version token (surface reload/retry); [Queued] means
+ * the edit was persisted locally to push later (offline); [Error] is any other failure.
+ */
+sealed interface SaveOutcome {
+    data class Success(val document: Document) : SaveOutcome
+    data class Conflict(val message: String?) : SaveOutcome
+    data object Queued : SaveOutcome
+    data class Error(val message: String?) : SaveOutcome
 }

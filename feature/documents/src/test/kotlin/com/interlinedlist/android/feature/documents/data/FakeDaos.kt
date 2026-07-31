@@ -4,6 +4,10 @@ import com.interlinedlist.android.feature.documents.data.local.DocumentDao
 import com.interlinedlist.android.feature.documents.data.local.DocumentEntity
 import com.interlinedlist.android.feature.documents.data.local.FolderDao
 import com.interlinedlist.android.feature.documents.data.local.FolderEntity
+import com.interlinedlist.android.feature.documents.data.local.PendingOpDao
+import com.interlinedlist.android.feature.documents.data.local.PendingOpEntity
+import com.interlinedlist.android.feature.documents.data.local.SyncMetaDao
+import com.interlinedlist.android.feature.documents.data.local.SyncMetaEntity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
@@ -86,5 +90,47 @@ class FakeFolderDao : FolderDao {
 
     override suspend fun clear() {
         rows.value = emptyList()
+    }
+}
+
+/** In-memory [PendingOpDao] mirroring the coalesce-by-documentId queue semantics. */
+class FakePendingOpDao : PendingOpDao {
+    private val rows = MutableStateFlow<List<PendingOpEntity>>(emptyList())
+
+    fun snapshot(): List<PendingOpEntity> = rows.value.sortedBy { it.queuedAt }
+
+    override fun observeCount(): Flow<Int> = rows.map { it.size }
+
+    override suspend fun all(): List<PendingOpEntity> = rows.value.sortedBy { it.queuedAt }
+
+    override suspend fun upsert(op: PendingOpEntity) {
+        rows.value = rows.value.filterNot { it.documentId == op.documentId } + op
+    }
+
+    override suspend fun deleteById(documentId: String) {
+        rows.value = rows.value.filterNot { it.documentId == documentId }
+    }
+
+    override suspend fun deleteAllByIds(documentIds: List<String>) {
+        rows.value = rows.value.filterNot { it.documentId in documentIds }
+    }
+
+    override suspend fun clear() {
+        rows.value = emptyList()
+    }
+}
+
+/** In-memory [SyncMetaDao] for the delta-sync cursor. */
+class FakeSyncMetaDao : SyncMetaDao {
+    private val rows = mutableMapOf<String, String?>()
+
+    override suspend fun get(key: String): String? = rows[key]
+
+    override suspend fun put(row: SyncMetaEntity) {
+        rows[row.key] = row.value
+    }
+
+    override suspend fun clear(key: String) {
+        rows.remove(key)
     }
 }

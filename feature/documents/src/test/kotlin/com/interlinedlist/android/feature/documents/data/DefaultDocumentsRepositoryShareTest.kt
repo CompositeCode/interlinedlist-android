@@ -49,7 +49,9 @@ class DefaultDocumentsRepositoryShareTest {
             .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()
         api = retrofit.create(DocumentsApi::class.java)
-        repository = DefaultDocumentsRepository(api, FakeDocumentDao(), FakeFolderDao(), json, dispatchers)
+        repository = DefaultDocumentsRepository(
+            api, FakeDocumentDao(), FakeFolderDao(), FakePendingOpDao(), FakeSyncMetaDao(), json, dispatchers,
+        )
     }
 
     @After

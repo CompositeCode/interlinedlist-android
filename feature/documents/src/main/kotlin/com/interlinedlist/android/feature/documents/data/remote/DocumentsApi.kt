@@ -1,5 +1,8 @@
 package com.interlinedlist.android.feature.documents.data.remote
 
+import com.interlinedlist.android.feature.documents.data.remote.dto.CollaboratorEnvelope
+import com.interlinedlist.android.feature.documents.data.remote.dto.CollaboratorUsersResponse
+import com.interlinedlist.android.feature.documents.data.remote.dto.CollaboratorsResponse
 import com.interlinedlist.android.feature.documents.data.remote.dto.CreateDocumentRequest
 import com.interlinedlist.android.feature.documents.data.remote.dto.CreateFolderRequest
 import com.interlinedlist.android.feature.documents.data.remote.dto.CreateShareLinkRequest
@@ -8,9 +11,15 @@ import com.interlinedlist.android.feature.documents.data.remote.dto.DocumentResp
 import com.interlinedlist.android.feature.documents.data.remote.dto.FolderListResponse
 import com.interlinedlist.android.feature.documents.data.remote.dto.FolderResponse
 import com.interlinedlist.android.feature.documents.data.remote.dto.FromTemplateRequest
+import com.interlinedlist.android.feature.documents.data.remote.dto.InviteCollaboratorRequest
+import com.interlinedlist.android.feature.documents.data.remote.dto.PresenceResponse
 import com.interlinedlist.android.feature.documents.data.remote.dto.ShareLinkEnvelope
 import com.interlinedlist.android.feature.documents.data.remote.dto.ShareLinksResponse
 import com.interlinedlist.android.feature.documents.data.remote.dto.SharedDocumentResponse
+import com.interlinedlist.android.feature.documents.data.remote.dto.SyncPullResponse
+import com.interlinedlist.android.feature.documents.data.remote.dto.SyncPushRequest
+import com.interlinedlist.android.feature.documents.data.remote.dto.TreeResponse
+import com.interlinedlist.android.feature.documents.data.remote.dto.UpdateCollaboratorRoleRequest
 import com.interlinedlist.android.feature.documents.data.remote.dto.UpdateDocumentRequest
 import com.interlinedlist.android.feature.documents.data.remote.dto.UpdateFolderRequest
 import okhttp3.MultipartBody
@@ -18,7 +27,9 @@ import okhttp3.ResponseBody
 import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
+import retrofit2.http.Header
 import retrofit2.http.Multipart
+import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.PUT
 import retrofit2.http.Part
@@ -47,6 +58,18 @@ interface DocumentsApi {
     suspend fun updateDocument(
         @Path("id") id: String,
         @Body body: UpdateDocumentRequest,
+    ): DocumentResponse
+
+    /**
+     * Partial update with optimistic concurrency. The document's current [ifMatch]
+     * version is sent as the `If-Match` header; a stale value is rejected by the
+     * server (surfaced as a conflict) rather than overwriting a concurrent edit.
+     */
+    @PATCH("api/documents/{id}")
+    suspend fun patchDocument(
+        @Path("id") id: String,
+        @Body body: UpdateDocumentRequest,
+        @Header("If-Match") ifMatch: String?,
     ): DocumentResponse
 
     @DELETE("api/documents/{id}")
@@ -129,4 +152,65 @@ interface DocumentsApi {
     /** Claims edit/admin access to a shared document as the logged-in user. */
     @POST("api/documents/shared/{token}")
     suspend fun claimSharedDocument(@Path("token") token: String)
+
+    // --- Delta sync --------------------------------------------------------
+
+    /**
+     * Delta PULL: folders + documents changed since [lastSyncAt] (both upserts and
+     * `deletedAt` tombstones), plus a fresh `lastSyncAt` cursor to persist. A null
+     * cursor returns the full set.
+     */
+    @GET("api/documents/sync")
+    suspend fun pullSync(@Query("lastSyncAt") lastSyncAt: String?): SyncPullResponse
+
+    /** Batch PUSH of queued local operations. */
+    @POST("api/documents/sync")
+    suspend fun pushSync(@Body body: SyncPushRequest): SyncPullResponse
+
+    /** Combined folder + document sidebar tree (folders embed their documents). */
+    @GET("api/documents/tree")
+    suspend fun getTree(): TreeResponse
+
+    // --- Collaborators -----------------------------------------------------
+
+    @GET("api/documents/{id}/collaborators")
+    suspend fun getCollaborators(@Path("id") id: String): CollaboratorsResponse
+
+    /** Searches users who can be invited (optionally excluding current collaborators). */
+    @GET("api/documents/{id}/collaborators/users")
+    suspend fun searchCollaboratorUsers(
+        @Path("id") id: String,
+        @Query("search") search: String?,
+        @Query("limit") limit: Int? = null,
+        @Query("excludeCollaborators") excludeCollaborators: Boolean? = null,
+    ): CollaboratorUsersResponse
+
+    @POST("api/documents/{id}/collaborators")
+    suspend fun inviteCollaborator(
+        @Path("id") id: String,
+        @Body body: InviteCollaboratorRequest,
+    ): CollaboratorEnvelope
+
+    @PUT("api/documents/{id}/collaborators/{userId}")
+    suspend fun updateCollaboratorRole(
+        @Path("id") id: String,
+        @Path("userId") userId: String,
+        @Body body: UpdateCollaboratorRoleRequest,
+    ): CollaboratorEnvelope
+
+    @DELETE("api/documents/{id}/collaborators/{userId}")
+    suspend fun removeCollaborator(
+        @Path("id") id: String,
+        @Path("userId") userId: String,
+    )
+
+    // --- Presence ----------------------------------------------------------
+
+    /** Heartbeat: marks the current user present on the document; returns everyone here. */
+    @POST("api/documents/{id}/presence")
+    suspend fun sendPresence(@Path("id") id: String): PresenceResponse
+
+    /** Leaves the document (stops the heartbeat). */
+    @DELETE("api/documents/{id}/presence")
+    suspend fun leavePresence(@Path("id") id: String)
 }

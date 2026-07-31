@@ -7,6 +7,8 @@ import com.interlinedlist.android.feature.documents.data.DocumentsRepository
 import com.interlinedlist.android.feature.documents.data.local.DocumentDao
 import com.interlinedlist.android.feature.documents.data.local.DocumentsDatabase
 import com.interlinedlist.android.feature.documents.data.local.FolderDao
+import com.interlinedlist.android.feature.documents.data.local.PendingOpDao
+import com.interlinedlist.android.feature.documents.data.local.SyncMetaDao
 import com.interlinedlist.android.feature.documents.data.remote.DocumentsApi
 import dagger.Binds
 import dagger.Module
@@ -53,4 +55,10 @@ object DocumentsDataModule {
 
     @Provides
     fun provideFolderDao(db: DocumentsDatabase): FolderDao = db.folderDao()
+
+    @Provides
+    fun providePendingOpDao(db: DocumentsDatabase): PendingOpDao = db.pendingOpDao()
+
+    @Provides
+    fun provideSyncMetaDao(db: DocumentsDatabase): SyncMetaDao = db.syncMetaDao()
 }

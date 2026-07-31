@@ -51,7 +51,9 @@ class DefaultDocumentsRepositoryTest {
         api = retrofit.create(DocumentsApi::class.java)
         documentDao = FakeDocumentDao()
         folderDao = FakeFolderDao()
-        repository = DefaultDocumentsRepository(api, documentDao, folderDao, json, dispatchers)
+        repository = DefaultDocumentsRepository(
+            api, documentDao, folderDao, FakePendingOpDao(), FakeSyncMetaDao(), json, dispatchers,
+        )
     }
 
     @After
