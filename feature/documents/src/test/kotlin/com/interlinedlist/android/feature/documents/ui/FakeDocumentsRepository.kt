@@ -1,0 +1,333 @@
+package com.interlinedlist.android.feature.documents.ui
+
+import com.interlinedlist.android.core.common.result.ApiResult
+import com.interlinedlist.android.core.common.result.AppError
+import com.interlinedlist.android.feature.documents.data.DocumentsRepository
+import com.interlinedlist.android.feature.documents.data.SaveOutcome
+import com.interlinedlist.android.feature.documents.domain.Collaborator
+import com.interlinedlist.android.feature.documents.domain.CollaboratorCandidate
+import com.interlinedlist.android.feature.documents.domain.CollaboratorRole
+import com.interlinedlist.android.feature.documents.domain.Document
+import com.interlinedlist.android.feature.documents.domain.DocumentFolder
+import com.interlinedlist.android.feature.documents.domain.DocumentTemplate
+import com.interlinedlist.android.feature.documents.domain.FolderContents
+import com.interlinedlist.android.feature.documents.domain.FolderNode
+import com.interlinedlist.android.feature.documents.domain.FolderSummary
+import com.interlinedlist.android.feature.documents.domain.FolderTree
+import com.interlinedlist.android.feature.documents.domain.Presence
+import com.interlinedlist.android.feature.documents.domain.ShareLink
+import com.interlinedlist.android.feature.documents.domain.ShareRole
+import com.interlinedlist.android.feature.documents.domain.SharedDocument
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.map
+
+/**
+ * In-memory [DocumentsRepository] for ViewModel tests. Backed by StateFlows of a
+ * flat folder list + documents so tests observe the same reactive tree-building
+ * behaviour as Room without a device. Failure modes are injectable per operation.
+ */
+class FakeDocumentsRepository : DocumentsRepository {
+
+    val folders = MutableStateFlow<List<DocumentFolder>>(emptyList())
+    val documents = MutableStateFlow<List<Document>>(emptyList())
+    val documentFlow = MutableStateFlow<Document?>(null)
+
+    var refreshTreeResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var refreshDocumentResult: ApiResult<Document>? = null
+    var createResult: ApiResult<Document>? = null
+    var updateResult: ApiResult<Document>? = null
+    var moveDocumentResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var deleteResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var uploadResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var createFolderResult: ApiResult<DocumentFolder>? = null
+    var renameFolderResult: ApiResult<DocumentFolder>? = null
+    var moveFolderResult: ApiResult<DocumentFolder>? = null
+    var deleteFolderResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var templatesResult: ApiResult<List<DocumentTemplate>> = ApiResult.Success(emptyList())
+    var seedTemplatesResult: ApiResult<List<DocumentTemplate>>? = null
+    var fromTemplateResult: ApiResult<Document>? = null
+    var searchResult: ApiResult<List<Document>> = ApiResult.Success(emptyList())
+
+    // Sharing.
+    var shareLinksResult: ApiResult<List<ShareLink>> = ApiResult.Success(emptyList())
+    var createShareLinkResult: ApiResult<ShareLink>? = null
+    var revokeShareLinkResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var resolveSharedResult: ApiResult<SharedDocument>? = null
+    var claimSharedResult: ApiResult<Unit> = ApiResult.Success(Unit)
+
+    // Sync + collaboration + presence.
+    val pendingCount = MutableStateFlow(0)
+    var patchOutcome: SaveOutcome? = null
+    var pullDeltaResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var pushPendingResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var collaboratorsResult: ApiResult<List<Collaborator>> = ApiResult.Success(emptyList())
+    var searchUsersResult: ApiResult<List<CollaboratorCandidate>> = ApiResult.Success(emptyList())
+    var inviteResult: ApiResult<Collaborator>? = null
+    var updateRoleResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var removeCollaboratorResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var sendPresenceResult: ApiResult<List<Presence>> = ApiResult.Success(emptyList())
+    var leavePresenceResult: ApiResult<Unit> = ApiResult.Success(Unit)
+
+    var lastPatch: Update? = null
+    var lastInvite: Invite? = null
+    var lastRoleChange: RoleChange? = null
+    var lastRemovedUserId: String? = null
+    var lastSearchUsersQuery: String? = null
+    var sendPresenceCount = 0
+    var leavePresenceCount = 0
+
+    data class Invite(val documentId: String, val userId: String, val role: CollaboratorRole)
+    data class RoleChange(val documentId: String, val userId: String, val role: CollaboratorRole)
+
+    var refreshTreeCount = 0
+    var seedTemplatesCount = 0
+    var lastCreate: Create? = null
+    var lastCreateInFolder: Create? = null
+    var lastUpdate: Update? = null
+    var lastMove: Move? = null
+    var lastDeletedDocId: String? = null
+    var lastFolderCreate: FolderCreate? = null
+    var lastFolderRename: FolderRename? = null
+    var lastDeletedFolderId: String? = null
+    var lastSearchQuery: String? = null
+    var createShareLinkCount = 0
+    var revokeShareLinkCount = 0
+    var claimSharedCount = 0
+    var lastCreatedShareRole: ShareRole? = null
+    var lastRevokedToken: String? = null
+    var lastResolvedToken: String? = null
+    var lastClaimedToken: String? = null
+
+    data class Create(val title: String, val content: String, val isPublic: Boolean, val folderId: String?)
+    data class Update(val id: String, val title: String, val content: String, val isPublic: Boolean, val folderId: String?)
+    data class Move(val id: String, val folderId: String?)
+    data class FolderCreate(val name: String, val parentId: String?)
+    data class FolderRename(val id: String, val name: String)
+
+    private fun tree(): FolderNode {
+        val byFolder = documents.value.filter { it.folderId != null }.groupBy { it.folderId!! }
+        val root = documents.value.filter { it.folderId == null }
+        return FolderTree.build(folders.value, byFolder, root)
+    }
+
+    override fun observeFolderContents(folderId: String?) =
+        combine2(folders, documents) { _, _ -> FolderTree.contentsOf(tree(), folderId) }
+
+    override fun observeFolderSummaries() =
+        combine2(folders, documents) { _, _ -> flatten(tree()) }
+
+    override fun observeDocument(id: String) = documentFlow.map { it }
+
+    override fun observePendingCount() = pendingCount.map { it }
+
+    override suspend fun refreshTree(): ApiResult<Unit> {
+        refreshTreeCount++
+        return refreshTreeResult
+    }
+
+    override suspend fun refreshDocument(id: String): ApiResult<Document> =
+        refreshDocumentResult ?: ApiResult.Failure(AppError.NotFound("not set"))
+
+    override suspend fun createDocument(
+        title: String,
+        content: String,
+        isPublic: Boolean,
+        folderId: String?,
+    ): ApiResult<Document> {
+        lastCreate = Create(title, content, isPublic, folderId)
+        return createResult ?: ApiResult.Failure(AppError.Unknown("not set"))
+    }
+
+    override suspend fun createDocumentInFolder(
+        folderId: String,
+        title: String,
+        content: String,
+        isPublic: Boolean,
+    ): ApiResult<Document> {
+        lastCreateInFolder = Create(title, content, isPublic, folderId)
+        return createResult ?: ApiResult.Failure(AppError.Unknown("not set"))
+    }
+
+    override suspend fun updateDocument(
+        id: String,
+        title: String,
+        content: String,
+        isPublic: Boolean,
+        folderId: String?,
+    ): ApiResult<Document> {
+        lastUpdate = Update(id, title, content, isPublic, folderId)
+        return updateResult ?: ApiResult.Failure(AppError.Unknown("not set"))
+    }
+
+    override suspend fun patchDocument(
+        id: String,
+        title: String,
+        content: String,
+        isPublic: Boolean,
+        folderId: String?,
+        expectedVersion: Int?,
+    ): SaveOutcome {
+        lastPatch = Update(id, title, content, isPublic, folderId)
+        return patchOutcome ?: SaveOutcome.Success(testDocument(id, title, content))
+    }
+
+    override suspend fun moveDocument(id: String, folderId: String?): ApiResult<Unit> {
+        lastMove = Move(id, folderId)
+        return moveDocumentResult
+    }
+
+    override suspend fun deleteDocument(id: String): ApiResult<Unit> {
+        lastDeletedDocId = id
+        return deleteResult
+    }
+
+    override suspend fun uploadImage(
+        documentId: String,
+        fileName: String,
+        mimeType: String,
+        bytes: ByteArray,
+    ): ApiResult<Unit> = uploadResult
+
+    override suspend fun createFolder(name: String, parentId: String?): ApiResult<DocumentFolder> {
+        lastFolderCreate = FolderCreate(name, parentId)
+        return createFolderResult ?: ApiResult.Success(DocumentFolder("new-folder", name, parentId))
+    }
+
+    override suspend fun renameFolder(id: String, name: String): ApiResult<DocumentFolder> {
+        lastFolderRename = FolderRename(id, name)
+        return renameFolderResult ?: ApiResult.Success(DocumentFolder(id, name, null))
+    }
+
+    override suspend fun moveFolder(id: String, newParentId: String?): ApiResult<DocumentFolder> =
+        moveFolderResult ?: ApiResult.Success(DocumentFolder(id, "moved", newParentId))
+
+    override suspend fun deleteFolder(id: String): ApiResult<Unit> {
+        lastDeletedFolderId = id
+        return deleteFolderResult
+    }
+
+    override suspend fun getTemplates(): ApiResult<List<DocumentTemplate>> = templatesResult
+
+    override suspend fun seedDefaultTemplates(): ApiResult<List<DocumentTemplate>> {
+        seedTemplatesCount++
+        return seedTemplatesResult ?: templatesResult
+    }
+
+    override suspend fun createFromTemplate(templateId: String, targetFolderId: String?): ApiResult<Document> =
+        fromTemplateResult ?: ApiResult.Failure(AppError.Unknown("not set"))
+
+    override suspend fun searchDocuments(query: String): ApiResult<List<Document>> {
+        lastSearchQuery = query
+        return searchResult
+    }
+
+    override suspend fun getShareLinks(documentId: String): ApiResult<List<ShareLink>> = shareLinksResult
+
+    override suspend fun createShareLink(documentId: String, role: ShareRole): ApiResult<ShareLink> {
+        createShareLinkCount++
+        lastCreatedShareRole = role
+        return createShareLinkResult ?: ApiResult.Success(
+            ShareLink("link-new", "token-new", role, null, null, null),
+        )
+    }
+
+    override suspend fun revokeShareLink(documentId: String, token: String): ApiResult<Unit> {
+        revokeShareLinkCount++
+        lastRevokedToken = token
+        return revokeShareLinkResult
+    }
+
+    override suspend fun resolveSharedDocument(token: String): ApiResult<SharedDocument> {
+        lastResolvedToken = token
+        return resolveSharedResult ?: ApiResult.Success(
+            SharedDocument(token, "D", "Untitled", null, null, ShareRole.VIEW),
+        )
+    }
+
+    override suspend fun claimSharedDocument(token: String): ApiResult<Unit> {
+        claimSharedCount++
+        lastClaimedToken = token
+        return claimSharedResult
+    }
+
+    override suspend fun pullDelta(): ApiResult<Unit> = pullDeltaResult
+
+    override suspend fun pushPendingOps(): ApiResult<Unit> = pushPendingResult
+
+    override suspend fun getCollaborators(documentId: String): ApiResult<List<Collaborator>> =
+        collaboratorsResult
+
+    override suspend fun searchCollaboratorUsers(
+        documentId: String,
+        query: String,
+    ): ApiResult<List<CollaboratorCandidate>> {
+        lastSearchUsersQuery = query
+        return searchUsersResult
+    }
+
+    override suspend fun inviteCollaborator(
+        documentId: String,
+        userId: String,
+        role: CollaboratorRole,
+    ): ApiResult<Collaborator> {
+        lastInvite = Invite(documentId, userId, role)
+        return inviteResult ?: ApiResult.Success(
+            Collaborator(userId, role, null, userId, null, null),
+        )
+    }
+
+    override suspend fun updateCollaboratorRole(
+        documentId: String,
+        userId: String,
+        role: CollaboratorRole,
+    ): ApiResult<Unit> {
+        lastRoleChange = RoleChange(documentId, userId, role)
+        return updateRoleResult
+    }
+
+    override suspend fun removeCollaborator(documentId: String, userId: String): ApiResult<Unit> {
+        lastRemovedUserId = userId
+        return removeCollaboratorResult
+    }
+
+    override suspend fun sendPresence(documentId: String): ApiResult<List<Presence>> {
+        sendPresenceCount++
+        return sendPresenceResult
+    }
+
+    override suspend fun leavePresence(documentId: String): ApiResult<Unit> {
+        leavePresenceCount++
+        return leavePresenceResult
+    }
+
+    private fun flatten(node: FolderNode): List<FolderSummary> = buildList {
+        node.children.forEach { child ->
+            add(FolderSummary(child.id, child.name, child.documents.size, child.children.size))
+            addAll(flatten(child))
+        }
+    }
+}
+
+/** Small combine helper to keep the fake independent of kotlinx.coroutines.flow.combine imports. */
+private fun <A, B, R> combine2(
+    a: MutableStateFlow<A>,
+    b: MutableStateFlow<B>,
+    transform: (A, B) -> R,
+) = kotlinx.coroutines.flow.combine(a, b) { av, bv -> transform(av, bv) }
+
+/** Shorthand for building a domain document in tests. */
+fun testDocument(
+    id: String,
+    title: String = "Doc $id",
+    content: String? = null,
+    folderId: String? = null,
+) = Document(
+    id = id,
+    title = title,
+    content = content,
+    snippet = content?.take(20) ?: "",
+    folderId = folderId,
+    folderName = null,
+    isPublic = false,
+    updatedAt = null,
+)

@@ -34,3 +34,9 @@ google-services.json
 
 # Android Profiling
 *.hprof
+
+# Agent git worktrees (temporary, isolated builds)
+.claude/worktrees/
+
+# Stale IDE/compiler bin outputs
+**/bin/
