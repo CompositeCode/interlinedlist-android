@@ -21,6 +21,7 @@ import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.CreateNewFolder
+import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
@@ -64,6 +65,7 @@ object DocumentsBrowserTestTags {
     const val CREATE_DOC = "browserCreateDoc"
     const val CREATE_FOLDER = "browserCreateFolder"
     const val SEARCH_ACTION = "browserSearchAction"
+    const val TEMPLATES_ACTION = "browserTemplatesAction"
     const val SEARCH_FIELD = "browserSearchField"
     const val SEARCH_RESULTS = "browserSearchResults"
     const val BREADCRUMB = "browserBreadcrumb"
@@ -88,6 +90,7 @@ fun DocumentsRoute(
     onOpenFolder: (String) -> Unit,
     onOpenDocument: (String) -> Unit,
     modifier: Modifier = Modifier,
+    onOpenTemplates: () -> Unit = {},
     viewModel: DocumentsBrowserViewModel = hiltViewModel(),
 ) {
     DocumentsFolderRoute(
@@ -95,6 +98,7 @@ fun DocumentsRoute(
         onOpenDocument = onOpenDocument,
         onBack = null,
         modifier = modifier,
+        onOpenTemplates = onOpenTemplates,
         viewModel = viewModel,
     )
 }
@@ -109,6 +113,7 @@ fun DocumentsFolderRoute(
     onOpenDocument: (String) -> Unit,
     onBack: (() -> Unit)?,
     modifier: Modifier = Modifier,
+    onOpenTemplates: () -> Unit = {},
     viewModel: DocumentsBrowserViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -126,6 +131,7 @@ fun DocumentsFolderRoute(
         onCloseSearch = viewModel::closeSearch,
         onSearchQueryChange = viewModel::onSearchQueryChange,
         onBack = onBack,
+        onOpenTemplates = onOpenTemplates,
         modifier = modifier,
     )
 }
@@ -147,6 +153,7 @@ fun DocumentsBrowserScreen(
     onSearchQueryChange: (String) -> Unit,
     onBack: (() -> Unit)?,
     modifier: Modifier = Modifier,
+    onOpenTemplates: () -> Unit = {},
 ) {
     var dialog by remember { mutableStateOf<BrowserDialog>(BrowserDialog.None) }
 
@@ -174,6 +181,12 @@ fun DocumentsBrowserScreen(
                         modifier = Modifier.testTag(DocumentsBrowserTestTags.SEARCH_ACTION),
                     ) {
                         Icon(Icons.Default.Search, contentDescription = "Search documents")
+                    }
+                    IconButton(
+                        onClick = onOpenTemplates,
+                        modifier = Modifier.testTag(DocumentsBrowserTestTags.TEMPLATES_ACTION),
+                    ) {
+                        Icon(Icons.Default.Dashboard, contentDescription = "Templates")
                     }
                     IconButton(
                         onClick = { dialog = BrowserDialog.CreateFolder },

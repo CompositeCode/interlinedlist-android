@@ -39,6 +39,7 @@ import com.interlinedlist.android.feature.documents.ui.editor.DocumentEditorRout
 import com.interlinedlist.android.feature.documents.ui.share.DocumentShareRoute
 import com.interlinedlist.android.feature.documents.ui.share.SharedDocumentRoute
 import com.interlinedlist.android.feature.documents.ui.collaborators.DocumentCollaboratorsRoute
+import com.interlinedlist.android.feature.documents.ui.templates.DocumentTemplatesRoute
 import com.interlinedlist.android.feature.integrations.ui.accounts.ConnectedAccountsRoute
 import com.interlinedlist.android.feature.integrations.ui.export.ExportRoute
 import com.interlinedlist.android.feature.integrations.ui.github.GitHubRoute
@@ -103,6 +104,7 @@ object Routes {
     // Documents destinations.
     const val DOCUMENT_FOLDER = "documents/folder/{folderId}"
     const val DOCUMENT_EDITOR = "documents/editor/{documentId}"
+    const val DOCUMENT_TEMPLATES = "documents/templates"
 
     // Documents sharing (Milestone F).
     const val DOCUMENT_SHARE = "documents/{documentId}/share"
@@ -281,6 +283,7 @@ private fun MainShell(onLoggedOut: () -> Unit) {
                     onOpenList = { id -> tabNav.navigate(Routes.listDetail(id)) },
                     onOpenConnections = { tabNav.navigate(Routes.LIST_CONNECTIONS) },
                     onOpenSharedWithMe = { tabNav.navigate(Routes.LISTS_SHARED_WITH_ME) },
+                    onOpenFolders = { tabNav.navigate(Routes.LIST_FOLDERS) },
                 )
             }
             composable(
@@ -345,6 +348,13 @@ private fun MainShell(onLoggedOut: () -> Unit) {
                 DocumentsRoute(
                     onOpenFolder = { id -> tabNav.navigate(Routes.documentFolder(id)) },
                     onOpenDocument = { id -> tabNav.navigate(Routes.documentEditor(id)) },
+                    onOpenTemplates = { tabNav.navigate(Routes.DOCUMENT_TEMPLATES) },
+                )
+            }
+            composable(Routes.DOCUMENT_TEMPLATES) {
+                DocumentTemplatesRoute(
+                    onOpenDocument = { id -> tabNav.navigate(Routes.documentEditor(id)) },
+                    onBack = { tabNav.popBackStack() },
                 )
             }
             composable(
