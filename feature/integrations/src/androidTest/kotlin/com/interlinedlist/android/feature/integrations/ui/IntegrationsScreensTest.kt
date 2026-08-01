@@ -8,12 +8,17 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.interlinedlist.android.core.designsystem.theme.InterlinedListTheme
 import com.interlinedlist.android.feature.integrations.domain.ConnectedAccount
 import com.interlinedlist.android.feature.integrations.domain.ExportType
+import com.interlinedlist.android.feature.integrations.domain.GitHubIssue
+import com.interlinedlist.android.feature.integrations.domain.GitHubRepo
 import com.interlinedlist.android.feature.integrations.ui.accounts.ConnectedAccountsScreen
 import com.interlinedlist.android.feature.integrations.ui.accounts.ConnectedAccountsTestTags
 import com.interlinedlist.android.feature.integrations.ui.accounts.ConnectedAccountsUiState
 import com.interlinedlist.android.feature.integrations.ui.export.ExportScreen
 import com.interlinedlist.android.feature.integrations.ui.export.ExportTestTags
 import com.interlinedlist.android.feature.integrations.ui.export.ExportUiState
+import com.interlinedlist.android.feature.integrations.ui.github.GitHubScreen
+import com.interlinedlist.android.feature.integrations.ui.github.GitHubTestTags
+import com.interlinedlist.android.feature.integrations.ui.github.GitHubUiState
 import com.interlinedlist.android.feature.integrations.ui.hub.IntegrationsHubScreen
 import com.interlinedlist.android.feature.integrations.ui.hub.IntegrationsHubTestTags
 import com.interlinedlist.android.feature.integrations.ui.hub.IntegrationsHubUiState
@@ -91,5 +96,84 @@ class IntegrationsScreensTest {
             .assertIsDisplayed()
         composeRule.onNodeWithTag(ConnectedAccountsTestTags.status(ConnectedAccount.Provider.BLUESKY))
             .assertIsDisplayed()
+    }
+
+    @Test
+    fun github_repos_renderAndSelect() {
+        var selected: GitHubRepo? = null
+        val repo = GitHubRepo("adron", "hello", description = "sample")
+        composeRule.setContent {
+            InterlinedListTheme {
+                GitHubScreen(
+                    state = GitHubUiState(isLoadingRepos = false, repos = listOf(repo)),
+                    onBack = {},
+                    onRetryRepos = {},
+                    onSelectRepo = { selected = it },
+                    onClearRepo = {},
+                    onCreateIssue = { _, _, _, _ -> },
+                    onAddComment = { _, _ -> },
+                    onMessageShown = {},
+                    onCreateErrorShown = {},
+                    onCommentErrorShown = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag(GitHubTestTags.REPO_LIST).assertIsDisplayed()
+        composeRule.onNodeWithTag(GitHubTestTags.repo("adron/hello")).assertIsDisplayed().performClick()
+        assert(selected == repo)
+    }
+
+    @Test
+    fun github_notConnected_showsConnectPrompt() {
+        composeRule.setContent {
+            InterlinedListTheme {
+                GitHubScreen(
+                    state = GitHubUiState(isLoadingRepos = false, notConnected = true),
+                    onBack = {},
+                    onRetryRepos = {},
+                    onSelectRepo = {},
+                    onClearRepo = {},
+                    onCreateIssue = { _, _, _, _ -> },
+                    onAddComment = { _, _ -> },
+                    onMessageShown = {},
+                    onCreateErrorShown = {},
+                    onCommentErrorShown = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag(GitHubTestTags.NOT_CONNECTED).assertIsDisplayed()
+    }
+
+    @Test
+    fun github_issues_renderForSelectedRepo() {
+        val repo = GitHubRepo("adron", "hello")
+        composeRule.setContent {
+            InterlinedListTheme {
+                GitHubScreen(
+                    state = GitHubUiState(
+                        isLoadingRepos = false,
+                        repos = listOf(repo),
+                        selectedRepo = repo,
+                        isLoadingIssues = false,
+                        issues = listOf(GitHubIssue(number = 7, title = "Fix bug", labels = listOf("bug"))),
+                    ),
+                    onBack = {},
+                    onRetryRepos = {},
+                    onSelectRepo = {},
+                    onClearRepo = {},
+                    onCreateIssue = { _, _, _, _ -> },
+                    onAddComment = { _, _ -> },
+                    onMessageShown = {},
+                    onCreateErrorShown = {},
+                    onCommentErrorShown = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag(GitHubTestTags.ISSUE_LIST).assertIsDisplayed()
+        composeRule.onNodeWithTag(GitHubTestTags.issue(7)).assertIsDisplayed()
+        composeRule.onNodeWithTag(GitHubTestTags.NEW_ISSUE_FAB).assertIsDisplayed()
     }
 }
