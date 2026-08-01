@@ -29,6 +29,9 @@ import androidx.navigation.navDeepLink
 import androidx.navigation.navigation
 import com.interlinedlist.android.feature.auth.nav.AuthRoutes
 import com.interlinedlist.android.feature.auth.nav.authGraph
+import com.interlinedlist.android.feature.billing.navigation.BillingDestinations
+import com.interlinedlist.android.feature.billing.navigation.billingGraph
+import com.interlinedlist.android.feature.billing.navigation.navigateToUpsell
 import com.interlinedlist.android.feature.directmessages.navigation.DirectMessagesDestinations
 import com.interlinedlist.android.feature.directmessages.navigation.directMessagesGraph
 import com.interlinedlist.android.feature.directmessages.navigation.navigateToDmThread
@@ -41,6 +44,7 @@ import com.interlinedlist.android.feature.documents.ui.share.SharedDocumentRoute
 import com.interlinedlist.android.feature.documents.ui.collaborators.DocumentCollaboratorsRoute
 import com.interlinedlist.android.feature.integrations.ui.accounts.ConnectedAccountsRoute
 import com.interlinedlist.android.feature.integrations.ui.export.ExportRoute
+import com.interlinedlist.android.feature.integrations.ui.github.GitHubRoute
 import com.interlinedlist.android.feature.integrations.ui.hub.IntegrationsRoute
 import com.interlinedlist.android.feature.lists.ui.connections.ConnectionsRoute
 import com.interlinedlist.android.feature.lists.ui.detail.ListDetailRoute
@@ -59,6 +63,7 @@ import com.interlinedlist.android.feature.notifications.ui.NotificationsRoute
 import com.interlinedlist.android.feature.organizations.ui.detail.OrganizationDetailRoute
 import com.interlinedlist.android.feature.organizations.ui.list.OrganizationsRoute
 import com.interlinedlist.android.feature.profile.ui.account.AccountSettingsRoute
+import com.interlinedlist.android.feature.profile.ui.account.BlockedMutedRoute
 import com.interlinedlist.android.feature.profile.ui.account.ConnectedAccountsRoute as ProfileConnectedAccountsRoute
 import com.interlinedlist.android.feature.profile.ui.account.SessionsRoute
 import com.interlinedlist.android.feature.profile.ui.edit.EditProfileRoute
@@ -123,6 +128,7 @@ object Routes {
     // Account & security (Milestone K), reached from the Account hub.
     const val ACCOUNT_SESSIONS = "account/sessions"
     const val ACCOUNT_CONNECTED = "account/connected-accounts"
+    const val ACCOUNT_BLOCKED_MUTED = "account/blocked-muted"
     const val ACCOUNT_SETTINGS = "account/settings"
 
     // Notifications / organizations / integrations (reached from the Account hub).
@@ -133,6 +139,7 @@ object Routes {
     const val INTEGRATIONS = "integrations"
     const val INTEGRATIONS_EXPORT = "integrations/export"
     const val INTEGRATIONS_ACCOUNTS = "integrations/accounts"
+    const val INTEGRATIONS_GITHUB = "integrations/github"
 
     fun listDetail(id: String) = "lists/$id"
     fun listSchema(id: String) = "lists/$id/schema"
@@ -404,9 +411,14 @@ private fun MainShell(onLoggedOut: () -> Unit) {
                     onOpenIntegrations = { tabNav.navigate(Routes.INTEGRATIONS) },
                     onOpenSessions = { tabNav.navigate(Routes.ACCOUNT_SESSIONS) },
                     onOpenConnectedAccounts = { tabNav.navigate(Routes.ACCOUNT_CONNECTED) },
+                    onOpenBlockedMuted = { tabNav.navigate(Routes.ACCOUNT_BLOCKED_MUTED) },
+                    onOpenUpgrade = { tabNav.navigateToUpsell() },
                     onOpenAccountSettings = { tabNav.navigate(Routes.ACCOUNT_SETTINGS) },
                     onSignOut = { logoutViewModel.logout(onLoggedOut) },
                 )
+            }
+            composable(Routes.ACCOUNT_BLOCKED_MUTED) {
+                BlockedMutedRoute(onBack = { tabNav.popBackStack() })
             }
             composable(Routes.ACCOUNT_SESSIONS) {
                 SessionsRoute(onBack = { tabNav.popBackStack() })
@@ -520,6 +532,7 @@ private fun MainShell(onLoggedOut: () -> Unit) {
                     onBack = { tabNav.popBackStack() },
                     onOpenExport = { tabNav.navigate(Routes.INTEGRATIONS_EXPORT) },
                     onOpenConnectedAccounts = { tabNav.navigate(Routes.INTEGRATIONS_ACCOUNTS) },
+                    onOpenGitHub = { tabNav.navigate(Routes.INTEGRATIONS_GITHUB) },
                 )
             }
             composable(Routes.INTEGRATIONS_EXPORT) {
@@ -528,6 +541,13 @@ private fun MainShell(onLoggedOut: () -> Unit) {
             composable(Routes.INTEGRATIONS_ACCOUNTS) {
                 ConnectedAccountsRoute(onBack = { tabNav.popBackStack() })
             }
+            composable(Routes.INTEGRATIONS_GITHUB) {
+                GitHubRoute(onBack = { tabNav.popBackStack() })
+            }
+
+            // ---- Billing / subscription upsell (Milestone J) ----
+            // Reached from the Account hub's "Subscription" row (BillingDestinations.UPSELL).
+            billingGraph(onBack = { tabNav.popBackStack() })
         }
     }
 }

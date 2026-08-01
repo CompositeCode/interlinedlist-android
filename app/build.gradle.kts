@@ -52,6 +52,7 @@ dependencies {
     implementation(project(":feature:lists"))
     implementation(project(":feature:messages"))
     implementation(project(":feature:directmessages"))
+    implementation(project(":feature:billing"))
     implementation(project(":feature:documents"))
     implementation(project(":feature:profile"))
     implementation(project(":feature:notifications"))
