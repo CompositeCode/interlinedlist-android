@@ -29,9 +29,6 @@ import androidx.navigation.navDeepLink
 import androidx.navigation.navigation
 import com.interlinedlist.android.feature.auth.nav.AuthRoutes
 import com.interlinedlist.android.feature.auth.nav.authGraph
-import com.interlinedlist.android.feature.billing.navigation.BillingDestinations
-import com.interlinedlist.android.feature.billing.navigation.billingGraph
-import com.interlinedlist.android.feature.billing.navigation.navigateToUpsell
 import com.interlinedlist.android.feature.directmessages.navigation.DirectMessagesDestinations
 import com.interlinedlist.android.feature.directmessages.navigation.directMessagesGraph
 import com.interlinedlist.android.feature.directmessages.navigation.navigateToDmThread
@@ -412,7 +409,6 @@ private fun MainShell(onLoggedOut: () -> Unit) {
                     onOpenSessions = { tabNav.navigate(Routes.ACCOUNT_SESSIONS) },
                     onOpenConnectedAccounts = { tabNav.navigate(Routes.ACCOUNT_CONNECTED) },
                     onOpenBlockedMuted = { tabNav.navigate(Routes.ACCOUNT_BLOCKED_MUTED) },
-                    onOpenUpgrade = { tabNav.navigateToUpsell() },
                     onOpenAccountSettings = { tabNav.navigate(Routes.ACCOUNT_SETTINGS) },
                     onSignOut = { logoutViewModel.logout(onLoggedOut) },
                 )
@@ -544,10 +540,6 @@ private fun MainShell(onLoggedOut: () -> Unit) {
             composable(Routes.INTEGRATIONS_GITHUB) {
                 GitHubRoute(onBack = { tabNav.popBackStack() })
             }
-
-            // ---- Billing / subscription upsell (Milestone J) ----
-            // Reached from the Account hub's "Subscription" row (BillingDestinations.UPSELL).
-            billingGraph(onBack = { tabNav.popBackStack() })
         }
     }
 }

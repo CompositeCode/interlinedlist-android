@@ -26,7 +26,6 @@ import androidx.compose.material.icons.filled.ManageAccounts
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -62,7 +61,6 @@ object AccountMenuTestTags {
     const val SESSIONS = "accountMenuSessions"
     const val CONNECTED_ACCOUNTS = "accountMenuConnectedAccounts"
     const val BLOCKED_MUTED = "accountMenuBlockedMuted"
-    const val UPGRADE = "accountMenuUpgrade"
     const val ACCOUNT_SETTINGS = "accountMenuAccountSettings"
 }
 
@@ -86,7 +84,6 @@ object AccountMenuTestTags {
  * @param onOpenSessions navigate to the Active Sessions screen (within this module).
  * @param onOpenConnectedAccounts navigate to the Connected Accounts screen (within this module).
  * @param onOpenBlockedMuted navigate to the "Blocked & muted" screen (within this module).
- * @param onOpenUpgrade navigate to the subscription upsell (the billing module).
  * @param onOpenAccountSettings navigate to the Account settings screen (within this module).
  * @param onSignOut invoked after the caller performs sign-out; the profile module does
  *   not own session state, so the app wires this to the auth logout + navigation.
@@ -108,9 +105,6 @@ fun ProfileRoute(
     // Defaulted so existing app nav wiring compiles unchanged; wire this to the
     // `account/blocked-muted` route to enable the Blocked & muted screen (Milestone D).
     onOpenBlockedMuted: () -> Unit = {},
-    // Defaulted so existing app nav wiring compiles unchanged; wire this to the
-    // billing upsell route to enable the subscription upgrade flow (Milestone J).
-    onOpenUpgrade: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: ProfileViewModel = hiltViewModel(),
 ) {
@@ -130,7 +124,6 @@ fun ProfileRoute(
         onOpenSessions = onOpenSessions,
         onOpenConnectedAccounts = onOpenConnectedAccounts,
         onOpenBlockedMuted = onOpenBlockedMuted,
-        onOpenUpgrade = onOpenUpgrade,
         onOpenAccountSettings = onOpenAccountSettings,
         onSignOut = onSignOut,
         onRetry = viewModel::refresh,
@@ -157,7 +150,6 @@ fun ProfileScreen(
     onSignOut: () -> Unit,
     onRetry: () -> Unit,
     onOpenBlockedMuted: () -> Unit = {},
-    onOpenUpgrade: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -247,12 +239,6 @@ fun ProfileScreen(
                     label = "Blocked & muted",
                     onClick = onOpenBlockedMuted,
                     tag = AccountMenuTestTags.BLOCKED_MUTED,
-                )
-                AccountMenuRow(
-                    icon = Icons.Default.Star,
-                    label = "Subscription",
-                    onClick = onOpenUpgrade,
-                    tag = AccountMenuTestTags.UPGRADE,
                 )
                 AccountMenuRow(
                     icon = Icons.Default.ManageAccounts,

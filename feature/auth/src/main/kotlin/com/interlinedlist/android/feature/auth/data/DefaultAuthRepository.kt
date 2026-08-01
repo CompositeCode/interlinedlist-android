@@ -96,7 +96,13 @@ class DefaultAuthRepository @Inject constructor(
      */
     private suspend fun signIn(email: String, password: String): ApiResult<User> {
         val tokenResult = safeApiCall(json) {
-            api.createSyncToken(SyncTokenRequest(email, password))
+            api.createSyncToken(
+                SyncTokenRequest(
+                    email,
+                    password,
+                    deviceLabel = "InterlinedList Android · ${android.os.Build.MODEL}",
+                ),
+            )
         }
         val token = when (tokenResult) {
             is ApiResult.Success -> tokenResult.data.token
