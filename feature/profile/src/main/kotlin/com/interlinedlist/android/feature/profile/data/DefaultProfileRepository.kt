@@ -12,6 +12,7 @@ import com.interlinedlist.android.feature.profile.data.mapper.toFollowCounts
 import com.interlinedlist.android.feature.profile.data.mapper.toFollowStatus
 import com.interlinedlist.android.feature.profile.data.mapper.toFollowUser
 import com.interlinedlist.android.feature.profile.data.mapper.toFollowUserOrNull
+import com.interlinedlist.android.feature.profile.data.mapper.toModeratedUserOrNull
 import com.interlinedlist.android.feature.profile.data.mapper.toMutualConnections
 import com.interlinedlist.android.feature.profile.data.mapper.toProfileUser
 import com.interlinedlist.android.feature.profile.data.mapper.toPublicDocumentDetail
@@ -25,14 +26,18 @@ import com.interlinedlist.android.feature.profile.data.remote.dto.AvatarFromUrlR
 import com.interlinedlist.android.feature.profile.data.remote.dto.ChangeEmailRequest
 import com.interlinedlist.android.feature.profile.data.remote.dto.DeleteAccountRequest
 import com.interlinedlist.android.feature.profile.data.remote.dto.ProfileUserDto
+import com.interlinedlist.android.feature.profile.data.remote.dto.ReportUserRequest
 import com.interlinedlist.android.feature.profile.data.remote.dto.UpdateProfileRequest
 import com.interlinedlist.android.feature.profile.domain.FollowCounts
 import com.interlinedlist.android.feature.profile.domain.FollowStatus
 import com.interlinedlist.android.feature.profile.domain.FollowUser
 import com.interlinedlist.android.feature.profile.domain.LinkedIdentity
 import com.interlinedlist.android.feature.profile.domain.LoginSession
+import com.interlinedlist.android.feature.profile.domain.ModeratedUser
+import com.interlinedlist.android.feature.profile.domain.ModerationStatus
 import com.interlinedlist.android.feature.profile.domain.MutualConnections
 import com.interlinedlist.android.feature.profile.domain.ProfileUser
+import com.interlinedlist.android.feature.profile.domain.ReportReason
 import com.interlinedlist.android.feature.profile.domain.PublicDocumentDetail
 import com.interlinedlist.android.feature.profile.domain.PublicDocumentSummary
 import com.interlinedlist.android.feature.profile.domain.PublicListDetail
@@ -297,6 +302,60 @@ class DefaultProfileRepository @Inject constructor(
         withContext(dispatchers.io) {
             safeApiCall(json) { api.deleteAccount(DeleteAccountRequest(username = username, email = email)) }
         }
+
+    // --- Moderation (block / mute / report; read-only lists, nothing cached) ---
+
+    override suspend fun getBlockedUsers(): ApiResult<List<ModeratedUser>> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) {
+                api.getBlocks(limit = LIST_LIMIT).usersOrEmpty.mapNotNull { it.toModeratedUserOrNull() }
+            }
+        }
+
+    override suspend fun getMutedUsers(): ApiResult<List<ModeratedUser>> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) {
+                api.getMutes(limit = LIST_LIMIT).usersOrEmpty.mapNotNull { it.toModeratedUserOrNull() }
+            }
+        }
+
+    override suspend fun getModerationStatus(username: String): ApiResult<ModerationStatus> =
+        withContext(dispatchers.io) {
+            // Two endpoints back the single status; combine them, failing fast if either does.
+            when (val block = safeApiCall(json) { api.getBlockStatus(username).blocked }) {
+                is ApiResult.Success -> when (val mute = safeApiCall(json) { api.getMuteStatus(username).muted }) {
+                    is ApiResult.Success ->
+                        ApiResult.Success(ModerationStatus(isBlocked = block.data, isMuted = mute.data))
+                    is ApiResult.Failure -> mute
+                }
+                is ApiResult.Failure -> block
+            }
+        }
+
+    override suspend fun blockUser(username: String): ApiResult<Unit> =
+        withContext(dispatchers.io) { safeApiCall(json) { api.blockUser(username) } }
+
+    override suspend fun unblockUser(username: String): ApiResult<Unit> =
+        withContext(dispatchers.io) { safeApiCall(json) { api.unblockUser(username) } }
+
+    override suspend fun muteUser(username: String): ApiResult<Unit> =
+        withContext(dispatchers.io) { safeApiCall(json) { api.muteUser(username) } }
+
+    override suspend fun unmuteUser(username: String): ApiResult<Unit> =
+        withContext(dispatchers.io) { safeApiCall(json) { api.unmuteUser(username) } }
+
+    override suspend fun reportUser(
+        username: String,
+        reason: ReportReason,
+        detail: String?,
+    ): ApiResult<Unit> = withContext(dispatchers.io) {
+        safeApiCall(json) {
+            api.reportUser(
+                username,
+                ReportUserRequest(reason = reason.apiValue, detail = detail?.trim()?.takeIf { it.isNotBlank() }),
+            )
+        }
+    }
 
     /** Caches [dto] as the current user, clearing the flag from any stale row first. */
     private suspend fun cacheCurrentUser(dto: ProfileUserDto): ProfileUser {

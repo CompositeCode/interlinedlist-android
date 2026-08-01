@@ -2,8 +2,13 @@ package com.interlinedlist.android.feature.profile.data.remote
 
 import com.interlinedlist.android.feature.profile.data.remote.dto.AvatarFromUrlRequest
 import com.interlinedlist.android.feature.profile.data.remote.dto.AvatarResponse
+import com.interlinedlist.android.feature.profile.data.remote.dto.BlockStatusResponse
+import com.interlinedlist.android.feature.profile.data.remote.dto.BlocksResponse
 import com.interlinedlist.android.feature.profile.data.remote.dto.ChangeEmailRequest
 import com.interlinedlist.android.feature.profile.data.remote.dto.DeleteAccountRequest
+import com.interlinedlist.android.feature.profile.data.remote.dto.MuteStatusResponse
+import com.interlinedlist.android.feature.profile.data.remote.dto.MutesResponse
+import com.interlinedlist.android.feature.profile.data.remote.dto.ReportUserRequest
 import com.interlinedlist.android.feature.profile.data.remote.dto.FollowCountsResponse
 import com.interlinedlist.android.feature.profile.data.remote.dto.FollowListResponse
 import com.interlinedlist.android.feature.profile.data.remote.dto.FollowRequestsResponse
@@ -200,4 +205,51 @@ interface ProfileApi {
     /** Deletes the current user's account (requires the username + email to confirm). */
     @POST("api/user/delete")
     suspend fun deleteAccount(@Body body: DeleteAccountRequest)
+
+    // --- Moderation (block / mute / report) ---
+
+    /** The users the current user has blocked (`{ "blockedUsers": [...], "pagination": {...} }`). */
+    @GET("api/user/blocks")
+    suspend fun getBlocks(
+        @Query("limit") limit: Int? = null,
+        @Query("offset") offset: Int? = null,
+    ): BlocksResponse
+
+    /** The users the current user has muted (`{ "mutedUsers": [...], "pagination": {...} }`). */
+    @GET("api/user/mutes")
+    suspend fun getMutes(
+        @Query("limit") limit: Int? = null,
+        @Query("offset") offset: Int? = null,
+    ): MutesResponse
+
+    /** Whether the current user is blocking [username] (`{ "blocked": true }`). */
+    @GET("api/users/{username}/block")
+    suspend fun getBlockStatus(@Path("username") username: String): BlockStatusResponse
+
+    /** Whether the current user is muting [username] (`{ "muted": true }`). */
+    @GET("api/users/{username}/mute")
+    suspend fun getMuteStatus(@Path("username") username: String): MuteStatusResponse
+
+    /** Blocks [username]. */
+    @POST("api/users/{username}/block")
+    suspend fun blockUser(@Path("username") username: String)
+
+    /** Unblocks [username]. */
+    @DELETE("api/users/{username}/block")
+    suspend fun unblockUser(@Path("username") username: String)
+
+    /** Mutes [username]. */
+    @POST("api/users/{username}/mute")
+    suspend fun muteUser(@Path("username") username: String)
+
+    /** Unmutes [username]. */
+    @DELETE("api/users/{username}/mute")
+    suspend fun unmuteUser(@Path("username") username: String)
+
+    /** Reports [username] with a reason and optional free-text detail. */
+    @POST("api/users/{username}/report")
+    suspend fun reportUser(
+        @Path("username") username: String,
+        @Body body: ReportUserRequest,
+    )
 }

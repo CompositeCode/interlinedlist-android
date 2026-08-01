@@ -9,8 +9,11 @@ import com.interlinedlist.android.feature.profile.domain.FollowStatus
 import com.interlinedlist.android.feature.profile.domain.FollowUser
 import com.interlinedlist.android.feature.profile.domain.LinkedIdentity
 import com.interlinedlist.android.feature.profile.domain.LoginSession
+import com.interlinedlist.android.feature.profile.domain.ModeratedUser
+import com.interlinedlist.android.feature.profile.domain.ModerationStatus
 import com.interlinedlist.android.feature.profile.domain.MutualConnections
 import com.interlinedlist.android.feature.profile.domain.ProfileUser
+import com.interlinedlist.android.feature.profile.domain.ReportReason
 import com.interlinedlist.android.feature.profile.domain.PublicDocumentDetail
 import com.interlinedlist.android.feature.profile.domain.PublicDocumentSummary
 import com.interlinedlist.android.feature.profile.domain.PublicListDetail
@@ -254,6 +257,80 @@ class FakeProfileRepository : ProfileRepository {
         deleteAccountArgs = username to email
         return deleteAccountResult
     }
+
+    // --- Moderation (block / mute / report) ---
+
+    var blockedUsersResult: ApiResult<List<ModeratedUser>> = ApiResult.Success(emptyList())
+    var mutedUsersResult: ApiResult<List<ModeratedUser>> = ApiResult.Success(emptyList())
+    var moderationStatusResult: ApiResult<ModerationStatus> = ApiResult.Success(ModerationStatus())
+    var blockResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var unblockResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var muteResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var unmuteResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var reportResult: ApiResult<Unit> = ApiResult.Success(Unit)
+
+    var blockedUsersCount = 0
+    var mutedUsersCount = 0
+    var moderationStatusUsername: String? = null
+    var blockedUsername: String? = null
+    var unblockedUsername: String? = null
+    var mutedUsername: String? = null
+    var unmutedUsername: String? = null
+    var blockCount = 0
+    var unblockCount = 0
+    var muteCount = 0
+    var unmuteCount = 0
+    var reportArgs: Triple<String, ReportReason, String?>? = null
+    var reportCount = 0
+
+    override suspend fun getBlockedUsers(): ApiResult<List<ModeratedUser>> {
+        blockedUsersCount++
+        return blockedUsersResult
+    }
+
+    override suspend fun getMutedUsers(): ApiResult<List<ModeratedUser>> {
+        mutedUsersCount++
+        return mutedUsersResult
+    }
+
+    override suspend fun getModerationStatus(username: String): ApiResult<ModerationStatus> {
+        moderationStatusUsername = username
+        return moderationStatusResult
+    }
+
+    override suspend fun blockUser(username: String): ApiResult<Unit> {
+        blockedUsername = username
+        blockCount++
+        return blockResult
+    }
+
+    override suspend fun unblockUser(username: String): ApiResult<Unit> {
+        unblockedUsername = username
+        unblockCount++
+        return unblockResult
+    }
+
+    override suspend fun muteUser(username: String): ApiResult<Unit> {
+        mutedUsername = username
+        muteCount++
+        return muteResult
+    }
+
+    override suspend fun unmuteUser(username: String): ApiResult<Unit> {
+        unmutedUsername = username
+        unmuteCount++
+        return unmuteResult
+    }
+
+    override suspend fun reportUser(
+        username: String,
+        reason: ReportReason,
+        detail: String?,
+    ): ApiResult<Unit> {
+        reportArgs = Triple(username, reason, detail)
+        reportCount++
+        return reportResult
+    }
 }
 
 /** Shorthand for building a follow-list/request user in tests. */
@@ -289,6 +366,14 @@ fun testSearchResult(
     username: String = "user$id",
     displayName: String? = "User $id",
 ) = UserSearchResult(id = id, username = username, displayName = displayName, avatarUrl = null)
+
+/** Shorthand for building a blocked/muted user row in tests. */
+fun testModeratedUser(
+    id: String = "m1",
+    username: String = "ada",
+    displayName: String? = "Ada Lovelace",
+    avatarUrl: String? = null,
+) = ModeratedUser(id = id, username = username, displayName = displayName, avatarUrl = avatarUrl)
 
 /** Shorthand for building a login session in tests. */
 fun testSession(

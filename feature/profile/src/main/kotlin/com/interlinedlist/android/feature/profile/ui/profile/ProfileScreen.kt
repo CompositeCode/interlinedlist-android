@@ -15,6 +15,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Edit
@@ -59,6 +60,7 @@ object AccountMenuTestTags {
     const val SEARCH_USERS = "accountMenuSearchUsers"
     const val SESSIONS = "accountMenuSessions"
     const val CONNECTED_ACCOUNTS = "accountMenuConnectedAccounts"
+    const val BLOCKED_MUTED = "accountMenuBlockedMuted"
     const val ACCOUNT_SETTINGS = "accountMenuAccountSettings"
 }
 
@@ -81,6 +83,7 @@ object AccountMenuTestTags {
  * @param onOpenIntegrations navigate to the integrations module.
  * @param onOpenSessions navigate to the Active Sessions screen (within this module).
  * @param onOpenConnectedAccounts navigate to the Connected Accounts screen (within this module).
+ * @param onOpenBlockedMuted navigate to the "Blocked & muted" screen (within this module).
  * @param onOpenAccountSettings navigate to the Account settings screen (within this module).
  * @param onSignOut invoked after the caller performs sign-out; the profile module does
  *   not own session state, so the app wires this to the auth logout + navigation.
@@ -99,6 +102,9 @@ fun ProfileRoute(
     onOpenConnectedAccounts: () -> Unit,
     onOpenAccountSettings: () -> Unit,
     onSignOut: () -> Unit,
+    // Defaulted so existing app nav wiring compiles unchanged; wire this to the
+    // `account/blocked-muted` route to enable the Blocked & muted screen (Milestone D).
+    onOpenBlockedMuted: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: ProfileViewModel = hiltViewModel(),
 ) {
@@ -117,6 +123,7 @@ fun ProfileRoute(
         onOpenIntegrations = onOpenIntegrations,
         onOpenSessions = onOpenSessions,
         onOpenConnectedAccounts = onOpenConnectedAccounts,
+        onOpenBlockedMuted = onOpenBlockedMuted,
         onOpenAccountSettings = onOpenAccountSettings,
         onSignOut = onSignOut,
         onRetry = viewModel::refresh,
@@ -142,6 +149,7 @@ fun ProfileScreen(
     onOpenAccountSettings: () -> Unit,
     onSignOut: () -> Unit,
     onRetry: () -> Unit,
+    onOpenBlockedMuted: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -225,6 +233,12 @@ fun ProfileScreen(
                     label = "Connected accounts",
                     onClick = onOpenConnectedAccounts,
                     tag = AccountMenuTestTags.CONNECTED_ACCOUNTS,
+                )
+                AccountMenuRow(
+                    icon = Icons.Default.Block,
+                    label = "Blocked & muted",
+                    onClick = onOpenBlockedMuted,
+                    tag = AccountMenuTestTags.BLOCKED_MUTED,
                 )
                 AccountMenuRow(
                     icon = Icons.Default.ManageAccounts,

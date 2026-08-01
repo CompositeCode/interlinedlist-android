@@ -6,8 +6,11 @@ import com.interlinedlist.android.feature.profile.domain.FollowStatus
 import com.interlinedlist.android.feature.profile.domain.FollowUser
 import com.interlinedlist.android.feature.profile.domain.LinkedIdentity
 import com.interlinedlist.android.feature.profile.domain.LoginSession
+import com.interlinedlist.android.feature.profile.domain.ModeratedUser
+import com.interlinedlist.android.feature.profile.domain.ModerationStatus
 import com.interlinedlist.android.feature.profile.domain.MutualConnections
 import com.interlinedlist.android.feature.profile.domain.ProfileUser
+import com.interlinedlist.android.feature.profile.domain.ReportReason
 import com.interlinedlist.android.feature.profile.domain.PublicDocumentDetail
 import com.interlinedlist.android.feature.profile.domain.PublicDocumentSummary
 import com.interlinedlist.android.feature.profile.domain.PublicListDetail
@@ -146,4 +149,41 @@ interface ProfileRepository {
      * the account's [username] and [email]. On success the caller signs the user out.
      */
     suspend fun deleteAccount(username: String, email: String): ApiResult<Unit>
+
+    // --- Moderation (block / mute / report) ---
+    // Read-only lists; nothing is cached in Room (YAGNI).
+
+    /** The current user's blocked users via `GET /api/user/blocks`. */
+    suspend fun getBlockedUsers(): ApiResult<List<ModeratedUser>>
+
+    /** The current user's muted users via `GET /api/user/mutes`. */
+    suspend fun getMutedUsers(): ApiResult<List<ModeratedUser>>
+
+    /**
+     * The current user's blocked/muted relationship to [username], combining
+     * `GET /api/users/{username}/block` and `.../mute`.
+     */
+    suspend fun getModerationStatus(username: String): ApiResult<ModerationStatus>
+
+    /** Blocks [username] via `POST /api/users/{username}/block`. */
+    suspend fun blockUser(username: String): ApiResult<Unit>
+
+    /** Unblocks [username] via `DELETE /api/users/{username}/block`. */
+    suspend fun unblockUser(username: String): ApiResult<Unit>
+
+    /** Mutes [username] via `POST /api/users/{username}/mute`. */
+    suspend fun muteUser(username: String): ApiResult<Unit>
+
+    /** Unmutes [username] via `DELETE /api/users/{username}/mute`. */
+    suspend fun unmuteUser(username: String): ApiResult<Unit>
+
+    /**
+     * Reports [username] with a [reason] and optional free-text [detail] via
+     * `POST /api/users/{username}/report`.
+     */
+    suspend fun reportUser(
+        username: String,
+        reason: ReportReason,
+        detail: String?,
+    ): ApiResult<Unit>
 }

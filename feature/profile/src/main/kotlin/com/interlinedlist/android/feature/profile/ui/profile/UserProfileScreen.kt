@@ -10,26 +10,42 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
+import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -42,11 +58,13 @@ import com.interlinedlist.android.core.designsystem.theme.InterlinedListTheme
 import com.interlinedlist.android.core.model.CustomerStatus
 import com.interlinedlist.android.feature.profile.domain.FollowCounts
 import com.interlinedlist.android.feature.profile.domain.FollowStatus
+import com.interlinedlist.android.feature.profile.domain.ModerationStatus
 import com.interlinedlist.android.feature.profile.domain.MutualConnections
 import com.interlinedlist.android.feature.profile.domain.ProfileUser
 import com.interlinedlist.android.feature.profile.domain.PublicDocumentSummary
 import com.interlinedlist.android.feature.profile.domain.PublicListSummary
 import com.interlinedlist.android.feature.profile.domain.PublicPost
+import com.interlinedlist.android.feature.profile.domain.ReportReason
 import com.interlinedlist.android.feature.profile.ui.account.relativeTime
 
 /** Stable test tags for the other-user profile's content tabs. */
@@ -61,6 +79,24 @@ object ProfileContentTestTags {
     fun postRow(id: String) = "profilePostRow_$id"
     fun listRow(id: String) = "profileListRow_$id"
     fun documentRow(id: String) = "profileDocumentRow_$id"
+}
+
+/** Stable test tags for the other-user profile's moderation overflow menu (Milestone D). */
+object ProfileModerationTestTags {
+    const val OVERFLOW = "profileModerationOverflow"
+    const val MENU = "profileModerationMenu"
+    const val MENU_BLOCK = "profileModerationMenuBlock"
+    const val MENU_MUTE = "profileModerationMenuMute"
+    const val MENU_REPORT = "profileModerationMenuReport"
+    const val BLOCK_DIALOG = "profileModerationBlockDialog"
+    const val BLOCK_CONFIRM = "profileModerationBlockConfirm"
+    const val MUTE_DIALOG = "profileModerationMuteDialog"
+    const val MUTE_CONFIRM = "profileModerationMuteConfirm"
+    const val REPORT_DIALOG = "profileModerationReportDialog"
+    const val REPORT_CONFIRM = "profileModerationReportConfirm"
+    const val REPORT_DETAIL = "profileModerationReportDetail"
+    const val REPORT_SUBMITTED = "profileModerationReportSubmitted"
+    fun reportReason(reason: ReportReason) = "profileModerationReason_${reason.name}"
 }
 
 /**
@@ -98,6 +134,10 @@ fun UserProfileRoute(
         onOpenFollowing = { state.user?.username?.let(onOpenFollowing) },
         onOpenList = { listId -> state.user?.username?.let { onOpenList(it, listId) } },
         onOpenDocument = onOpenDocument,
+        onToggleBlock = viewModel::toggleBlock,
+        onToggleMute = viewModel::toggleMute,
+        onReport = viewModel::report,
+        onAcknowledgeReport = viewModel::acknowledgeReport,
         modifier = modifier,
     )
 }
@@ -115,8 +155,15 @@ fun UserProfileScreen(
     onOpenFollowing: () -> Unit = {},
     onOpenList: (String) -> Unit = {},
     onOpenDocument: (String) -> Unit = {},
+    onToggleBlock: () -> Unit = {},
+    onToggleMute: () -> Unit = {},
+    onReport: (ReportReason, String?) -> Unit = { _, _ -> },
+    onAcknowledgeReport: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    // Which moderation dialog (if any) is currently up.
+    var moderationDialog by remember { mutableStateOf(ModerationDialog.NONE) }
+
     Scaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
@@ -125,6 +172,17 @@ fun UserProfileScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack, modifier = Modifier.testTag(ProfileTestTags.BACK)) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    if (state.canModerate) {
+                        ModerationOverflowMenu(
+                            status = state.moderationStatus,
+                            enabled = !state.isModerationActionInProgress,
+                            onBlock = { moderationDialog = ModerationDialog.BLOCK },
+                            onMute = { moderationDialog = ModerationDialog.MUTE },
+                            onReport = { moderationDialog = ModerationDialog.REPORT },
+                        )
                     }
                 },
             )
@@ -188,7 +246,225 @@ fun UserProfileScreen(
                 }
             }
         }
+
+        val label = state.user?.displayLabel ?: "this user"
+        when (moderationDialog) {
+            ModerationDialog.BLOCK -> ModerationConfirmDialog(
+                title = if (state.moderationStatus.isBlocked) "Unblock $label?" else "Block $label?",
+                body = if (state.moderationStatus.isBlocked) {
+                    "They'll be able to see your profile and interact with you again."
+                } else {
+                    "They won't be able to see your profile or interact with you."
+                },
+                confirmLabel = if (state.moderationStatus.isBlocked) "Unblock" else "Block",
+                dialogTag = ProfileModerationTestTags.BLOCK_DIALOG,
+                confirmTag = ProfileModerationTestTags.BLOCK_CONFIRM,
+                onConfirm = {
+                    onToggleBlock()
+                    moderationDialog = ModerationDialog.NONE
+                },
+                onDismiss = { moderationDialog = ModerationDialog.NONE },
+            )
+
+            ModerationDialog.MUTE -> ModerationConfirmDialog(
+                title = if (state.moderationStatus.isMuted) "Unmute $label?" else "Mute $label?",
+                body = if (state.moderationStatus.isMuted) {
+                    "You'll start seeing their activity again."
+                } else {
+                    "You won't see their activity, but they won't be notified."
+                },
+                confirmLabel = if (state.moderationStatus.isMuted) "Unmute" else "Mute",
+                dialogTag = ProfileModerationTestTags.MUTE_DIALOG,
+                confirmTag = ProfileModerationTestTags.MUTE_CONFIRM,
+                onConfirm = {
+                    onToggleMute()
+                    moderationDialog = ModerationDialog.NONE
+                },
+                onDismiss = { moderationDialog = ModerationDialog.NONE },
+            )
+
+            ModerationDialog.REPORT -> ReportDialog(
+                targetLabel = label,
+                onSubmit = { reason, detail ->
+                    onReport(reason, detail)
+                    moderationDialog = ModerationDialog.NONE
+                },
+                onDismiss = { moderationDialog = ModerationDialog.NONE },
+            )
+
+            ModerationDialog.NONE -> Unit
+        }
+
+        if (state.reportSubmitted) {
+            ReportSubmittedDialog(onDismiss = onAcknowledgeReport)
+        }
     }
+}
+
+/** Which moderation dialog is showing over the profile. */
+private enum class ModerationDialog { NONE, BLOCK, MUTE, REPORT }
+
+/** The three-dot overflow menu offering Block / Mute / Report on another user's profile. */
+@Composable
+private fun ModerationOverflowMenu(
+    status: ModerationStatus,
+    enabled: Boolean,
+    onBlock: () -> Unit,
+    onMute: () -> Unit,
+    onReport: () -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box(Modifier.wrapContentSize(Alignment.TopEnd)) {
+        IconButton(
+            onClick = { expanded = true },
+            enabled = enabled,
+            modifier = Modifier.testTag(ProfileModerationTestTags.OVERFLOW),
+        ) {
+            Icon(Icons.Default.MoreVert, contentDescription = "More options")
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.testTag(ProfileModerationTestTags.MENU),
+        ) {
+            DropdownMenuItem(
+                text = { Text(if (status.isBlocked) "Unblock" else "Block") },
+                leadingIcon = { Icon(Icons.Default.Block, contentDescription = null) },
+                onClick = {
+                    expanded = false
+                    onBlock()
+                },
+                modifier = Modifier.testTag(ProfileModerationTestTags.MENU_BLOCK),
+            )
+            DropdownMenuItem(
+                text = { Text(if (status.isMuted) "Unmute" else "Mute") },
+                leadingIcon = { Icon(Icons.AutoMirrored.Filled.VolumeOff, contentDescription = null) },
+                onClick = {
+                    expanded = false
+                    onMute()
+                },
+                modifier = Modifier.testTag(ProfileModerationTestTags.MENU_MUTE),
+            )
+            DropdownMenuItem(
+                text = { Text("Report") },
+                leadingIcon = { Icon(Icons.Default.Flag, contentDescription = null) },
+                onClick = {
+                    expanded = false
+                    onReport()
+                },
+                modifier = Modifier.testTag(ProfileModerationTestTags.MENU_REPORT),
+            )
+        }
+    }
+}
+
+/** A generic confirm dialog for the destructive block/mute toggles. */
+@Composable
+private fun ModerationConfirmDialog(
+    title: String,
+    body: String,
+    confirmLabel: String,
+    dialogTag: String,
+    confirmTag: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.testTag(dialogTag),
+        title = { Text(title) },
+        text = { Text(body) },
+        confirmButton = {
+            TextButton(onClick = onConfirm, modifier = Modifier.testTag(confirmTag)) {
+                Text(confirmLabel, color = MaterialTheme.colorScheme.error)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
+}
+
+/** The report dialog: pick a reason (required) and add optional detail. */
+@Composable
+private fun ReportDialog(
+    targetLabel: String,
+    onSubmit: (ReportReason, String?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var selectedReason by remember { mutableStateOf<ReportReason?>(null) }
+    var detail by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.testTag(ProfileModerationTestTags.REPORT_DIALOG),
+        title = { Text("Report $targetLabel") },
+        text = {
+            Column {
+                Text(
+                    text = "Why are you reporting this user?",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+                ReportReason.entries.forEach { reason ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .selectable(
+                                selected = selectedReason == reason,
+                                onClick = { selectedReason = reason },
+                            )
+                            .testTag(ProfileModerationTestTags.reportReason(reason))
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(
+                            selected = selectedReason == reason,
+                            onClick = { selectedReason = reason },
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(reason.label, style = MaterialTheme.typography.bodyLarge)
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = detail,
+                    onValueChange = { detail = it },
+                    label = { Text("Add detail (optional)") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag(ProfileModerationTestTags.REPORT_DETAIL),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { selectedReason?.let { onSubmit(it, detail.ifBlank { null }) } },
+                enabled = selectedReason != null,
+                modifier = Modifier.testTag(ProfileModerationTestTags.REPORT_CONFIRM),
+            ) {
+                Text("Submit report")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
+}
+
+/** A brief confirmation shown after a report is successfully submitted. */
+@Composable
+private fun ReportSubmittedDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.testTag(ProfileModerationTestTags.REPORT_SUBMITTED),
+        title = { Text("Report submitted") },
+        text = { Text("Thanks — our team will review this report.") },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Done") }
+        },
+    )
 }
 
 /** Renders the selected tab's rows as LazyColumn items (loading / error / empty / content). */

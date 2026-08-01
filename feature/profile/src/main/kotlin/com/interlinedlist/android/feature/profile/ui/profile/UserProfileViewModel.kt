@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.feature.profile.data.ProfileRepository
 import com.interlinedlist.android.feature.profile.domain.FollowStatus
+import com.interlinedlist.android.feature.profile.domain.ReportReason
 import com.interlinedlist.android.feature.profile.ui.common.toUserMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -60,6 +61,7 @@ class UserProfileViewModel @Inject constructor(
                     _uiState.update { it.copy(user = result.data, isLoading = false) }
                     loadFollow(result.data.id, result.data.isCurrentUser)
                     loadMutual(result.data.id, result.data.isCurrentUser)
+                    loadModerationStatus(result.data.isCurrentUser)
                     // Load the initially-selected tab now that the username is confirmed.
                     loadTab(_uiState.value.selectedTab)
                 }
@@ -155,6 +157,100 @@ class UserProfileViewModel @Inject constructor(
             val result = repository.getFollowCounts(userId)
             if (result is ApiResult.Success) {
                 _uiState.update { it.copy(followCounts = result.data) }
+            }
+        }
+    }
+
+    /** Loads the blocked/muted status for the viewed user (not fetched for your own profile). */
+    private fun loadModerationStatus(isCurrentUser: Boolean) {
+        if (isCurrentUser) return
+        viewModelScope.launch {
+            val result = repository.getModerationStatus(username)
+            if (result is ApiResult.Success) {
+                _uiState.update { it.copy(moderationStatus = result.data) }
+            }
+        }
+    }
+
+    /**
+     * Blocks or unblocks the viewed user, optimistically flipping the blocked flag and
+     * rolling it back on failure. Deduped while any moderation action is in flight.
+     */
+    fun toggleBlock() {
+        val state = _uiState.value
+        if (!state.canModerate || state.isModerationActionInProgress) return
+        val wasBlocked = state.moderationStatus.isBlocked
+
+        _uiState.update {
+            it.copy(
+                moderationStatus = it.moderationStatus.copy(isBlocked = !wasBlocked),
+                isModerationActionInProgress = true,
+                errorMessage = null,
+            )
+        }
+        viewModelScope.launch {
+            val result = if (wasBlocked) repository.unblockUser(username) else repository.blockUser(username)
+            applyModerationResult(result) { it.copy(isBlocked = wasBlocked) }
+        }
+    }
+
+    /**
+     * Mutes or unmutes the viewed user, optimistically flipping the muted flag and rolling
+     * it back on failure. Deduped while any moderation action is in flight.
+     */
+    fun toggleMute() {
+        val state = _uiState.value
+        if (!state.canModerate || state.isModerationActionInProgress) return
+        val wasMuted = state.moderationStatus.isMuted
+
+        _uiState.update {
+            it.copy(
+                moderationStatus = it.moderationStatus.copy(isMuted = !wasMuted),
+                isModerationActionInProgress = true,
+                errorMessage = null,
+            )
+        }
+        viewModelScope.launch {
+            val result = if (wasMuted) repository.unmuteUser(username) else repository.muteUser(username)
+            applyModerationResult(result) { it.copy(isMuted = wasMuted) }
+        }
+    }
+
+    /** Reports the viewed user with a [reason] and optional free-text [detail]. */
+    fun report(reason: ReportReason, detail: String?) {
+        val state = _uiState.value
+        if (!state.canModerate || state.isModerationActionInProgress) return
+        _uiState.update { it.copy(isModerationActionInProgress = true, errorMessage = null) }
+        viewModelScope.launch {
+            when (val result = repository.reportUser(username, reason, detail)) {
+                is ApiResult.Success -> _uiState.update {
+                    it.copy(isModerationActionInProgress = false, reportSubmitted = true)
+                }
+                is ApiResult.Failure -> _uiState.update {
+                    it.copy(isModerationActionInProgress = false, errorMessage = result.error.toUserMessage())
+                }
+            }
+        }
+    }
+
+    fun acknowledgeReport() = _uiState.update { it.copy(reportSubmitted = false) }
+
+    /**
+     * Clears the in-flight flag on a block/mute result; on failure it rolls the optimistic
+     * status change back via [rollback] and surfaces the mapped error.
+     */
+    private fun applyModerationResult(
+        result: ApiResult<Unit>,
+        rollback: (com.interlinedlist.android.feature.profile.domain.ModerationStatus) -> com.interlinedlist.android.feature.profile.domain.ModerationStatus,
+    ) {
+        when (result) {
+            is ApiResult.Success -> _uiState.update { it.copy(isModerationActionInProgress = false) }
+            is ApiResult.Failure -> _uiState.update {
+                it.copy(
+                    moderationStatus = rollback(it.moderationStatus),
+                    isModerationActionInProgress = false,
+                    errorMessage = result.error.toUserMessage(),
+                )
             }
         }
     }
