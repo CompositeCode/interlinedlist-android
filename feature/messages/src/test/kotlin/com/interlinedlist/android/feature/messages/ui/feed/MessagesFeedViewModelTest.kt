@@ -287,6 +287,133 @@ class MessagesFeedViewModelTest {
     }
 
     @Test
+    fun `edit seeds the sheet and saves the new content marking it edited`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            editResult = ApiResult.Success(
+                sampleMessage(id = "own", content = "updated body", mine = true, editedAt = "2026-07-31T12:00:00Z"),
+            )
+        }
+        repo.emitFeed(listOf(sampleMessage(id = "own", content = "original body", mine = true)))
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.openEdit(sampleMessage(id = "own", content = "original body", mine = true))
+        advanceUntilIdle()
+        // Editor is seeded with the current content.
+        assertThat(vm.uiState.value.editTarget?.id).isEqualTo("own")
+        assertThat(vm.uiState.value.editText).isEqualTo("original body")
+
+        vm.onEditTextChange("updated body")
+        vm.saveEdit()
+        advanceUntilIdle()
+
+        assertThat(repo.lastEdit).isEqualTo("own" to "updated body")
+        // Sheet closed and the feed reflects the edited, marked message.
+        assertThat(vm.uiState.value.editTarget).isNull()
+        val edited = vm.uiState.value.messages.first { it.id == "own" }
+        assertThat(edited.content).isEqualTo("updated body")
+        assertThat(edited.isEdited).isTrue()
+    }
+
+    @Test
+    fun `edit failure keeps the sheet open and surfaces an error`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            editResult = ApiResult.Failure(AppError.Server("nope"))
+        }
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.openEdit(sampleMessage(id = "own", content = "original", mine = true))
+        vm.onEditTextChange("changed")
+        vm.saveEdit()
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertThat(state.editTarget?.id).isEqualTo("own")
+        assertThat(state.isSavingEdit).isFalse()
+        assertThat(state.errorMessage).isNotEmpty()
+    }
+
+    @Test
+    fun `block hides the author's messages from the feed`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository()
+        repo.emitFeed(
+            listOf(
+                sampleMessage(id = "1", authorUsername = "amy"),
+                sampleMessage(id = "2", authorUsername = "bob"),
+            ),
+        )
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.openModeration(sampleMessage(id = "1", authorUsername = "amy"), ModerationAction.BLOCK)
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.moderationTarget?.username).isEqualTo("amy")
+
+        vm.confirmModeration()
+        advanceUntilIdle()
+
+        assertThat(repo.blockedUsernames).containsExactly("amy")
+        assertThat(vm.uiState.value.moderationTarget).isNull()
+        assertThat(vm.uiState.value.messages.map { it.id }).containsExactly("2")
+    }
+
+    @Test
+    fun `block failure surfaces an error and keeps the feed`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            blockResult = ApiResult.Failure(AppError.Server("boom"))
+        }
+        repo.emitFeed(listOf(sampleMessage(id = "1", authorUsername = "amy")))
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.openModeration(sampleMessage(id = "1", authorUsername = "amy"), ModerationAction.BLOCK)
+        vm.confirmModeration()
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.errorMessage).isNotEmpty()
+        assertThat(vm.uiState.value.messages.map { it.id }).containsExactly("1")
+    }
+
+    @Test
+    fun `mute delegates to the repository`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository()
+        repo.emitFeed(listOf(sampleMessage(id = "1", authorUsername = "amy")))
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.openModeration(sampleMessage(id = "1", authorUsername = "amy"), ModerationAction.MUTE)
+        vm.confirmModeration()
+        advanceUntilIdle()
+
+        assertThat(repo.mutedUsernames).containsExactly("amy")
+        assertThat(vm.uiState.value.messages).isEmpty()
+    }
+
+    @Test
+    fun `report user submits the chosen reason and detail`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository()
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.openModeration(sampleMessage(id = "1", authorUsername = "amy"), ModerationAction.REPORT)
+        vm.confirmModeration(ReportReason.HARASSMENT, "abusive")
+        advanceUntilIdle()
+
+        val report = repo.lastReportUser!!
+        assertThat(report.username).isEqualTo("amy")
+        assertThat(report.reason).isEqualTo(ReportReason.HARASSMENT)
+        assertThat(report.detail).isEqualTo("abusive")
+        assertThat(vm.uiState.value.moderationTarget).isNull()
+    }
+
+    @Test
     fun `fetchMetadata delegates to the repository`() = runTest(dispatcher) {
         val repo = FakeMessagesRepository().apply {
             metadataResult = ApiResult.Success(sampleMessage(id = "m1"))

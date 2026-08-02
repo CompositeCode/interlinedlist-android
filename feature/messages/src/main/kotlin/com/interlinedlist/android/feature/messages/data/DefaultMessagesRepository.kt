@@ -8,8 +8,10 @@ import com.interlinedlist.android.feature.messages.data.local.toDomain
 import com.interlinedlist.android.feature.messages.data.local.toEntity
 import com.interlinedlist.android.feature.messages.data.remote.MessagesApi
 import com.interlinedlist.android.feature.messages.data.remote.dto.CreateMessageRequest
+import com.interlinedlist.android.feature.messages.data.remote.dto.EditMessageRequest
 import com.interlinedlist.android.feature.messages.data.remote.dto.PaginationDto
 import com.interlinedlist.android.feature.messages.data.remote.dto.ReportRequest
+import com.interlinedlist.android.feature.messages.data.remote.dto.UserReportRequest
 import com.interlinedlist.android.feature.messages.data.remote.dto.toDomain
 import com.interlinedlist.android.core.network.error.safeApiCall
 import com.interlinedlist.android.feature.messages.domain.Message
@@ -195,6 +197,33 @@ class DefaultMessagesRepository @Inject constructor(
         }
     }
 
+    override suspend fun editMessage(messageId: String, content: String): ApiResult<Message> =
+        withContext(dispatchers.io) {
+            // Optimistically apply the new content + an "edited" marker so the feed
+            // and detail react immediately; roll back the whole row on failure.
+            val previous = currentEntity(messageId)
+            val editedAt = nowIso()
+            if (previous != null) {
+                messageDao.upsert(previous.copy(content = content, editedAt = editedAt))
+            }
+            when (val result = safeCall { api.editMessage(messageId, EditMessageRequest(content = content)) }) {
+                is ApiResult.Success -> {
+                    val updated = (previous?.copy(content = content, editedAt = editedAt))?.toDomain()
+                        ?: Message(
+                            id = messageId, content = content, authorId = "", authorUsername = "",
+                            authorDisplayName = null, authorAvatarUrl = null, createdAt = null,
+                            digCount = 0, replyCount = 0, dugByMe = false, parentId = null,
+                            mine = true, editedAt = editedAt,
+                        )
+                    ApiResult.Success(updated)
+                }
+                is ApiResult.Failure -> {
+                    if (previous != null) messageDao.upsert(previous)
+                    result
+                }
+            }
+        }
+
     override suspend fun refreshScheduled(): ApiResult<Unit> = withContext(dispatchers.io) {
         when (val result = safeCall { api.getScheduled() }) {
             is ApiResult.Success -> {
@@ -228,6 +257,44 @@ class DefaultMessagesRepository @Inject constructor(
             api.report(
                 id = messageId,
                 body = ReportRequest(reason = reason.wireValue, detail = detail?.takeIf { it.isNotBlank() }),
+            )
+        }
+    }
+
+    override suspend fun blockUser(username: String): ApiResult<Unit> = withContext(dispatchers.io) {
+        when (val result = safeCall { api.blockUser(username) }) {
+            is ApiResult.Success -> {
+                // Hide the blocked author's messages from the local cache.
+                messageDao.deleteByAuthorUsername(username)
+                ApiResult.Success(Unit)
+            }
+            is ApiResult.Failure -> result
+        }
+    }
+
+    override suspend fun muteUser(username: String): ApiResult<Unit> = withContext(dispatchers.io) {
+        when (val result = safeCall { api.muteUser(username) }) {
+            is ApiResult.Success -> {
+                // Hide the muted author's messages from the local cache.
+                messageDao.deleteByAuthorUsername(username)
+                ApiResult.Success(Unit)
+            }
+            is ApiResult.Failure -> result
+        }
+    }
+
+    override suspend fun reportUser(
+        username: String,
+        reason: ReportReason,
+        detail: String?,
+    ): ApiResult<Unit> = withContext(dispatchers.io) {
+        safeCall {
+            api.reportUser(
+                username = username,
+                body = UserReportRequest(
+                    reason = reason.wireValue,
+                    detail = detail?.takeIf { it.isNotBlank() },
+                ),
             )
         }
     }
@@ -283,6 +350,9 @@ class DefaultMessagesRepository @Inject constructor(
         safeApiCall(json, block)
 
     private fun currentUserId(): String? = sessionStore.userId
+
+    /** Current instant as an ISO-8601 string, for the optimistic "edited" marker. */
+    private fun nowIso(): String = java.time.Instant.now().toString()
 
     /** Shared multipart upload path; extracts the hosted URL from the response. */
     private suspend fun upload(

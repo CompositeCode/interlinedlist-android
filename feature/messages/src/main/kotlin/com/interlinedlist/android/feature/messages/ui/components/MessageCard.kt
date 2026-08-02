@@ -45,8 +45,13 @@ object MessageCardTags {
     const val REPLY = "messageReply"
     const val MENU = "messageMenu"
     const val DELETE = "messageDelete"
+    const val EDIT = "messageEdit"
     const val REPORT = "messageReport"
+    const val BLOCK_USER = "messageBlockUser"
+    const val MUTE_USER = "messageMuteUser"
+    const val REPORT_USER = "messageReportUser"
     const val BODY = "messageBody"
+    const val EDITED = "messageEdited"
 }
 
 /**
@@ -62,6 +67,10 @@ fun MessageCard(
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
     onReport: () -> Unit = {},
+    onEdit: () -> Unit = {},
+    onBlockUser: () -> Unit = {},
+    onMuteUser: () -> Unit = {},
+    onReportUser: () -> Unit = {},
     onOpenLink: (String) -> Unit = {},
 ) {
     Row(
@@ -87,8 +96,24 @@ fun MessageCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                if (message.isEdited) {
+                    Text(
+                        text = " · edited",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.testTag(MessageCardTags.EDITED),
+                    )
+                }
                 Spacer(Modifier.weight(1f))
-                MessageMenu(isMine = message.mine, onDelete = onDelete, onReport = onReport)
+                MessageMenu(
+                    isMine = message.mine,
+                    onEdit = onEdit,
+                    onDelete = onDelete,
+                    onReport = onReport,
+                    onBlockUser = onBlockUser,
+                    onMuteUser = onMuteUser,
+                    onReportUser = onReportUser,
+                )
             }
             Spacer(Modifier.size(4.dp))
             Text(
@@ -125,11 +150,20 @@ fun MessageCard(
 }
 
 /**
- * Overflow menu: own messages offer Delete; everyone else's offer Report. Renders
- * nothing when there is no applicable action (defensive; both branches are covered).
+ * Overflow menu. Own messages offer Edit + Delete. Everyone else's offer author
+ * moderation — Block user, Mute user, Report user — plus the existing Report
+ * (message) action.
  */
 @Composable
-private fun MessageMenu(isMine: Boolean, onDelete: () -> Unit, onReport: () -> Unit) {
+private fun MessageMenu(
+    isMine: Boolean,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+    onReport: () -> Unit,
+    onBlockUser: () -> Unit,
+    onMuteUser: () -> Unit,
+    onReportUser: () -> Unit,
+) {
     var expanded by remember { mutableStateOf(false) }
     Box {
         IconButton(
@@ -141,6 +175,14 @@ private fun MessageMenu(isMine: Boolean, onDelete: () -> Unit, onReport: () -> U
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             if (isMine) {
                 DropdownMenuItem(
+                    text = { Text("Edit") },
+                    onClick = {
+                        expanded = false
+                        onEdit()
+                    },
+                    modifier = Modifier.testTag(MessageCardTags.EDIT),
+                )
+                DropdownMenuItem(
                     text = { Text("Delete") },
                     onClick = {
                         expanded = false
@@ -150,12 +192,36 @@ private fun MessageMenu(isMine: Boolean, onDelete: () -> Unit, onReport: () -> U
                 )
             } else {
                 DropdownMenuItem(
-                    text = { Text("Report") },
+                    text = { Text("Report message") },
                     onClick = {
                         expanded = false
                         onReport()
                     },
                     modifier = Modifier.testTag(MessageCardTags.REPORT),
+                )
+                DropdownMenuItem(
+                    text = { Text("Block user") },
+                    onClick = {
+                        expanded = false
+                        onBlockUser()
+                    },
+                    modifier = Modifier.testTag(MessageCardTags.BLOCK_USER),
+                )
+                DropdownMenuItem(
+                    text = { Text("Mute user") },
+                    onClick = {
+                        expanded = false
+                        onMuteUser()
+                    },
+                    modifier = Modifier.testTag(MessageCardTags.MUTE_USER),
+                )
+                DropdownMenuItem(
+                    text = { Text("Report user") },
+                    onClick = {
+                        expanded = false
+                        onReportUser()
+                    },
+                    modifier = Modifier.testTag(MessageCardTags.REPORT_USER),
                 )
             }
         }

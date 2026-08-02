@@ -2,17 +2,20 @@ package com.interlinedlist.android.feature.messages.data.remote
 
 import com.interlinedlist.android.feature.messages.data.remote.dto.CreateMessageRequest
 import com.interlinedlist.android.feature.messages.data.remote.dto.CreateMessageResponse
+import com.interlinedlist.android.feature.messages.data.remote.dto.EditMessageRequest
 import com.interlinedlist.android.feature.messages.data.remote.dto.MediaUploadResponse
 import com.interlinedlist.android.feature.messages.data.remote.dto.MessageResponse
 import com.interlinedlist.android.feature.messages.data.remote.dto.MessagesResponse
 import com.interlinedlist.android.feature.messages.data.remote.dto.MetadataResponse
 import com.interlinedlist.android.feature.messages.data.remote.dto.ReportRequest
 import com.interlinedlist.android.feature.messages.data.remote.dto.ScheduledMessagesResponse
+import com.interlinedlist.android.feature.messages.data.remote.dto.UserReportRequest
 import okhttp3.MultipartBody
 import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.Multipart
+import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.Part
 import retrofit2.http.Path
@@ -57,6 +60,14 @@ interface MessagesApi {
     @DELETE("api/messages/{id}")
     suspend fun deleteMessage(@Path("id") id: String)
 
+    /**
+     * Edits the content of one of the caller's own messages. The endpoint's
+     * response body is not modelled in the OpenAPI spec; the repository updates
+     * the cache optimistically and treats a 2xx as success, so this returns Unit.
+     */
+    @PATCH("api/messages/{id}")
+    suspend fun editMessage(@Path("id") id: String, @Body body: EditMessageRequest)
+
     /** Full-text search over top-level messages. */
     @GET("api/messages/search")
     suspend fun search(
@@ -86,4 +97,18 @@ interface MessagesApi {
     /** Fetches and attaches link-preview metadata for a message's links. */
     @POST("api/messages/{id}/metadata")
     suspend fun fetchMetadata(@Path("id") id: String): MetadataResponse
+
+    // --- author moderation (on messages by other users) --------------------
+
+    /** Blocks a user by username. */
+    @POST("api/users/{username}/block")
+    suspend fun blockUser(@Path("username") username: String)
+
+    /** Mutes a user by username. */
+    @POST("api/users/{username}/mute")
+    suspend fun muteUser(@Path("username") username: String)
+
+    /** Reports a user with a reason (and optional free-text detail). */
+    @POST("api/users/{username}/report")
+    suspend fun reportUser(@Path("username") username: String, @Body body: UserReportRequest)
 }

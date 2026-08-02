@@ -91,6 +91,26 @@ data class ReportRequest(
 )
 
 /**
+ * Request body for editing one of the caller's own messages via
+ * `PATCH /api/messages/{id}`. Only `content` is sent; the shared Json uses
+ * `explicitNulls = false`, so the body is a plain `{ "content": "…" }`.
+ */
+@Serializable
+data class EditMessageRequest(
+    val content: String,
+)
+
+/**
+ * Request body for reporting a *user* via `POST /api/users/{username}/report`.
+ * Mirrors the message [ReportRequest] shape: `{ reason, detail? }`.
+ */
+@Serializable
+data class UserReportRequest(
+    val reason: String,
+    val detail: String? = null,
+)
+
+/**
  * Response from the metadata endpoint. The updated message (with its populated
  * `linkMetadata`) is returned either at the top level or under `message`.
  */

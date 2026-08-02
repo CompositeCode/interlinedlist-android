@@ -370,6 +370,139 @@ class DefaultMessagesRepositoryTest {
     }
 
     @Test
+    fun `editMessage PATCHes the content and updates the cached message`() = runTest(dispatcher) {
+        enqueueJson(
+            200,
+            """{ "data": [ { "id": "1", "content": "original", "author": { "id": "me", "username": "me" } } ],
+                "pagination": { "hasMore": false } }""",
+        )
+        enqueueJson(200, "") // PATCH response body is not modelled; a 2xx is success.
+        val repo = repository()
+        repo.refreshFeed()
+
+        val result = repo.editMessage("1", content = "edited body")
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        assertThat((result as ApiResult.Success).data.content).isEqualTo("edited body")
+        // The cache reflects the new content and now carries an "edited" marker.
+        val cached = repo.observeMessage("1").first()
+        assertThat(cached?.content).isEqualTo("edited body")
+        assertThat(cached?.isEdited).isTrue()
+
+        server.takeRequest() // the refresh GET
+        val patch = server.takeRequest()
+        assertThat(patch.method).isEqualTo("PATCH")
+        assertThat(patch.path).contains("api/messages/1")
+        assertThat(patch.body.readUtf8()).contains("\"content\":\"edited body\"")
+    }
+
+    @Test
+    fun `editMessage rolls back the cached content on failure`() = runTest(dispatcher) {
+        enqueueJson(
+            200,
+            """{ "data": [ { "id": "1", "content": "original", "author": { "id": "me", "username": "me" } } ],
+                "pagination": { "hasMore": false } }""",
+        )
+        enqueueJson(500, """{ "error": "boom" }""")
+        val repo = repository()
+        repo.refreshFeed()
+
+        val result = repo.editMessage("1", content = "will not stick")
+
+        assertThat(result).isInstanceOf(ApiResult.Failure::class.java)
+        val cached = repo.observeMessage("1").first()
+        assertThat(cached?.content).isEqualTo("original")
+        assertThat(cached?.isEdited).isFalse()
+    }
+
+    @Test
+    fun `blockUser posts and hides the author's messages from the feed`() = runTest(dispatcher) {
+        enqueueJson(
+            200,
+            """{ "data": [
+                  { "id": "1", "content": "by amy", "author": { "id": "a", "username": "amy" } },
+                  { "id": "2", "content": "by bob", "author": { "id": "b", "username": "bob" } }
+                ], "pagination": { "hasMore": false } }""",
+        )
+        enqueueJson(201, "")
+        val repo = repository()
+        repo.refreshFeed()
+
+        val result = repo.blockUser("amy")
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        val request = server.let { it.takeRequest(); it.takeRequest() }
+        assertThat(request.method).isEqualTo("POST")
+        assertThat(request.path).contains("api/users/amy/block")
+        // Amy's message is gone; bob's remains.
+        assertThat(repo.observeFeed().first().map { it.id }).containsExactly("2")
+    }
+
+    @Test
+    fun `muteUser posts and hides the author's messages from the feed`() = runTest(dispatcher) {
+        enqueueJson(
+            200,
+            """{ "data": [
+                  { "id": "1", "content": "by amy", "author": { "id": "a", "username": "amy" } }
+                ], "pagination": { "hasMore": false } }""",
+        )
+        enqueueJson(201, "")
+        val repo = repository()
+        repo.refreshFeed()
+
+        val result = repo.muteUser("amy")
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        server.takeRequest()
+        assertThat(server.takeRequest().path).contains("api/users/amy/mute")
+        assertThat(repo.observeFeed().first()).isEmpty()
+    }
+
+    @Test
+    fun `blockUser failure leaves the feed intact`() = runTest(dispatcher) {
+        enqueueJson(
+            200,
+            """{ "data": [
+                  { "id": "1", "content": "by amy", "author": { "id": "a", "username": "amy" } }
+                ], "pagination": { "hasMore": false } }""",
+        )
+        enqueueJson(500, """{ "error": "boom" }""")
+        val repo = repository()
+        repo.refreshFeed()
+
+        val result = repo.blockUser("amy")
+
+        assertThat(result).isInstanceOf(ApiResult.Failure::class.java)
+        assertThat(repo.observeFeed().first().map { it.id }).containsExactly("1")
+    }
+
+    @Test
+    fun `reportUser posts the reason and detail to the user report endpoint`() = runTest(dispatcher) {
+        enqueueJson(201, "")
+        val repo = repository()
+
+        val result = repo.reportUser("amy", ReportReason.HARASSMENT, detail = "abusive dms")
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        val request = server.takeRequest()
+        assertThat(request.path).contains("api/users/amy/report")
+        val body = request.body.readUtf8()
+        assertThat(body).contains("\"reason\":\"harassment\"")
+        assertThat(body).contains("abusive dms")
+    }
+
+    @Test
+    fun `reportUser omits blank detail`() = runTest(dispatcher) {
+        enqueueJson(201, "")
+        val repo = repository()
+
+        repo.reportUser("amy", ReportReason.OTHER, detail = "   ")
+
+        val body = server.takeRequest().body.readUtf8()
+        assertThat(body).doesNotContain("detail")
+    }
+
+    @Test
     fun `fetchMetadata attaches a link preview to the cached message`() = runTest(dispatcher) {
         enqueueJson(
             200,

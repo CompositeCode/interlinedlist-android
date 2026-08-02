@@ -11,8 +11,10 @@ import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.interlinedlist.android.core.designsystem.theme.InterlinedListTheme
 import com.interlinedlist.android.feature.messages.domain.Message
+import com.interlinedlist.android.feature.messages.ui.components.EditMessageSheetTags
 import com.interlinedlist.android.feature.messages.ui.components.MessageCardTags
 import com.interlinedlist.android.feature.messages.ui.components.MessageMediaTags
+import com.interlinedlist.android.feature.messages.ui.components.ModerationDialogTags
 import com.interlinedlist.android.feature.messages.ui.components.ReportDialogTags
 import org.junit.Rule
 import org.junit.Test
@@ -28,11 +30,13 @@ class MessagesFeedScreenTest {
         id: String,
         body: String,
         imageUrls: List<String> = emptyList(),
+        mine: Boolean = false,
+        editedAt: String? = null,
     ) = Message(
         id = id, content = body, authorId = "u1", authorUsername = "adron",
         authorDisplayName = "Adron", authorAvatarUrl = null, createdAt = null,
-        digCount = 0, replyCount = 0, dugByMe = false, parentId = null, mine = false,
-        imageUrls = imageUrls,
+        digCount = 0, replyCount = 0, dugByMe = false, parentId = null, mine = mine,
+        imageUrls = imageUrls, editedAt = editedAt,
     )
 
     /** Hosts the stateless feed with a tiny in-memory state holder. */
@@ -40,6 +44,10 @@ class MessagesFeedScreenTest {
         initial: MessagesFeedUiState,
         onOpenMessage: (String) -> Unit = {},
         onReport: (Message) -> Unit = {},
+        onEdit: (Message) -> Unit = {},
+        onBlockUser: (Message) -> Unit = {},
+        onMuteUser: (Message) -> Unit = {},
+        onReportUser: (Message) -> Unit = {},
     ) {
         composeRule.setContent {
             var state by mutableStateOf(initial)
@@ -56,6 +64,10 @@ class MessagesFeedScreenTest {
                     onComposeTextChange = { state = state.copy(composeText = it) },
                     onPost = {},
                     onReport = onReport,
+                    onEdit = onEdit,
+                    onBlockUser = onBlockUser,
+                    onMuteUser = onMuteUser,
+                    onReportUser = onReportUser,
                 )
             }
         }
@@ -123,6 +135,70 @@ class MessagesFeedScreenTest {
     fun reportDialog_isShown_whenReportTargetIsSet() {
         setFeed(MessagesFeedUiState(reportTarget = message("77", "not mine")))
         composeRule.onNodeWithTag(ReportDialogTags.DIALOG).assertIsDisplayed()
+    }
+
+    @Test
+    fun overflowMenu_offersEdit_onOwnMessage() {
+        var edited: String? = null
+        setFeed(
+            MessagesFeedUiState(messages = listOf(message("mine1", "my post", mine = true))),
+            onEdit = { edited = it.id },
+        )
+        composeRule.onNodeWithTag(MessageCardTags.MENU).performClick()
+        composeRule.onNodeWithTag(MessageCardTags.EDIT).performClick()
+        assert(edited == "mine1")
+    }
+
+    @Test
+    fun overflowMenu_offersAuthorModeration_onOthersMessage() {
+        var blocked: String? = null
+        var muted: String? = null
+        var reportedUser: String? = null
+        setFeed(
+            MessagesFeedUiState(messages = listOf(message("77", "not mine"))),
+            onBlockUser = { blocked = it.id },
+            onMuteUser = { muted = it.id },
+            onReportUser = { reportedUser = it.id },
+        )
+        composeRule.onNodeWithTag(MessageCardTags.MENU).performClick()
+        composeRule.onNodeWithTag(MessageCardTags.BLOCK_USER).assertIsDisplayed()
+        composeRule.onNodeWithTag(MessageCardTags.MUTE_USER).assertIsDisplayed()
+        composeRule.onNodeWithTag(MessageCardTags.REPORT_USER).performClick()
+        assert(reportedUser == "77")
+    }
+
+    @Test
+    fun editSheet_isShown_whenEditTargetIsSet() {
+        setFeed(
+            MessagesFeedUiState(
+                editTarget = message("mine1", "my post", mine = true),
+                editText = "my post",
+            ),
+        )
+        composeRule.onNodeWithTag(EditMessageSheetTags.INPUT).assertIsDisplayed()
+    }
+
+    @Test
+    fun moderationDialog_isShown_whenModerationTargetIsSet() {
+        setFeed(
+            MessagesFeedUiState(
+                moderationTarget = com.interlinedlist.android.feature.messages.ui.feed.ModerationTarget(
+                    message = message("77", "not mine"),
+                    action = com.interlinedlist.android.feature.messages.ui.feed.ModerationAction.BLOCK,
+                ),
+            ),
+        )
+        composeRule.onNodeWithTag(ModerationDialogTags.DIALOG).assertIsDisplayed()
+    }
+
+    @Test
+    fun editedMarker_isShown_forEditedMessage() {
+        setFeed(
+            MessagesFeedUiState(
+                messages = listOf(message("1", "edited body", editedAt = "2026-07-31T12:00:00Z")),
+            ),
+        )
+        composeRule.onNodeWithTag(MessageCardTags.EDITED).assertIsDisplayed()
     }
 
     @Test

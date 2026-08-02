@@ -47,6 +47,14 @@ data class MessagesFeedUiState(
     /** The message currently being reported (drives the report dialog), if any. */
     val reportTarget: Message? = null,
     val isReporting: Boolean = false,
+    /** The message currently being edited in-place (drives the edit sheet), if any. */
+    val editTarget: Message? = null,
+    /** The working edit text seeded from [editTarget]'s content. */
+    val editText: String = "",
+    val isSavingEdit: Boolean = false,
+    /** A pending author-moderation action awaiting confirmation, if any. */
+    val moderationTarget: ModerationTarget? = null,
+    val isModerating: Boolean = false,
 ) {
     val isEmpty: Boolean get() = messages.isEmpty()
     val hasAttachments: Boolean get() = attachments.isNotEmpty()
@@ -55,7 +63,25 @@ data class MessagesFeedUiState(
     val canPost: Boolean
         get() = (composeText.isNotBlank() || attachments.any { it.hostedUrl != null }) &&
             !isPosting && !isUploading
+
+    /** Edit can be saved when the text is non-blank and not currently saving. */
+    val canSaveEdit: Boolean get() = editText.isNotBlank() && !isSavingEdit
 }
+
+/**
+ * A pending author-moderation action, captured when the user taps Block / Mute /
+ * Report on someone else's message. Drives a confirm dialog before the call runs.
+ */
+data class ModerationTarget(
+    val message: Message,
+    val action: ModerationAction,
+) {
+    val username: String get() = message.authorUsername
+    val authorLabel: String get() = message.authorLabel
+}
+
+/** The three author-level moderation actions (distinct from reporting a message). */
+enum class ModerationAction { BLOCK, MUTE, REPORT }
 
 /** Transient (non-cached) UI flags kept separate from the Room-backed message list. */
 private data class FeedTransientState(
@@ -71,6 +97,11 @@ private data class FeedTransientState(
     val scheduledAt: String? = null,
     val reportTarget: Message? = null,
     val isReporting: Boolean = false,
+    val editTarget: Message? = null,
+    val editText: String = "",
+    val isSavingEdit: Boolean = false,
+    val moderationTarget: ModerationTarget? = null,
+    val isModerating: Boolean = false,
 )
 
 @HiltViewModel
@@ -100,6 +131,11 @@ class MessagesFeedViewModel @Inject constructor(
                 scheduledAt = t.scheduledAt,
                 reportTarget = t.reportTarget,
                 isReporting = t.isReporting,
+                editTarget = t.editTarget,
+                editText = t.editText,
+                isSavingEdit = t.isSavingEdit,
+                moderationTarget = t.moderationTarget,
+                isModerating = t.isModerating,
             )
         }.stateIn(
             scope = viewModelScope,
@@ -266,6 +302,74 @@ class MessagesFeedViewModel @Inject constructor(
                 }
                 is ApiResult.Failure -> transient.update {
                     it.copy(isReporting = false, reportTarget = null).withError(result.error)
+                }
+            }
+        }
+    }
+
+    // --- edit own message --------------------------------------------------
+
+    /** Opens the in-place editor seeded with [message]'s current content. */
+    fun openEdit(message: Message) = transient.update {
+        it.copy(editTarget = message, editText = message.content, errorMessage = null)
+    }
+
+    fun onEditTextChange(value: String) = transient.update { it.copy(editText = value) }
+
+    fun dismissEdit() = transient.update {
+        it.copy(editTarget = null, editText = "", isSavingEdit = false)
+    }
+
+    /** Saves the edit: PATCHes the new content (repository updates the cache). */
+    fun saveEdit() {
+        val target = transient.value.editTarget ?: return
+        val text = transient.value.editText.trim()
+        if (text.isBlank()) return
+        transient.update { it.copy(isSavingEdit = true, errorMessage = null) }
+        viewModelScope.launch {
+            when (val result = repository.editMessage(target.id, text)) {
+                is ApiResult.Success -> transient.update {
+                    it.copy(isSavingEdit = false, editTarget = null, editText = "")
+                }
+                is ApiResult.Failure -> transient.update {
+                    it.copy(isSavingEdit = false).withError(result.error)
+                }
+            }
+        }
+    }
+
+    // --- author moderation -------------------------------------------------
+
+    /** Queues a Block / Mute / Report-user action for confirmation. */
+    fun openModeration(message: Message, action: ModerationAction) = transient.update {
+        it.copy(moderationTarget = ModerationTarget(message, action), errorMessage = null)
+    }
+
+    fun dismissModeration() = transient.update {
+        it.copy(moderationTarget = null, isModerating = false)
+    }
+
+    /**
+     * Confirms the queued moderation action. Block/Mute additionally hide the
+     * author's messages from the local feed (handled in the repository); Report
+     * carries the chosen [reason] and optional [detail].
+     */
+    fun confirmModeration(reason: ReportReason? = null, detail: String = "") {
+        val target = transient.value.moderationTarget ?: return
+        transient.update { it.copy(isModerating = true, errorMessage = null) }
+        viewModelScope.launch {
+            val result = when (target.action) {
+                ModerationAction.BLOCK -> repository.blockUser(target.username)
+                ModerationAction.MUTE -> repository.muteUser(target.username)
+                ModerationAction.REPORT ->
+                    repository.reportUser(target.username, reason ?: ReportReason.OTHER, detail)
+            }
+            when (result) {
+                is ApiResult.Success -> transient.update {
+                    it.copy(isModerating = false, moderationTarget = null)
+                }
+                is ApiResult.Failure -> transient.update {
+                    it.copy(isModerating = false, moderationTarget = null).withError(result.error)
                 }
             }
         }

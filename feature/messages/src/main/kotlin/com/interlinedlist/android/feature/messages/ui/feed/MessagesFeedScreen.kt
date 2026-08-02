@@ -56,7 +56,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.interlinedlist.android.core.designsystem.theme.InterlinedListTheme
 import com.interlinedlist.android.feature.messages.domain.Message
 import com.interlinedlist.android.feature.messages.domain.ReportReason
+import com.interlinedlist.android.feature.messages.ui.components.EditMessageSheet
 import com.interlinedlist.android.feature.messages.ui.components.MessageCard
+import com.interlinedlist.android.feature.messages.ui.components.ModerationDialog
 import com.interlinedlist.android.feature.messages.ui.components.ReportDialog
 import com.interlinedlist.android.feature.messages.ui.readMediaBytes
 import java.time.Instant
@@ -102,6 +104,10 @@ fun MessagesRoute(
         onDig = viewModel::onDig,
         onDelete = viewModel::onDelete,
         onReport = viewModel::openReport,
+        onEdit = viewModel::openEdit,
+        onBlockUser = { viewModel.openModeration(it, ModerationAction.BLOCK) },
+        onMuteUser = { viewModel.openModeration(it, ModerationAction.MUTE) },
+        onReportUser = { viewModel.openModeration(it, ModerationAction.REPORT) },
         onFetchMetadata = viewModel::onFetchMetadata,
         onOpenCompose = viewModel::openCompose,
         onDismissCompose = viewModel::dismissCompose,
@@ -118,6 +124,11 @@ fun MessagesRoute(
         onScheduleChange = viewModel::onScheduleChange,
         onDismissReport = viewModel::dismissReport,
         onSubmitReport = viewModel::submitReport,
+        onEditTextChange = viewModel::onEditTextChange,
+        onDismissEdit = viewModel::dismissEdit,
+        onSaveEdit = viewModel::saveEdit,
+        onDismissModeration = viewModel::dismissModeration,
+        onConfirmModeration = viewModel::confirmModeration,
         modifier = modifier,
     )
 }
@@ -139,12 +150,21 @@ fun MessagesFeedScreen(
     modifier: Modifier = Modifier,
     onOpenScheduled: () -> Unit = {},
     onReport: (Message) -> Unit = {},
+    onEdit: (Message) -> Unit = {},
+    onBlockUser: (Message) -> Unit = {},
+    onMuteUser: (Message) -> Unit = {},
+    onReportUser: (Message) -> Unit = {},
     onFetchMetadata: (Message) -> Unit = {},
     onAttachMedia: (Uri, Boolean) -> Unit = { _, _ -> },
     onRemoveAttachment: (PendingAttachment) -> Unit = {},
     onScheduleChange: (String?) -> Unit = {},
     onDismissReport: () -> Unit = {},
     onSubmitReport: (ReportReason, String) -> Unit = { _, _ -> },
+    onEditTextChange: (String) -> Unit = {},
+    onDismissEdit: () -> Unit = {},
+    onSaveEdit: () -> Unit = {},
+    onDismissModeration: () -> Unit = {},
+    onConfirmModeration: (ReportReason?, String) -> Unit = { _, _ -> },
 ) {
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -186,6 +206,10 @@ fun MessagesFeedScreen(
                 onDig = onDig,
                 onDelete = onDelete,
                 onReport = onReport,
+                onEdit = onEdit,
+                onBlockUser = onBlockUser,
+                onMuteUser = onMuteUser,
+                onReportUser = onReportUser,
                 onFetchMetadata = onFetchMetadata,
             )
         }
@@ -210,6 +234,26 @@ fun MessagesFeedScreen(
             isSubmitting = state.isReporting,
         )
     }
+
+    if (state.editTarget != null) {
+        EditMessageSheet(
+            text = state.editText,
+            canSave = state.canSaveEdit,
+            isSaving = state.isSavingEdit,
+            onTextChange = onEditTextChange,
+            onDismiss = onDismissEdit,
+            onSave = onSaveEdit,
+        )
+    }
+
+    state.moderationTarget?.let { target ->
+        ModerationDialog(
+            target = target,
+            isSubmitting = state.isModerating,
+            onDismiss = onDismissModeration,
+            onConfirm = onConfirmModeration,
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -223,6 +267,10 @@ private fun FeedContent(
     onDig: (Message) -> Unit,
     onDelete: (Message) -> Unit,
     onReport: (Message) -> Unit,
+    onEdit: (Message) -> Unit,
+    onBlockUser: (Message) -> Unit,
+    onMuteUser: (Message) -> Unit,
+    onReportUser: (Message) -> Unit,
     onFetchMetadata: (Message) -> Unit,
 ) {
     PullToRefreshBox(
@@ -243,6 +291,10 @@ private fun FeedContent(
                 onDig = onDig,
                 onDelete = onDelete,
                 onReport = onReport,
+                onEdit = onEdit,
+                onBlockUser = onBlockUser,
+                onMuteUser = onMuteUser,
+                onReportUser = onReportUser,
                 onFetchMetadata = onFetchMetadata,
             )
         }
@@ -257,6 +309,10 @@ private fun FeedList(
     onDig: (Message) -> Unit,
     onDelete: (Message) -> Unit,
     onReport: (Message) -> Unit,
+    onEdit: (Message) -> Unit,
+    onBlockUser: (Message) -> Unit,
+    onMuteUser: (Message) -> Unit,
+    onReportUser: (Message) -> Unit,
     onFetchMetadata: (Message) -> Unit,
 ) {
     val listState = rememberLazyListState()
@@ -282,6 +338,10 @@ private fun FeedList(
                 onDig = { onDig(message) },
                 onDelete = { onDelete(message) },
                 onReport = { onReport(message) },
+                onEdit = { onEdit(message) },
+                onBlockUser = { onBlockUser(message) },
+                onMuteUser = { onMuteUser(message) },
+                onReportUser = { onReportUser(message) },
                 onOpenLink = { onFetchMetadata(message) },
             )
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)

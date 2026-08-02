@@ -29,6 +29,10 @@ class FakeMessagesRepository : MessagesRepository {
     var postReplyResult: ApiResult<Message>? = null
     var setDugResult: ApiResult<Unit> = ApiResult.Success(Unit)
     var deleteResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var editResult: ApiResult<Message>? = null
+    var blockResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var muteResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var reportUserResult: ApiResult<Unit> = ApiResult.Success(Unit)
     var searchResult: ApiResult<List<Message>> = ApiResult.Success(emptyList())
     var uploadImageResult: ApiResult<String> = ApiResult.Success("https://cdn/image.png")
     var uploadVideoResult: ApiResult<String> = ApiResult.Success("https://cdn/video.mp4")
@@ -48,6 +52,10 @@ class FakeMessagesRepository : MessagesRepository {
     var cancelledScheduledIds = mutableListOf<String>()
     var lastReport: ReportArgs? = null
     var metadataFetchedIds = mutableListOf<String>()
+    var lastEdit: Pair<String, String>? = null
+    var blockedUsernames = mutableListOf<String>()
+    var mutedUsernames = mutableListOf<String>()
+    var lastReportUser: ReportUserArgs? = null
 
     /** Snapshot of the arguments passed to the last [createMessage] call. */
     data class CreateArgs(
@@ -59,6 +67,9 @@ class FakeMessagesRepository : MessagesRepository {
 
     /** Snapshot of the arguments passed to the last [report] call. */
     data class ReportArgs(val messageId: String, val reason: ReportReason, val detail: String?)
+
+    /** Snapshot of the arguments passed to the last [reportUser] call. */
+    data class ReportUserArgs(val username: String, val reason: ReportReason, val detail: String?)
 
     fun emitFeed(messages: List<Message>) { feed.value = messages }
     fun emitReplies(parentId: String, messages: List<Message>) {
@@ -125,6 +136,17 @@ class FakeMessagesRepository : MessagesRepository {
         return deleteResult
     }
 
+    override suspend fun editMessage(messageId: String, content: String): ApiResult<Message> {
+        lastEdit = messageId to content
+        val result = editResult ?: ApiResult.Failure(AppError.Unknown("editResult not set"))
+        if (result is ApiResult.Success) {
+            // Reflect the edit into the observable feed/message so the UI re-emits.
+            feed.value = feed.value.map { if (it.id == messageId) result.data else it }
+            single.value = single.value + (messageId to result.data)
+        }
+        return result
+    }
+
     override suspend fun refreshScheduled(): ApiResult<Unit> {
         refreshScheduledCount++
         return refreshScheduledResult
@@ -138,6 +160,30 @@ class FakeMessagesRepository : MessagesRepository {
     override suspend fun report(messageId: String, reason: ReportReason, detail: String?): ApiResult<Unit> {
         lastReport = ReportArgs(messageId, reason, detail)
         return reportResult
+    }
+
+    override suspend fun blockUser(username: String): ApiResult<Unit> {
+        blockedUsernames += username
+        val result = blockResult
+        if (result is ApiResult.Success) {
+            // Mirror the repository's hide-on-block behaviour for ViewModel tests.
+            feed.value = feed.value.filterNot { it.authorUsername == username }
+        }
+        return result
+    }
+
+    override suspend fun muteUser(username: String): ApiResult<Unit> {
+        mutedUsernames += username
+        val result = muteResult
+        if (result is ApiResult.Success) {
+            feed.value = feed.value.filterNot { it.authorUsername == username }
+        }
+        return result
+    }
+
+    override suspend fun reportUser(username: String, reason: ReportReason, detail: String?): ApiResult<Unit> {
+        lastReportUser = ReportUserArgs(username, reason, detail)
+        return reportUserResult
     }
 
     override suspend fun fetchMetadata(messageId: String): ApiResult<Message> {
@@ -160,11 +206,13 @@ fun sampleMessage(
     imageUrls: List<String> = emptyList(),
     videoUrls: List<String> = emptyList(),
     scheduledAt: String? = null,
+    authorUsername: String = "adron",
+    editedAt: String? = null,
 ) = Message(
     id = id,
     content = content,
     authorId = "u1",
-    authorUsername = "adron",
+    authorUsername = authorUsername,
     authorDisplayName = "Adron",
     authorAvatarUrl = null,
     createdAt = null,
@@ -176,4 +224,5 @@ fun sampleMessage(
     imageUrls = imageUrls,
     videoUrls = videoUrls,
     scheduledAt = scheduledAt,
+    editedAt = editedAt,
 )

@@ -69,6 +69,13 @@ interface MessagesRepository {
     /** Deletes one of the caller's own messages, removing it from the cache. */
     suspend fun deleteMessage(messageId: String): ApiResult<Unit>
 
+    /**
+     * Edits the [content] of one of the caller's own messages. Optimistically
+     * updates the cached message (content + an "edited" marker) and rolls the
+     * change back on failure. Returns the updated [Message].
+     */
+    suspend fun editMessage(messageId: String, content: String): ApiResult<Message>
+
     /** Refreshes the caller's scheduled messages from the API into the cache. */
     suspend fun refreshScheduled(): ApiResult<Unit>
 
@@ -77,6 +84,21 @@ interface MessagesRepository {
 
     /** Reports a message with a [reason] and optional free-text [detail]. */
     suspend fun report(messageId: String, reason: ReportReason, detail: String? = null): ApiResult<Unit>
+
+    /**
+     * Blocks the user [username]. On success, removes that author's messages from
+     * the local feed/reply cache so the caller stops seeing them immediately.
+     */
+    suspend fun blockUser(username: String): ApiResult<Unit>
+
+    /**
+     * Mutes the user [username]. On success, removes that author's messages from
+     * the local feed/reply cache so the caller stops seeing them immediately.
+     */
+    suspend fun muteUser(username: String): ApiResult<Unit>
+
+    /** Reports the user [username] with a [reason] and optional free-text [detail]. */
+    suspend fun reportUser(username: String, reason: ReportReason, detail: String? = null): ApiResult<Unit>
 
     /**
      * Fetches link-preview metadata for [messageId]'s links and updates the cached
