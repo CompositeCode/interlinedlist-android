@@ -5,6 +5,9 @@ import androidx.lifecycle.viewModelScope
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
 import com.interlinedlist.android.feature.messages.data.MessagesRepository
+import com.interlinedlist.android.feature.messages.domain.CrossPostSelection
+import com.interlinedlist.android.feature.messages.domain.CrossPostStatus
+import com.interlinedlist.android.feature.messages.domain.LinkedNetwork
 import com.interlinedlist.android.feature.messages.domain.Message
 import com.interlinedlist.android.feature.messages.domain.ReportReason
 import com.interlinedlist.android.feature.messages.ui.isSubscriptionGate
@@ -44,6 +47,12 @@ data class MessagesFeedUiState(
     val attachments: List<PendingAttachment> = emptyList(),
     /** Optional future send time (ISO-8601) for the in-progress compose. */
     val scheduledAt: String? = null,
+    /** The caller's already-linked networks, offered as cross-post destinations. */
+    val linkedNetworks: List<LinkedNetwork> = emptyList(),
+    /** Ids of the linked networks currently selected as cross-post targets. */
+    val selectedNetworkIds: Set<String> = emptySet(),
+    /** Per-network delivery statuses from the last successful post, if any. */
+    val crossPostStatuses: List<CrossPostStatus> = emptyList(),
     /** The message currently being reported (drives the report dialog), if any. */
     val reportTarget: Message? = null,
     val isReporting: Boolean = false,
@@ -63,6 +72,9 @@ data class MessagesFeedUiState(
     val canPost: Boolean
         get() = (composeText.isNotBlank() || attachments.any { it.hostedUrl != null }) &&
             !isPosting && !isUploading
+
+    /** True when the account has no linked networks to cross-post to. */
+    val hasNoLinkedNetworks: Boolean get() = linkedNetworks.isEmpty()
 
     /** Edit can be saved when the text is non-blank and not currently saving. */
     val canSaveEdit: Boolean get() = editText.isNotBlank() && !isSavingEdit
@@ -95,6 +107,9 @@ private data class FeedTransientState(
     val isPosting: Boolean = false,
     val attachments: List<PendingAttachment> = emptyList(),
     val scheduledAt: String? = null,
+    val linkedNetworks: List<LinkedNetwork> = emptyList(),
+    val selectedNetworkIds: Set<String> = emptySet(),
+    val crossPostStatuses: List<CrossPostStatus> = emptyList(),
     val reportTarget: Message? = null,
     val isReporting: Boolean = false,
     val editTarget: Message? = null,
@@ -129,6 +144,9 @@ class MessagesFeedViewModel @Inject constructor(
                 isPosting = t.isPosting,
                 attachments = t.attachments,
                 scheduledAt = t.scheduledAt,
+                linkedNetworks = t.linkedNetworks,
+                selectedNetworkIds = t.selectedNetworkIds,
+                crossPostStatuses = t.crossPostStatuses,
                 reportTarget = t.reportTarget,
                 isReporting = t.isReporting,
                 editTarget = t.editTarget,
@@ -145,6 +163,29 @@ class MessagesFeedViewModel @Inject constructor(
 
     init {
         refresh()
+        loadLinkedNetworks()
+    }
+
+    /**
+     * Loads the caller's already-linked networks so the composer can offer them as
+     * cross-post destinations. Best-effort: a failure just leaves the list empty
+     * (the composer then shows the "link accounts on the web" hint) and does not
+     * surface a feed-level error.
+     */
+    fun loadLinkedNetworks() {
+        viewModelScope.launch {
+            when (val result = repository.getLinkedNetworks()) {
+                is ApiResult.Success -> transient.update { state ->
+                    // Prune any selections whose network is no longer linked.
+                    val liveIds = result.data.map { it.id }.toSet()
+                    state.copy(
+                        linkedNetworks = result.data,
+                        selectedNetworkIds = state.selectedNetworkIds.intersect(liveIds),
+                    )
+                }
+                is ApiResult.Failure -> Unit
+            }
+        }
     }
 
     fun refresh() {
@@ -198,13 +239,35 @@ class MessagesFeedViewModel @Inject constructor(
 
     // --- compose sheet -----------------------------------------------------
 
-    fun openCompose() = transient.update { it.copy(isComposeOpen = true, errorMessage = null) }
+    fun openCompose() = transient.update {
+        it.copy(isComposeOpen = true, errorMessage = null, crossPostStatuses = emptyList())
+    }
 
     fun dismissCompose() = transient.update {
-        it.copy(isComposeOpen = false, composeText = "", attachments = emptyList(), scheduledAt = null)
+        it.copy(
+            isComposeOpen = false,
+            composeText = "",
+            attachments = emptyList(),
+            scheduledAt = null,
+            selectedNetworkIds = emptySet(),
+        )
     }
 
     fun onComposeTextChange(value: String) = transient.update { it.copy(composeText = value) }
+
+    /**
+     * Toggles a linked network as a cross-post target for the in-progress compose.
+     * No-ops for an id that isn't currently linked.
+     */
+    fun onToggleNetwork(networkId: String) = transient.update { state ->
+        if (state.linkedNetworks.none { it.id == networkId }) return@update state
+        val selected = if (networkId in state.selectedNetworkIds) {
+            state.selectedNetworkIds - networkId
+        } else {
+            state.selectedNetworkIds + networkId
+        }
+        state.copy(selectedNetworkIds = selected)
+    }
 
     /** Sets (or clears with null) the future send time for the in-progress compose. */
     fun onScheduleChange(isoTimestamp: String?) = transient.update { it.copy(scheduledAt = isoTimestamp) }
@@ -260,7 +323,10 @@ class MessagesFeedViewModel @Inject constructor(
         if (snapshot.attachments.any { it.isUploading }) return
         val images = snapshot.attachments.filterNot { it.isVideo }.mapNotNull { it.hostedUrl }
         val videos = snapshot.attachments.filter { it.isVideo }.mapNotNull { it.hostedUrl }
-        transient.update { it.copy(isPosting = true, errorMessage = null) }
+        // Fold the selected linked networks into the cross-post request fields.
+        val selected = snapshot.linkedNetworks.filter { it.id in snapshot.selectedNetworkIds }
+        val crossPost = CrossPostSelection.from(selected)
+        transient.update { it.copy(isPosting = true, errorMessage = null, crossPostStatuses = emptyList()) }
         viewModelScope.launch {
             when (
                 val result = repository.createMessage(
@@ -268,6 +334,7 @@ class MessagesFeedViewModel @Inject constructor(
                     imageUrls = images,
                     videoUrls = videos,
                     scheduledAt = snapshot.scheduledAt,
+                    crossPost = crossPost,
                 )
             ) {
                 is ApiResult.Success -> transient.update {
@@ -277,6 +344,8 @@ class MessagesFeedViewModel @Inject constructor(
                         composeText = "",
                         attachments = emptyList(),
                         scheduledAt = null,
+                        selectedNetworkIds = emptySet(),
+                        crossPostStatuses = result.data.crossPosts,
                     )
                 }
                 is ApiResult.Failure -> transient.update {
@@ -285,6 +354,9 @@ class MessagesFeedViewModel @Inject constructor(
             }
         }
     }
+
+    /** Dismisses the post-send cross-post status banner. */
+    fun dismissCrossPostStatuses() = transient.update { it.copy(crossPostStatuses = emptyList()) }
 
     // --- report ------------------------------------------------------------
 

@@ -3,6 +3,7 @@ package com.interlinedlist.android.feature.messages.data.remote
 import com.interlinedlist.android.feature.messages.data.remote.dto.CreateMessageRequest
 import com.interlinedlist.android.feature.messages.data.remote.dto.CreateMessageResponse
 import com.interlinedlist.android.feature.messages.data.remote.dto.EditMessageRequest
+import com.interlinedlist.android.feature.messages.data.remote.dto.IdentitiesResponse
 import com.interlinedlist.android.feature.messages.data.remote.dto.MediaUploadResponse
 import com.interlinedlist.android.feature.messages.data.remote.dto.MessageResponse
 import com.interlinedlist.android.feature.messages.data.remote.dto.MessagesResponse
@@ -89,6 +90,14 @@ interface MessagesApi {
     /** The caller's scheduled (not-yet-published) messages. */
     @GET("api/messages/scheduled")
     suspend fun getScheduled(): ScheduledMessagesResponse
+
+    /**
+     * The caller's already-linked social identities (Mastodon/LinkedIn/X/Bluesky),
+     * used to offer cross-post destinations in the composer. Linking new accounts
+     * is a web-only OAuth flow and is not exposed here.
+     */
+    @GET("api/user/identities")
+    suspend fun getIdentities(): IdentitiesResponse
 
     /** Reports a message with a reason (and optional free-text detail). */
     @POST("api/messages/{id}/report")

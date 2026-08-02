@@ -4,6 +4,8 @@ import com.google.common.truth.Truth.assertThat
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
 import com.interlinedlist.android.feature.messages.data.remote.MessagesApi
+import com.interlinedlist.android.feature.messages.domain.CrossPostSelection
+import com.interlinedlist.android.feature.messages.domain.NetworkProvider
 import com.interlinedlist.android.feature.messages.domain.ReportReason
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -23,7 +25,13 @@ import retrofit2.Retrofit
 class DefaultMessagesRepositoryTest {
 
     private val dispatcher = StandardTestDispatcher()
-    private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
+    // Mirrors the production Json (see core:network NetworkModule): coerce explicit
+    // nulls (e.g. `crossPosts: null`) to the property's default rather than failing.
+    private val json = Json {
+        ignoreUnknownKeys = true
+        explicitNulls = false
+        coerceInputValues = true
+    }
 
     private lateinit var server: MockWebServer
     private lateinit var api: MessagesApi
@@ -143,7 +151,7 @@ class DefaultMessagesRepositoryTest {
 
         val result = repo.createMessage("brand new")
 
-        assertThat((result as ApiResult.Success).data.id).isEqualTo("new")
+        assertThat((result as ApiResult.Success).data.message.id).isEqualTo("new")
         val ids = repo.observeFeed().first().map { it.id }
         assertThat(ids.first()).isEqualTo("new")
     }
@@ -289,7 +297,7 @@ class DefaultMessagesRepositoryTest {
             imageUrls = listOf("https://cdn/a.png"),
         )
 
-        assertThat((result as ApiResult.Success).data.imageUrls).containsExactly("https://cdn/a.png")
+        assertThat((result as ApiResult.Success).data.message.imageUrls).containsExactly("https://cdn/a.png")
         val body = server.takeRequest().body.readUtf8()
         assertThat(body).contains("https://cdn/a.png")
         assertThat(body).contains("imageUrls")
@@ -307,7 +315,7 @@ class DefaultMessagesRepositoryTest {
 
         val result = repo.createMessage(content = "later", scheduledAt = "2026-07-19T09:00:00Z")
 
-        assertThat((result as ApiResult.Success).data.scheduledAt).isEqualTo("2026-07-19T09:00:00Z")
+        assertThat((result as ApiResult.Success).data.message.scheduledAt).isEqualTo("2026-07-19T09:00:00Z")
         assertThat(repo.observeFeed().first()).isEmpty()
         assertThat(repo.observeScheduled().first().map { it.id }).containsExactly("sch1")
     }
@@ -500,6 +508,143 @@ class DefaultMessagesRepositoryTest {
 
         val body = server.takeRequest().body.readUtf8()
         assertThat(body).doesNotContain("detail")
+    }
+
+    // --- cross-posting -----------------------------------------------------
+
+    @Test
+    fun `getLinkedNetworks parses varied providers`() = runTest(dispatcher) {
+        enqueueJson(
+            200,
+            """
+            { "identities": [
+                { "id": "m1", "provider": "mastodon:techhub.social",
+                  "providerUsername": "crew@techhub.social",
+                  "profileUrl": "https://techhub.social/@crew", "avatarUrl": null,
+                  "connectedAt": "2026-04-07T16:35:32.476Z", "lastVerifiedAt": null },
+                { "id": "l1", "provider": "linkedin", "providerUsername": "Adron Hall" },
+                { "id": "t1", "provider": "twitter", "providerUsername": "interlinedlist" },
+                { "id": "b1", "provider": "bluesky", "providerUsername": "il.bsky.social" }
+            ] }
+            """.trimIndent(),
+        )
+        val repo = repository()
+
+        val result = repo.getLinkedNetworks()
+
+        val networks = (result as ApiResult.Success).data
+        assertThat(networks.map { it.id }).containsExactly("m1", "l1", "t1", "b1").inOrder()
+        assertThat(networks.map { it.networkProvider }).containsExactly(
+            NetworkProvider.MASTODON,
+            NetworkProvider.LINKEDIN,
+            NetworkProvider.TWITTER,
+            NetworkProvider.BLUESKY,
+        ).inOrder()
+        // The mastodon chip label surfaces the instance host.
+        assertThat(networks.first().chipLabel).isEqualTo("techhub.social")
+        assertThat(server.takeRequest().path).contains("api/user/identities")
+    }
+
+    @Test
+    fun `getLinkedNetworks returns empty when nothing is linked`() = runTest(dispatcher) {
+        enqueueJson(200, """{ "identities": [] }""")
+        val repo = repository()
+
+        val result = repo.getLinkedNetworks()
+
+        assertThat((result as ApiResult.Success).data).isEmpty()
+    }
+
+    @Test
+    fun `createMessage with targets sends the cross-post fields`() = runTest(dispatcher) {
+        enqueueJson(
+            201,
+            """{ "message": "Message created successfully",
+                "data": { "id": "x1", "content": "cross-posted" } }""",
+        )
+        val repo = repository()
+
+        val result = repo.createMessage(
+            content = "cross-posted",
+            crossPost = CrossPostSelection(
+                mastodonProviderIds = listOf("m1"),
+                linkedIn = true,
+                twitter = true,
+            ),
+        )
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        val body = server.takeRequest().body.readUtf8()
+        assertThat(body).contains("\"mastodonProviderIds\":[\"m1\"]")
+        assertThat(body).contains("\"crossPostToLinkedIn\":true")
+        assertThat(body).contains("\"crossPostToTwitter\":true")
+        // Unselected networks are omitted entirely (explicitNulls = false).
+        assertThat(body).doesNotContain("crossPostToBluesky")
+    }
+
+    @Test
+    fun `createMessage without targets keeps the original body`() = runTest(dispatcher) {
+        enqueueJson(
+            201,
+            """{ "message": "Message created successfully",
+                "data": { "id": "plain", "content": "just il" } }""",
+        )
+        val repo = repository()
+
+        repo.createMessage(content = "just il")
+
+        val body = server.takeRequest().body.readUtf8()
+        assertThat(body).contains("\"content\":\"just il\"")
+        // None of the cross-post fields are present on a plain post.
+        assertThat(body).doesNotContain("mastodonProviderIds")
+        assertThat(body).doesNotContain("crossPostToBluesky")
+        assertThat(body).doesNotContain("crossPostToLinkedIn")
+        assertThat(body).doesNotContain("crossPostToTwitter")
+    }
+
+    @Test
+    fun `createMessage parses the crossPosts statuses from the response`() = runTest(dispatcher) {
+        enqueueJson(
+            201,
+            """{ "message": "Message created successfully",
+                "data": { "id": "x2", "content": "cross-posted" },
+                "crossPosts": [
+                    { "provider": "linkedin", "status": "success",
+                      "url": "https://linkedin.com/post/1" },
+                    { "provider": "mastodon:techhub.social", "status": "pending" },
+                    { "provider": "twitter", "status": "failed", "error": "rate limited" }
+                ] }""",
+        )
+        val repo = repository()
+
+        val result = repo.createMessage(
+            content = "cross-posted",
+            crossPost = CrossPostSelection(linkedIn = true, twitter = true),
+        )
+
+        val created = (result as ApiResult.Success).data
+        assertThat(created.crossPosts.map { it.provider })
+            .containsExactly("linkedin", "mastodon:techhub.social", "twitter").inOrder()
+        val linkedIn = created.crossPosts.first { it.provider == "linkedin" }
+        assertThat(linkedIn.isSuccess).isTrue()
+        assertThat(linkedIn.url).isEqualTo("https://linkedin.com/post/1")
+        val twitter = created.crossPosts.first { it.provider == "twitter" }
+        assertThat(twitter.isFailed).isTrue()
+        assertThat(twitter.error).isEqualTo("rate limited")
+    }
+
+    @Test
+    fun `createMessage defaults crossPosts to empty when absent`() = runTest(dispatcher) {
+        enqueueJson(
+            201,
+            """{ "message": "Message created successfully",
+                "data": { "id": "x3", "content": "plain" }, "crossPosts": null }""",
+        )
+        val repo = repository()
+
+        val result = repo.createMessage(content = "plain")
+
+        assertThat((result as ApiResult.Success).data.crossPosts).isEmpty()
     }
 
     @Test

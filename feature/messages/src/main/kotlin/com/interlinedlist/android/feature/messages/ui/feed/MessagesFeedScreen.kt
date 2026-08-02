@@ -13,8 +13,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -24,10 +27,12 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -36,6 +41,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -54,6 +60,8 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.interlinedlist.android.core.designsystem.theme.InterlinedListTheme
+import com.interlinedlist.android.feature.messages.domain.CrossPostStatus
+import com.interlinedlist.android.feature.messages.domain.LinkedNetwork
 import com.interlinedlist.android.feature.messages.domain.Message
 import com.interlinedlist.android.feature.messages.domain.ReportReason
 import com.interlinedlist.android.feature.messages.ui.components.EditMessageSheet
@@ -78,6 +86,17 @@ object MessagesFeedTags {
     const val COMPOSE_ADD_VIDEO = "messagesComposeAddVideo"
     const val COMPOSE_SCHEDULE = "messagesComposeSchedule"
     const val SCHEDULED_ACTION = "messagesFeedScheduledAction"
+
+    /** The always-on InterlinedList destination chip. */
+    const val DESTINATION_IL = "messagesComposeDestinationInterlinedList"
+    /** Prefix for a per-network destination chip; suffixed with the network id. */
+    const val DESTINATION_PREFIX = "messagesComposeDestination_"
+    /** Hint shown when the account has no linked networks to cross-post to. */
+    const val DESTINATIONS_HINT = "messagesComposeDestinationsHint"
+    /** Post-send banner listing per-network cross-post statuses. */
+    const val CROSS_POST_STATUS = "messagesFeedCrossPostStatus"
+
+    fun destinationTag(networkId: String): String = DESTINATION_PREFIX + networkId
 }
 
 /**
@@ -122,6 +141,8 @@ fun MessagesRoute(
         },
         onRemoveAttachment = viewModel::onRemoveAttachment,
         onScheduleChange = viewModel::onScheduleChange,
+        onToggleNetwork = viewModel::onToggleNetwork,
+        onDismissCrossPostStatuses = viewModel::dismissCrossPostStatuses,
         onDismissReport = viewModel::dismissReport,
         onSubmitReport = viewModel::submitReport,
         onEditTextChange = viewModel::onEditTextChange,
@@ -158,6 +179,8 @@ fun MessagesFeedScreen(
     onAttachMedia: (Uri, Boolean) -> Unit = { _, _ -> },
     onRemoveAttachment: (PendingAttachment) -> Unit = {},
     onScheduleChange: (String?) -> Unit = {},
+    onToggleNetwork: (String) -> Unit = {},
+    onDismissCrossPostStatuses: () -> Unit = {},
     onDismissReport: () -> Unit = {},
     onSubmitReport: (ReportReason, String) -> Unit = { _, _ -> },
     onEditTextChange: (String) -> Unit = {},
@@ -224,6 +247,14 @@ fun MessagesFeedScreen(
             onAttachMedia = onAttachMedia,
             onRemoveAttachment = onRemoveAttachment,
             onScheduleChange = onScheduleChange,
+            onToggleNetwork = onToggleNetwork,
+        )
+    }
+
+    if (state.crossPostStatuses.isNotEmpty()) {
+        CrossPostStatusBanner(
+            statuses = state.crossPostStatuses,
+            onDismiss = onDismissCrossPostStatuses,
         )
     }
 
@@ -427,6 +458,7 @@ private fun ComposeSheet(
     onAttachMedia: (Uri, Boolean) -> Unit,
     onRemoveAttachment: (PendingAttachment) -> Unit,
     onScheduleChange: (String?) -> Unit,
+    onToggleNetwork: (String) -> Unit,
 ) {
     val imagePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent(),
@@ -487,6 +519,14 @@ private fun ComposeSheet(
             }
 
             Spacer(Modifier.height(12.dp))
+            DestinationsRow(
+                networks = state.linkedNetworks,
+                selectedIds = state.selectedNetworkIds,
+                enabled = !state.isPosting,
+                onToggleNetwork = onToggleNetwork,
+            )
+
+            Spacer(Modifier.height(12.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 TextButton(onClick = onDismiss, enabled = !state.isPosting) { Text("Cancel") }
                 Spacer(Modifier.height(8.dp))
@@ -545,6 +585,137 @@ private fun AttachmentRow(
                     Icon(Icons.Filled.Close, contentDescription = "Remove", modifier = Modifier.size(16.dp))
                 },
             )
+        }
+    }
+}
+
+/**
+ * The cross-post destinations row: InterlinedList is always-on (rendered as a
+ * disabled, always-selected chip), followed by a toggle chip per already-linked
+ * network. When nothing is linked, a subtle hint points the user to the web to
+ * link accounts — the app does not build an OAuth connect flow.
+ */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun DestinationsRow(
+    networks: List<LinkedNetwork>,
+    selectedIds: Set<String>,
+    enabled: Boolean,
+    onToggleNetwork: (String) -> Unit,
+) {
+    Column {
+        Text(
+            text = "Post to",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(6.dp))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // InterlinedList is always a destination; shown selected and locked.
+            FilterChip(
+                selected = true,
+                onClick = {},
+                enabled = false,
+                label = { Text("InterlinedList") },
+                leadingIcon = {
+                    Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                },
+                modifier = Modifier.testTag(MessagesFeedTags.DESTINATION_IL),
+            )
+            networks.forEach { network ->
+                val isSelected = network.id in selectedIds
+                FilterChip(
+                    selected = isSelected,
+                    onClick = { onToggleNetwork(network.id) },
+                    enabled = enabled,
+                    label = { Text(network.chipLabel) },
+                    leadingIcon = if (isSelected) {
+                        {
+                            Icon(
+                                Icons.Filled.Check,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                    } else {
+                        null
+                    },
+                    modifier = Modifier.testTag(MessagesFeedTags.destinationTag(network.id)),
+                )
+            }
+        }
+        if (networks.isEmpty()) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "Link accounts on the web to cross-post.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.testTag(MessagesFeedTags.DESTINATIONS_HINT),
+            )
+        }
+    }
+}
+
+/**
+ * A brief, dismissible banner surfacing the per-network cross-post statuses
+ * returned by the create endpoint. Anchored to the bottom of the screen.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun CrossPostStatusBanner(
+    statuses: List<CrossPostStatus>,
+    onDismiss: () -> Unit,
+) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+        Surface(
+            tonalElevation = 3.dp,
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(16.dp)
+                .testTag(MessagesFeedTags.CROSS_POST_STATUS),
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Text(
+                    text = "Cross-post results",
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Spacer(Modifier.height(8.dp))
+                statuses.forEach { status ->
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        val icon = if (status.isFailed) Icons.Filled.Close else Icons.Filled.Check
+                        val tint = when {
+                            status.isFailed -> MaterialTheme.colorScheme.error
+                            status.isSuccess -> MaterialTheme.colorScheme.primary
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(16.dp))
+                        Text(
+                            text = buildString {
+                                append(status.label)
+                                append(": ")
+                                append(
+                                    when {
+                                        status.isFailed -> status.error ?: "Failed"
+                                        status.isSuccess -> "Posted"
+                                        else -> status.status
+                                    },
+                                )
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = onDismiss) { Text("Dismiss") }
+                }
+            }
         }
     }
 }

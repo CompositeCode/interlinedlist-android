@@ -4,9 +4,11 @@ import app.cash.turbine.test
 import com.google.common.truth.Truth.assertThat
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
+import com.interlinedlist.android.feature.messages.domain.CrossPostStatus
 import com.interlinedlist.android.feature.messages.domain.ReportReason
 import com.interlinedlist.android.feature.messages.ui.FakeMessagesRepository
 import com.interlinedlist.android.feature.messages.ui.sampleMessage
+import com.interlinedlist.android.feature.messages.ui.sampleNetwork
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
@@ -411,6 +413,148 @@ class MessagesFeedViewModelTest {
         assertThat(report.reason).isEqualTo(ReportReason.HARASSMENT)
         assertThat(report.detail).isEqualTo("abusive")
         assertThat(vm.uiState.value.moderationTarget).isNull()
+    }
+
+    // --- cross-posting -----------------------------------------------------
+
+    @Test
+    fun `linked networks are loaded on init`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            linkedNetworksResult = ApiResult.Success(
+                listOf(
+                    sampleNetwork(id = "m1", provider = "mastodon:techhub.social"),
+                    sampleNetwork(id = "l1", provider = "linkedin"),
+                ),
+            )
+        }
+        val vm = MessagesFeedViewModel(repo)
+
+        vm.uiState.test {
+            advanceUntilIdle()
+            val state = expectMostRecentItem()
+            assertThat(state.linkedNetworks.map { it.id }).containsExactly("m1", "l1").inOrder()
+            assertThat(state.hasNoLinkedNetworks).isFalse()
+        }
+    }
+
+    @Test
+    fun `empty linked networks yields the no-networks state`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            linkedNetworksResult = ApiResult.Success(emptyList())
+        }
+        val vm = MessagesFeedViewModel(repo)
+
+        vm.uiState.test {
+            advanceUntilIdle()
+            val state = expectMostRecentItem()
+            assertThat(state.linkedNetworks).isEmpty()
+            assertThat(state.hasNoLinkedNetworks).isTrue()
+        }
+    }
+
+    @Test
+    fun `toggling a network selects then deselects it`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            linkedNetworksResult = ApiResult.Success(
+                listOf(sampleNetwork(id = "l1", provider = "linkedin")),
+            )
+        }
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.onToggleNetwork("l1")
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.selectedNetworkIds).containsExactly("l1")
+
+        vm.onToggleNetwork("l1")
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.selectedNetworkIds).isEmpty()
+    }
+
+    @Test
+    fun `post includes the selected networks as cross-post targets`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            linkedNetworksResult = ApiResult.Success(
+                listOf(
+                    sampleNetwork(id = "m1", provider = "mastodon:techhub.social"),
+                    sampleNetwork(id = "l1", provider = "linkedin"),
+                    sampleNetwork(id = "b1", provider = "bluesky"),
+                ),
+            )
+            createResult = ApiResult.Success(sampleMessage(id = "new"))
+        }
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.openCompose()
+        vm.onComposeTextChange("hello networks")
+        vm.onToggleNetwork("m1")
+        vm.onToggleNetwork("l1")
+        advanceUntilIdle()
+        vm.post()
+        advanceUntilIdle()
+
+        val crossPost = repo.lastCreate!!.crossPost
+        assertThat(crossPost.mastodonProviderIds).containsExactly("m1")
+        assertThat(crossPost.linkedIn).isTrue()
+        // Bluesky was never toggled.
+        assertThat(crossPost.bluesky).isFalse()
+        assertThat(crossPost.twitter).isFalse()
+        // Selection is cleared after a successful post.
+        assertThat(vm.uiState.value.selectedNetworkIds).isEmpty()
+    }
+
+    @Test
+    fun `post with no targets sends an empty selection`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            linkedNetworksResult = ApiResult.Success(
+                listOf(sampleNetwork(id = "l1", provider = "linkedin")),
+            )
+            createResult = ApiResult.Success(sampleMessage(id = "new"))
+        }
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.openCompose()
+        vm.onComposeTextChange("just il")
+        vm.post()
+        advanceUntilIdle()
+
+        assertThat(repo.lastCreate!!.crossPost.hasTargets).isFalse()
+    }
+
+    @Test
+    fun `a successful cross-post surfaces the per-network statuses`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            linkedNetworksResult = ApiResult.Success(
+                listOf(sampleNetwork(id = "l1", provider = "linkedin")),
+            )
+            createResult = ApiResult.Success(sampleMessage(id = "new"))
+            createCrossPosts = listOf(
+                CrossPostStatus(provider = "linkedin", status = "success", url = "https://li/1"),
+            )
+        }
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.openCompose()
+        vm.onComposeTextChange("cross-posted")
+        vm.onToggleNetwork("l1")
+        advanceUntilIdle()
+        vm.post()
+        advanceUntilIdle()
+
+        val statuses = vm.uiState.value.crossPostStatuses
+        assertThat(statuses.map { it.provider }).containsExactly("linkedin")
+        assertThat(statuses.first().isSuccess).isTrue()
+
+        vm.dismissCrossPostStatuses()
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.crossPostStatuses).isEmpty()
     }
 
     @Test

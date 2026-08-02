@@ -4,12 +4,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.interlinedlist.android.core.designsystem.theme.InterlinedListTheme
+import com.interlinedlist.android.feature.messages.domain.LinkedNetwork
 import com.interlinedlist.android.feature.messages.domain.Message
 import com.interlinedlist.android.feature.messages.ui.components.EditMessageSheetTags
 import com.interlinedlist.android.feature.messages.ui.components.MessageCardTags
@@ -63,6 +65,14 @@ class MessagesFeedScreenTest {
                     onDismissCompose = { state = state.copy(isComposeOpen = false) },
                     onComposeTextChange = { state = state.copy(composeText = it) },
                     onPost = {},
+                    onToggleNetwork = { id ->
+                        val selected = if (id in state.selectedNetworkIds) {
+                            state.selectedNetworkIds - id
+                        } else {
+                            state.selectedNetworkIds + id
+                        }
+                        state = state.copy(selectedNetworkIds = selected)
+                    },
                     onReport = onReport,
                     onEdit = onEdit,
                     onBlockUser = onBlockUser,
@@ -205,5 +215,37 @@ class MessagesFeedScreenTest {
     fun scheduledAction_isPresent_inTheTopBar() {
         setFeed(MessagesFeedUiState(messages = listOf(message("1", "hi"))))
         composeRule.onNodeWithTag(MessagesFeedTags.SCHEDULED_ACTION).assertIsDisplayed()
+    }
+
+    @Test
+    fun destinationsRow_rendersInterlinedListAndLinkedNetwork_andTogglesIt() {
+        val linkedIn = LinkedNetwork(id = "l1", provider = "linkedin", providerUsername = "Adron Hall")
+        setFeed(
+            MessagesFeedUiState(
+                isComposeOpen = true,
+                composeText = "cross-post me",
+                linkedNetworks = listOf(linkedIn),
+            ),
+        )
+
+        // InterlinedList is always present; the linked network chip is offered too.
+        composeRule.onNodeWithTag(MessagesFeedTags.DESTINATION_IL).assertIsDisplayed()
+        composeRule.onNodeWithTag(MessagesFeedTags.destinationTag("l1")).assertIsDisplayed()
+
+        // Tapping the LinkedIn chip selects it as a cross-post target.
+        composeRule.onNodeWithTag(MessagesFeedTags.destinationTag("l1")).performClick()
+        composeRule.onNodeWithTag(MessagesFeedTags.destinationTag("l1")).assertIsSelected()
+    }
+
+    @Test
+    fun destinationsHint_isShown_whenNoNetworksAreLinked() {
+        setFeed(
+            MessagesFeedUiState(
+                isComposeOpen = true,
+                composeText = "hi",
+                linkedNetworks = emptyList(),
+            ),
+        )
+        composeRule.onNodeWithTag(MessagesFeedTags.DESTINATIONS_HINT).assertIsDisplayed()
     }
 }

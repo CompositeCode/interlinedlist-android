@@ -1,6 +1,9 @@
 package com.interlinedlist.android.feature.messages.data
 
 import com.interlinedlist.android.core.common.result.ApiResult
+import com.interlinedlist.android.feature.messages.domain.CreatedMessage
+import com.interlinedlist.android.feature.messages.domain.CrossPostSelection
+import com.interlinedlist.android.feature.messages.domain.LinkedNetwork
 import com.interlinedlist.android.feature.messages.domain.Message
 import com.interlinedlist.android.feature.messages.domain.ReportReason
 import kotlinx.coroutines.flow.Flow
@@ -38,15 +41,26 @@ interface MessagesRepository {
 
     /**
      * Creates a new top-level message and caches it. Optionally attaches already
-     * uploaded [imageUrls] / [videoUrls] and defers publishing to [scheduledAt]
-     * (ISO-8601). A scheduled message does not enter the feed cache.
+     * uploaded [imageUrls] / [videoUrls], defers publishing to [scheduledAt]
+     * (ISO-8601), and cross-posts to the already-linked networks named by
+     * [crossPost] (InterlinedList-only when [CrossPostSelection.NONE]). A scheduled
+     * message does not enter the feed cache. Returns the created message plus any
+     * per-network cross-post delivery statuses the endpoint reported.
      */
     suspend fun createMessage(
         content: String,
         imageUrls: List<String> = emptyList(),
         videoUrls: List<String> = emptyList(),
         scheduledAt: String? = null,
-    ): ApiResult<Message>
+        crossPost: CrossPostSelection = CrossPostSelection.NONE,
+    ): ApiResult<CreatedMessage>
+
+    /**
+     * The caller's already-linked social networks, offered as cross-post
+     * destinations in the composer. Read directly from the API (not cached); an
+     * empty list means nothing is linked yet.
+     */
+    suspend fun getLinkedNetworks(): ApiResult<List<LinkedNetwork>>
 
     /** Uploads image [bytes] and returns the hosted URL to attach on compose. */
     suspend fun uploadImage(bytes: ByteArray, fileName: String, mimeType: String): ApiResult<String>

@@ -3,6 +3,10 @@ package com.interlinedlist.android.feature.messages.ui
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
 import com.interlinedlist.android.feature.messages.data.MessagesRepository
+import com.interlinedlist.android.feature.messages.domain.CreatedMessage
+import com.interlinedlist.android.feature.messages.domain.CrossPostSelection
+import com.interlinedlist.android.feature.messages.domain.CrossPostStatus
+import com.interlinedlist.android.feature.messages.domain.LinkedNetwork
 import com.interlinedlist.android.feature.messages.domain.Message
 import com.interlinedlist.android.feature.messages.domain.ReportReason
 import kotlinx.coroutines.flow.Flow
@@ -24,6 +28,9 @@ class FakeMessagesRepository : MessagesRepository {
     var refreshResult: ApiResult<Boolean> = ApiResult.Success(false)
     var loadMoreResult: ApiResult<Boolean> = ApiResult.Success(false)
     var createResult: ApiResult<Message>? = null
+    /** Cross-post statuses returned alongside a successful [createResult]. */
+    var createCrossPosts: List<CrossPostStatus> = emptyList()
+    var linkedNetworksResult: ApiResult<List<LinkedNetwork>> = ApiResult.Success(emptyList())
     var fetchResult: ApiResult<Message>? = null
     var refreshRepliesResult: ApiResult<Unit> = ApiResult.Success(Unit)
     var postReplyResult: ApiResult<Message>? = null
@@ -63,6 +70,7 @@ class FakeMessagesRepository : MessagesRepository {
         val imageUrls: List<String>,
         val videoUrls: List<String>,
         val scheduledAt: String?,
+        val crossPost: CrossPostSelection = CrossPostSelection.NONE,
     )
 
     /** Snapshot of the arguments passed to the last [report] call. */
@@ -103,10 +111,17 @@ class FakeMessagesRepository : MessagesRepository {
         imageUrls: List<String>,
         videoUrls: List<String>,
         scheduledAt: String?,
-    ): ApiResult<Message> {
-        lastCreate = CreateArgs(content, imageUrls, videoUrls, scheduledAt)
-        return createResult ?: ApiResult.Failure(AppError.Unknown("createResult not set"))
+        crossPost: CrossPostSelection,
+    ): ApiResult<CreatedMessage> {
+        lastCreate = CreateArgs(content, imageUrls, videoUrls, scheduledAt, crossPost)
+        return when (val result = createResult) {
+            is ApiResult.Success -> ApiResult.Success(CreatedMessage(result.data, createCrossPosts))
+            is ApiResult.Failure -> result
+            null -> ApiResult.Failure(AppError.Unknown("createResult not set"))
+        }
     }
+
+    override suspend fun getLinkedNetworks(): ApiResult<List<LinkedNetwork>> = linkedNetworksResult
 
     override suspend fun uploadImage(bytes: ByteArray, fileName: String, mimeType: String): ApiResult<String> {
         uploadedImages++
@@ -193,6 +208,17 @@ class FakeMessagesRepository : MessagesRepository {
 
     override suspend fun search(query: String): ApiResult<List<Message>> = searchResult
 }
+
+/** Builds a sample [LinkedNetwork] for tests. */
+fun sampleNetwork(
+    id: String,
+    provider: String,
+    providerUsername: String = "handle",
+) = LinkedNetwork(
+    id = id,
+    provider = provider,
+    providerUsername = providerUsername,
+)
 
 /** Builds a sample [Message] for tests. */
 fun sampleMessage(

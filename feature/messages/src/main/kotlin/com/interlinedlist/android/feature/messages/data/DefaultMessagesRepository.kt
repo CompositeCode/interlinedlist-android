@@ -14,6 +14,9 @@ import com.interlinedlist.android.feature.messages.data.remote.dto.ReportRequest
 import com.interlinedlist.android.feature.messages.data.remote.dto.UserReportRequest
 import com.interlinedlist.android.feature.messages.data.remote.dto.toDomain
 import com.interlinedlist.android.core.network.error.safeApiCall
+import com.interlinedlist.android.feature.messages.domain.CreatedMessage
+import com.interlinedlist.android.feature.messages.domain.CrossPostSelection
+import com.interlinedlist.android.feature.messages.domain.LinkedNetwork
 import com.interlinedlist.android.feature.messages.domain.Message
 import com.interlinedlist.android.feature.messages.domain.ReportReason
 import kotlinx.coroutines.flow.Flow
@@ -83,12 +86,19 @@ class DefaultMessagesRepository @Inject constructor(
         imageUrls: List<String>,
         videoUrls: List<String>,
         scheduledAt: String?,
-    ): ApiResult<Message> = withContext(dispatchers.io) {
+        crossPost: CrossPostSelection,
+    ): ApiResult<CreatedMessage> = withContext(dispatchers.io) {
         val request = CreateMessageRequest(
             content = content,
             imageUrls = imageUrls.ifEmpty { null },
             videoUrls = videoUrls.ifEmpty { null },
             scheduledAt = scheduledAt,
+            // Encode cross-post targets per the create schema. explicitNulls=false
+            // drops these when empty/false, so a plain post keeps its original body.
+            mastodonProviderIds = crossPost.mastodonProviderIds.ifEmpty { null },
+            crossPostToBluesky = crossPost.bluesky.takeIf { it },
+            crossPostToLinkedIn = crossPost.linkedIn.takeIf { it },
+            crossPostToTwitter = crossPost.twitter.takeIf { it },
         )
         when (val result = safeCall { api.createMessage(request) }) {
             is ApiResult.Success -> {
@@ -101,8 +111,16 @@ class DefaultMessagesRepository @Inject constructor(
                     val topOrder = (messageDao.maxFeedOrder() ?: 0L)
                     messageDao.upsert(message.toEntity(feedOrder = topOrder - 1L))
                 }
-                ApiResult.Success(message)
+                val crossPosts = result.data.crossPosts.mapNotNull { it.toDomainOrNull() }
+                ApiResult.Success(CreatedMessage(message = message, crossPosts = crossPosts))
             }
+            is ApiResult.Failure -> result
+        }
+    }
+
+    override suspend fun getLinkedNetworks(): ApiResult<List<LinkedNetwork>> = withContext(dispatchers.io) {
+        when (val result = safeCall { api.getIdentities() }) {
+            is ApiResult.Success -> ApiResult.Success(result.data.identities.map { it.toDomain() })
             is ApiResult.Failure -> result
         }
     }
