@@ -90,7 +90,7 @@ class DefaultMessagesRepository @Inject constructor(
         )
         when (val result = safeCall { api.createMessage(request) }) {
             is ApiResult.Success -> {
-                val message = result.data.message.toDomain(currentUserId())
+                val message = result.data.data.toDomain(currentUserId())
                 if (message.scheduledAt != null) {
                     // Scheduled messages are cached in the scheduled view, not the feed.
                     messageDao.upsert(message.toEntity(feedOrder = 0L))
@@ -153,7 +153,7 @@ class DefaultMessagesRepository @Inject constructor(
                 api.createMessage(CreateMessageRequest(content = content, parentId = parentId))
             }) {
                 is ApiResult.Success -> {
-                    val reply = result.data.message.toDomain(currentUserId()).copy(parentId = parentId)
+                    val reply = result.data.data.toDomain(currentUserId()).copy(parentId = parentId)
                     val base = (messageDao.maxFeedOrder() ?: 0L) + 1L
                     messageDao.upsert(reply.toEntity(feedOrder = base))
                     // Reflect the new reply count on the parent if it is cached.

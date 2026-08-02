@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Ocean Blue: adaptive-icon background layer and splash background. -->
-    <color name="brand_ocean_blue">#0F4C5F</color>
+    <!-- Strata brand. Adaptive-icon background is the soft-sand surface the mark sits on. -->
+    <color name="il_icon_background">#F4EEE2</color>
+    <!-- Splash background: soft sand in light mode (see values-night for dark). -->
+    <color name="il_splash_background">#F4EEE2</color>
 </resources>
