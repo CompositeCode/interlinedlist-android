@@ -1,15 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Splash screen shown until the first Compose frame; brand mark on Ocean Blue. -->
+    <!-- Splash shown until the first Compose frame: brand mark on the sand/near-black
+         surface (icon and background follow light/dark via -night resources). -->
     <style name="Theme.InterlinedList.Starting" parent="Theme.SplashScreen">
-        <item name="windowSplashScreenBackground">@color/brand_ocean_blue</item>
-        <item name="windowSplashScreenAnimatedIcon">@drawable/il_logo_mark</item>
+        <item name="windowSplashScreenBackground">@color/il_splash_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/il_splash_icon</item>
         <item name="postSplashScreenTheme">@style/Theme.InterlinedList</item>
     </style>
 
     <!-- Base activity theme; the Compose UI supplies the real Material 3 styling. -->
     <style name="Theme.InterlinedList" parent="android:Theme.Material.NoActionBar">
-        <item name="android:windowBackground">@color/brand_ocean_blue</item>
+        <item name="android:windowBackground">@color/il_splash_background</item>
     </style>
 </resources>

@@ -130,10 +130,13 @@ class DefaultMessagesRepositoryTest {
             """{ "data": [ { "id": "old", "content": "old" } ],
                 "pagination": { "hasMore": false } }""",
         )
+        // The create endpoint returns the new message under `data` (and keys the
+        // author sub-object as `user`); `message` is a status string.
         enqueueJson(
             201,
-            """{ "message": { "id": "new", "content": "brand new",
-                "author": { "id": "me", "username": "me" } } }""",
+            """{ "message": "Message created successfully",
+                "data": { "id": "new", "content": "brand new",
+                    "user": { "id": "me", "username": "me" } } }""",
         )
         val repo = repository()
         repo.refreshFeed()
@@ -210,7 +213,8 @@ class DefaultMessagesRepositoryTest {
         )
         enqueueJson(
             201,
-            """{ "message": { "id": "r", "content": "a reply", "author": { "id": "me" } } }""",
+            """{ "message": "Message created successfully",
+                "data": { "id": "r", "content": "a reply", "user": { "id": "me" } } }""",
         )
         val repo = repository()
         repo.refreshFeed()
@@ -274,8 +278,9 @@ class DefaultMessagesRepositoryTest {
     fun `createMessage with media sends the attached urls`() = runTest(dispatcher) {
         enqueueJson(
             201,
-            """{ "message": { "id": "m1", "content": "with media",
-                "imageUrls": ["https://cdn/a.png"] } }""",
+            """{ "message": "Message created successfully",
+                "data": { "id": "m1", "content": "with media",
+                    "imageUrls": ["https://cdn/a.png"] } }""",
         )
         val repo = repository()
 
@@ -294,8 +299,9 @@ class DefaultMessagesRepositoryTest {
     fun `createMessage scheduled is cached in the scheduled view not the feed`() = runTest(dispatcher) {
         enqueueJson(
             201,
-            """{ "message": { "id": "sch1", "content": "later",
-                "scheduledAt": "2026-07-19T09:00:00Z" } }""",
+            """{ "message": "Message created successfully",
+                "data": { "id": "sch1", "content": "later",
+                    "scheduledAt": "2026-07-19T09:00:00Z" } }""",
         )
         val repo = repository()
 
