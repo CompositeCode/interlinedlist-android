@@ -13,9 +13,11 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -36,6 +38,7 @@ import com.interlinedlist.android.feature.directmessages.navigation.navigateToNe
 import com.interlinedlist.android.feature.documents.ui.browser.DocumentsFolderRoute
 import com.interlinedlist.android.feature.documents.ui.browser.DocumentsRoute
 import com.interlinedlist.android.feature.documents.ui.editor.DocumentEditorRoute
+import com.interlinedlist.android.feature.documents.sync.DocumentsSyncScheduler
 import com.interlinedlist.android.feature.documents.ui.share.DocumentShareRoute
 import com.interlinedlist.android.feature.documents.ui.share.SharedDocumentRoute
 import com.interlinedlist.android.feature.documents.ui.collaborators.DocumentCollaboratorsRoute
@@ -197,8 +200,12 @@ fun InterlinedListNavHost(startLoggedIn: Boolean) {
             )
         }
         composable(Routes.MAIN) {
+            val context = LocalContext.current
             MainShell(
                 onLoggedOut = {
+                    // Stop background document sync for the signed-out session. Cancellation
+                    // must never crash the sign-out flow, so any failure is swallowed.
+                    runCatching { DocumentsSyncScheduler.cancelAll(context) }
                     navController.navigate(AuthRoutes.GRAPH) {
                         popUpTo(Routes.MAIN) { inclusive = true }
                     }
@@ -345,6 +352,16 @@ private fun MainShell(onLoggedOut: () -> Unit) {
 
             // ---- Documents ----
             composable(Routes.DOCUMENTS) {
+                // Bootstrap the documents delta-sync: register the periodic pull/push and
+                // kick a one-shot sync when the Documents tab is opened. Scheduling must
+                // never crash the UI, so any failure is swallowed defensively.
+                val context = LocalContext.current
+                LaunchedEffect(Unit) {
+                    runCatching {
+                        DocumentsSyncScheduler.schedulePeriodic(context)
+                        DocumentsSyncScheduler.syncNow(context)
+                    }
+                }
                 DocumentsRoute(
                     onOpenFolder = { id -> tabNav.navigate(Routes.documentFolder(id)) },
                     onOpenDocument = { id -> tabNav.navigate(Routes.documentEditor(id)) },

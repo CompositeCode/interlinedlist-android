@@ -49,5 +49,21 @@
                 <data android:scheme="interlinedlist" android:host="verify-email" />
             </intent-filter>
         </activity>
+
+        <!--
+            Remove the default WorkManager androidx.startup initializer so WorkManager
+            is initialized on demand from InterlinedListApplication (Configuration.Provider),
+            which wires in the HiltWorkerFactory needed by @HiltWorker workers.
+        -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup"
+                tools:node="remove" />
+        </provider>
     </application>
 </manifest>
