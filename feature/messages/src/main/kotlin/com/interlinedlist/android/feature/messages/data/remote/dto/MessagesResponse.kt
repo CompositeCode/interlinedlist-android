@@ -32,6 +32,17 @@ data class MessageResponse(
 )
 
 /**
+ * Response from creating a message or posting a reply. Unlike [MessageResponse],
+ * here `message` is a human-readable status string ("Message created
+ * successfully") and the created message is under [data]:
+ * `{ message: "…", data: { …message… }, crossPosts: [...] }`.
+ */
+@Serializable
+data class CreateMessageResponse(
+    val data: MessageDto,
+)
+
+/**
  * Request body for creating a message or posting a reply.
  *
  * [imageUrls] / [videoUrls] carry media previously uploaded via the upload

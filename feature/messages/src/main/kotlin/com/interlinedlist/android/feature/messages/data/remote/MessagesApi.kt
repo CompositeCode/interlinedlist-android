@@ -1,6 +1,7 @@
 package com.interlinedlist.android.feature.messages.data.remote
 
 import com.interlinedlist.android.feature.messages.data.remote.dto.CreateMessageRequest
+import com.interlinedlist.android.feature.messages.data.remote.dto.CreateMessageResponse
 import com.interlinedlist.android.feature.messages.data.remote.dto.MediaUploadResponse
 import com.interlinedlist.android.feature.messages.data.remote.dto.MessageResponse
 import com.interlinedlist.android.feature.messages.data.remote.dto.MessagesResponse
@@ -31,9 +32,10 @@ interface MessagesApi {
         @Query("offset") offset: Int,
     ): MessagesResponse
 
-    /** Creates a new message (or a reply when `parentId` is set). */
+    /** Creates a new message (or a reply when `parentId` is set). The created
+     *  message is returned under `data` (see [CreateMessageResponse]). */
     @POST("api/messages")
-    suspend fun createMessage(@Body body: CreateMessageRequest): MessageResponse
+    suspend fun createMessage(@Body body: CreateMessageRequest): CreateMessageResponse
 
     /** A single message by id (for the detail screen). */
     @GET("api/messages/{id}")
