@@ -18,6 +18,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -40,6 +41,8 @@ object LoginTestTags {
     const val SUBMIT = "loginSubmit"
     const val ERROR = "loginError"
     const val PROGRESS = "loginProgress"
+    const val REGISTER = "loginRegister"
+    const val FORGOT = "loginForgot"
 }
 
 /** Hilt-wired entry point; collects state and forwards events to the ViewModel. */
@@ -47,6 +50,8 @@ object LoginTestTags {
 fun LoginRoute(
     onLoggedIn: () -> Unit,
     modifier: Modifier = Modifier,
+    onRegister: () -> Unit = {},
+    onForgotPassword: () -> Unit = {},
     viewModel: LoginViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -55,6 +60,8 @@ fun LoginRoute(
         onEmailChange = viewModel::onEmailChange,
         onPasswordChange = viewModel::onPasswordChange,
         onSubmit = { viewModel.login(onLoggedIn) },
+        onRegister = onRegister,
+        onForgotPassword = onForgotPassword,
         modifier = modifier,
     )
 }
@@ -67,6 +74,8 @@ fun LoginScreen(
     onPasswordChange: (String) -> Unit,
     onSubmit: () -> Unit,
     modifier: Modifier = Modifier,
+    onRegister: () -> Unit = {},
+    onForgotPassword: () -> Unit = {},
 ) {
     Scaffold(modifier = modifier.fillMaxSize()) { padding ->
         Column(
@@ -145,6 +154,22 @@ fun LoginScreen(
                 } else {
                     Text("Sign in")
                 }
+            }
+
+            Spacer(Modifier.height(8.dp))
+            TextButton(
+                onClick = onForgotPassword,
+                enabled = !state.isLoading,
+                modifier = Modifier.testTag(LoginTestTags.FORGOT),
+            ) {
+                Text("Forgot password?")
+            }
+            TextButton(
+                onClick = onRegister,
+                enabled = !state.isLoading,
+                modifier = Modifier.testTag(LoginTestTags.REGISTER),
+            ) {
+                Text("Create an account")
             }
         }
     }

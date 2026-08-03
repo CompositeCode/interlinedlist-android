@@ -25,3 +25,26 @@ data class CreateFolderRequest(
     val name: String,
     val parentId: String? = null,
 )
+
+/**
+ * Body for `PUT /api/folders/{id}` — partial rename/move. Both fields are optional
+ * so a rename need not resend the parent (and a move need not resend the name); the
+ * shared Json drops nulls so only the supplied fields reach the server.
+ */
+@Serializable
+data class UpdateFolderRequest(
+    val name: String? = null,
+    val parentId: String? = null,
+)
+
+/**
+ * Envelope for `PUT /api/folders/{id}`. The updated folder arrives under `folder`
+ * (verified against the web handler); `data` is tolerated for forward-compatibility.
+ */
+@Serializable
+data class FolderEnvelope(
+    val folder: FolderDto? = null,
+    val data: FolderDto? = null,
+) {
+    val folderOrData: FolderDto? get() = folder ?: data
+}

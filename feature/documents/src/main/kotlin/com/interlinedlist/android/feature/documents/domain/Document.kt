@@ -14,6 +14,13 @@ data class Document(
     val folderName: String?,
     val isPublic: Boolean,
     val updatedAt: String?,
+    /**
+     * Optimistic-concurrency token: the server's row version. Sent back as an
+     * `If-Match` header on `PATCH` so a save that raced another writer is rejected
+     * rather than silently clobbering their change. Null until a versioned response
+     * (sync / detail) has populated it.
+     */
+    val version: Int? = null,
 ) {
     companion object {
         /** Longest preview we keep for the index snippet, in characters. */

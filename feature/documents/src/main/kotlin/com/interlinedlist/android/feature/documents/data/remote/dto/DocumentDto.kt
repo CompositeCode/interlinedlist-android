@@ -20,4 +20,6 @@ data class DocumentDto(
     val isPublic: Boolean = false,
     val updatedAt: String? = null,
     val createdAt: String? = null,
+    // Optimistic-concurrency token supplied by the detail/sync endpoints.
+    val version: Int? = null,
 )

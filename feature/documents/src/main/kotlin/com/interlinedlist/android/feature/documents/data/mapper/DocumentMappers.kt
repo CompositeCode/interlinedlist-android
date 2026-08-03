@@ -25,6 +25,7 @@ fun DocumentDto.toDomain(): Document {
         folderName = folderName,
         isPublic = isPublic,
         updatedAt = updatedAt ?: createdAt,
+        version = version,
     )
 }
 

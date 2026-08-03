@@ -3,9 +3,6 @@ package com.interlinedlist.android.feature.auth.ui
 import com.google.common.truth.Truth.assertThat
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
-import com.interlinedlist.android.core.model.CustomerStatus
-import com.interlinedlist.android.core.model.User
-import com.interlinedlist.android.feature.auth.data.AuthRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -22,29 +19,13 @@ class LoginViewModelTest {
 
     private val dispatcher = StandardTestDispatcher()
 
-    private class FakeAuthRepository(var result: ApiResult<User>) : AuthRepository {
-        var loginCount = 0
-        override fun isLoggedIn() = false
-        override suspend fun login(email: String, password: String): ApiResult<User> {
-            loginCount++
-            return result
-        }
-        override suspend fun logout() = Unit
-    }
-
-    private val sampleUser = User(
-        id = "1", username = "messenger", displayName = "Messenger",
-        email = null, avatarUrl = null, bio = null,
-        emailVerified = true, customerStatus = CustomerStatus.SUBSCRIBER,
-    )
-
     @Before fun setUp() = Dispatchers.setMain(dispatcher)
 
     @After fun tearDown() = Dispatchers.resetMain()
 
     @Test
     fun `blank credentials show validation error and skip the repository`() = runTest(dispatcher) {
-        val repo = FakeAuthRepository(ApiResult.Success(sampleUser))
+        val repo = FakeAuthRepository(loginResult = ApiResult.Success(sampleUser))
         val vm = LoginViewModel(repo)
 
         var succeeded = false
@@ -58,7 +39,7 @@ class LoginViewModelTest {
 
     @Test
     fun `successful login invokes onSuccess and clears loading`() = runTest(dispatcher) {
-        val repo = FakeAuthRepository(ApiResult.Success(sampleUser))
+        val repo = FakeAuthRepository(loginResult = ApiResult.Success(sampleUser))
         val vm = LoginViewModel(repo)
         vm.onEmailChange("you@example.com")
         vm.onPasswordChange("secret")
@@ -75,7 +56,7 @@ class LoginViewModelTest {
 
     @Test
     fun `failed login surfaces a mapped error and does not navigate`() = runTest(dispatcher) {
-        val repo = FakeAuthRepository(ApiResult.Failure(AppError.Unauthorized("Invalid credentials")))
+        val repo = FakeAuthRepository(loginResult = ApiResult.Failure(AppError.Unauthorized("Invalid credentials")))
         val vm = LoginViewModel(repo)
         vm.onEmailChange("you@example.com")
         vm.onPasswordChange("wrong")

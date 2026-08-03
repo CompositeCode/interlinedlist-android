@@ -10,6 +10,19 @@ data class CreateDocumentRequest(
     val isPublic: Boolean = false,
 )
 
+/**
+ * Body for `POST /api/documents/folders/{id}/documents` — create a document directly
+ * inside a folder. The folder is the path parameter, so the body only carries the
+ * document fields (the optional [relativePath] lets the server derive a file name).
+ */
+@Serializable
+data class CreateFolderDocumentRequest(
+    val title: String,
+    val content: String,
+    val isPublic: Boolean = false,
+    val relativePath: String? = null,
+)
+
 /** Body for `PUT`/`PATCH /api/documents/{id}`. Null fields are left unchanged. */
 @Serializable
 data class UpdateDocumentRequest(

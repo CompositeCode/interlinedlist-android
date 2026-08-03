@@ -69,8 +69,10 @@ object ListDetailTestTags {
     const val DELETE_LIST = "listDetailDeleteList"
     const val REFRESH = "listDetailRefresh"
     const val OVERFLOW = "listDetailOverflow"
+    const val EDIT_LIST = "listDetailEditList"
     const val EDIT_SCHEMA = "listDetailEditSchema"
     const val WATCHERS = "listDetailWatchers"
+    const val SHARE = "listDetailShare"
     fun row(id: String) = "listDetailRow_$id"
 }
 
@@ -88,6 +90,7 @@ fun ListDetailRoute(
     onEditSchema: () -> Unit,
     onOpenWatchers: () -> Unit,
     modifier: Modifier = Modifier,
+    onOpenShare: () -> Unit = {},
     viewModel: ListDetailViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -108,22 +111,32 @@ fun ListDetailRoute(
         state = state,
         onBack = onBack,
         onAddRow = { editing = EditorTarget.New },
-        onEditRow = { editing = EditorTarget.Existing(it) },
+        onEditRow = {
+            // Seed the editor from the freshest server copy of the row.
+            viewModel.loadRow(it.id)
+            editing = EditorTarget.Existing(it)
+        },
         onDeleteRow = viewModel::deleteRow,
+        onEditList = viewModel::startEditingMetadata,
         onDeleteList = { viewModel.deleteList(onListDeleted) },
         onRefresh = viewModel::refreshFromGithub,
         onEditSchema = onEditSchema,
         onOpenWatchers = onOpenWatchers,
+        onOpenShare = onOpenShare,
         snackbarHostState = snackbarHostState,
         modifier = modifier,
     )
 
     val target = editing
     if (target != null) {
+        // Re-read the (possibly refreshed) row from state so single-row load is reflected.
+        val liveRow = (target as? EditorTarget.Existing)?.let { existing ->
+            state.rows.firstOrNull { it.id == existing.row.id } ?: existing.row
+        }
         ModalBottomSheet(onDismissRequest = { editing = null }, sheetState = sheetState) {
             RowEditor(
                 schema = state.schema,
-                row = (target as? EditorTarget.Existing)?.row,
+                row = liveRow,
                 isSaving = state.isSaving,
                 onSave = { values ->
                     when (target) {
@@ -132,6 +145,23 @@ fun ListDetailRoute(
                     }
                 },
                 onCancel = { editing = null },
+            )
+        }
+    }
+
+    val summary = state.summary
+    if (state.isEditingMetadata && summary != null) {
+        ModalBottomSheet(
+            onDismissRequest = viewModel::stopEditingMetadata,
+            sheetState = sheetState,
+        ) {
+            ListMetadataEditor(
+                summary = summary,
+                isSaving = state.isSaving,
+                onSave = { title, description, isPublic ->
+                    viewModel.editMetadata(title, description, isPublic)
+                },
+                onCancel = viewModel::stopEditingMetadata,
             )
         }
     }
@@ -153,9 +183,11 @@ fun ListDetailScreen(
     onDeleteRow: (String) -> Unit,
     onDeleteList: () -> Unit,
     modifier: Modifier = Modifier,
+    onEditList: () -> Unit = {},
     onRefresh: () -> Unit = {},
     onEditSchema: () -> Unit = {},
     onOpenWatchers: () -> Unit = {},
+    onOpenShare: () -> Unit = {},
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
 ) {
     var menuOpen by remember { mutableStateOf(false) }
@@ -189,6 +221,11 @@ fun ListDetailScreen(
                     ) { Icon(Icons.Default.MoreVert, contentDescription = "More actions") }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                         DropdownMenuItem(
+                            text = { Text("Edit list") },
+                            onClick = { menuOpen = false; onEditList() },
+                            modifier = Modifier.testTag(ListDetailTestTags.EDIT_LIST),
+                        )
+                        DropdownMenuItem(
                             text = { Text("Edit columns") },
                             onClick = { menuOpen = false; onEditSchema() },
                             modifier = Modifier.testTag(ListDetailTestTags.EDIT_SCHEMA),
@@ -197,6 +234,11 @@ fun ListDetailScreen(
                             text = { Text("Watchers") },
                             onClick = { menuOpen = false; onOpenWatchers() },
                             modifier = Modifier.testTag(ListDetailTestTags.WATCHERS),
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Share") },
+                            onClick = { menuOpen = false; onOpenShare() },
+                            modifier = Modifier.testTag(ListDetailTestTags.SHARE),
                         )
                         DropdownMenuItem(
                             text = { Text("Delete list") },

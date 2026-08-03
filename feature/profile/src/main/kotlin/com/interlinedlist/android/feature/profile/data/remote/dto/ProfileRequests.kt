@@ -19,3 +19,23 @@ data class UpdateProfileRequest(
 data class AvatarFromUrlRequest(
     val url: String,
 )
+
+/**
+ * Body for `POST /api/user/change-email/request` (schema verified against the
+ * OpenAPI spec). The server sends a verification email to [newEmail].
+ */
+@Serializable
+data class ChangeEmailRequest(
+    val newEmail: String,
+)
+
+/**
+ * Body for `POST /api/user/delete` (schema verified against the OpenAPI spec). The
+ * account is deleted only when both [username] and [email] match the current user —
+ * the type-to-confirm guard on the UI collects them.
+ */
+@Serializable
+data class DeleteAccountRequest(
+    val username: String,
+    val email: String,
+)

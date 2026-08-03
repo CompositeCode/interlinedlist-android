@@ -10,11 +10,15 @@ import com.interlinedlist.android.feature.lists.data.remote.dto.AddWatcherReques
 import com.interlinedlist.android.feature.lists.data.remote.dto.CreateConnectionRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.CreateFolderRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.CreateListRequest
+import com.interlinedlist.android.feature.lists.data.remote.dto.CreateShareLinkRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.ListDto
 import com.interlinedlist.android.feature.lists.data.remote.dto.RowDto
 import com.interlinedlist.android.feature.lists.data.remote.dto.RowWriteRequest
+import com.interlinedlist.android.feature.lists.data.remote.dto.UpdateFolderRequest
+import com.interlinedlist.android.feature.lists.data.remote.dto.UpdateListRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.UpdateSchemaRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.UpdateWatcherRoleRequest
+import com.interlinedlist.android.feature.lists.domain.Contributor
 import com.interlinedlist.android.feature.lists.domain.ListConnection
 import com.interlinedlist.android.feature.lists.domain.ListDetail
 import com.interlinedlist.android.feature.lists.domain.ListFolder
@@ -23,6 +27,10 @@ import com.interlinedlist.android.feature.lists.domain.ListSchema
 import com.interlinedlist.android.feature.lists.domain.ListSummary
 import com.interlinedlist.android.feature.lists.domain.Paged
 import com.interlinedlist.android.feature.lists.domain.RefreshResult
+import com.interlinedlist.android.feature.lists.domain.ShareLink
+import com.interlinedlist.android.feature.lists.domain.ShareRole
+import com.interlinedlist.android.feature.lists.domain.SharedList
+import com.interlinedlist.android.feature.lists.domain.SharedListResolution
 import com.interlinedlist.android.feature.lists.domain.Watcher
 import com.interlinedlist.android.feature.lists.domain.WatcherCandidate
 import com.interlinedlist.android.feature.lists.domain.WatcherRole
@@ -103,6 +111,35 @@ class DefaultListsRepository @Inject constructor(
         }
     }
 
+    override suspend fun updateList(
+        id: String,
+        title: String?,
+        description: String?,
+        isPublic: Boolean?,
+        folderId: String?,
+    ): ApiResult<ListSummary> = withContext(dispatchers.io) {
+        val body = UpdateListRequest(
+            title = title,
+            description = description,
+            isPublic = isPublic,
+            folderId = folderId,
+        )
+        when (val result = safeApiCall(json) { api.updateList(id, body) }) {
+            is ApiResult.Success -> {
+                val dto = result.data.list ?: result.data.data
+                    ?: return@withContext ApiResult.Failure(
+                        com.interlinedlist.android.core.common.result.AppError.Unknown(
+                            "List update returned no list",
+                        ),
+                    )
+                val summary = ListMapper.summaryFromDto(dto)
+                listDao.upsert(ListMapper.summaryToEntity(summary))
+                ApiResult.Success(summary)
+            }
+            is ApiResult.Failure -> result
+        }
+    }
+
     override suspend fun deleteList(id: String): ApiResult<Unit> = withContext(dispatchers.io) {
         when (val result = safeApiCall(json) { api.deleteList(id) }) {
             is ApiResult.Success -> {
@@ -144,6 +181,13 @@ class DefaultListsRepository @Inject constructor(
             ApiResult.Success(ListDetail(summary = summary, schema = schema, rows = rows))
         }
 
+    override suspend fun getRow(listId: String, rowId: String): ApiResult<ListRow> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.getRow(listId, rowId) }
+                .map { it.row ?: it.data ?: RowDto(id = rowId) }
+                .map(RowMapper::fromDto)
+        }
+
     override suspend fun addRow(listId: String, values: Map<String, String>): ApiResult<ListRow> =
         withContext(dispatchers.io) {
             safeApiCall(json) { api.createRow(listId, RowWriteRequest(values.toJsonData())) }
@@ -175,6 +219,34 @@ class DefaultListsRepository @Inject constructor(
         withContext(dispatchers.io) {
             safeApiCall(json) { api.createFolder(CreateFolderRequest(name = name, parentId = parentId)) }
                 .map(ListMapper::folderFromDto)
+        }
+
+    override suspend fun updateFolder(
+        id: String,
+        name: String?,
+        parentId: String?,
+    ): ApiResult<ListFolder> = withContext(dispatchers.io) {
+        val body = UpdateFolderRequest(name = name?.takeIf { it.isNotBlank() }, parentId = parentId)
+        when (val result = safeApiCall(json) { api.updateFolder(id, body) }) {
+            is ApiResult.Success -> {
+                val dto = result.data.folderOrData
+                    ?: return@withContext ApiResult.Success(
+                        ListFolder(id = id, name = name.orEmpty(), parentId = parentId),
+                    )
+                ApiResult.Success(ListMapper.folderFromDto(dto))
+            }
+            is ApiResult.Failure -> result
+        }
+    }
+
+    override suspend fun deleteFolder(id: String): ApiResult<Unit> = withContext(dispatchers.io) {
+        safeApiCall(json) { api.deleteFolder(id) }.map { }
+    }
+
+    override suspend fun getContributors(listId: String): ApiResult<List<Contributor>> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.getContributors(listId) }
+                .map { response -> response.items.map(ContributorMapper::fromDto) }
         }
 
     override suspend fun updateSchema(listId: String, schema: ListSchema): ApiResult<ListSchema> =
@@ -287,6 +359,52 @@ class DefaultListsRepository @Inject constructor(
     override suspend fun deleteConnection(id: String): ApiResult<Unit> =
         withContext(dispatchers.io) {
             safeApiCall(json) { api.deleteConnection(id) }.map { }
+        }
+
+    override suspend fun getShareLinks(listId: String): ApiResult<List<ShareLink>> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.getShareLinks(listId) }
+                .map { response -> response.items.map(ShareMapper::linkFromDto) }
+        }
+
+    override suspend fun createShareLink(listId: String, role: ShareRole): ApiResult<ShareLink> =
+        withContext(dispatchers.io) {
+            when (val result = safeApiCall(json) {
+                api.createShareLink(listId, CreateShareLinkRequest(role = role.apiValue))
+            }) {
+                is ApiResult.Success -> {
+                    val dto = result.data.linkOrSelf
+                        ?: return@withContext ApiResult.Failure(
+                            com.interlinedlist.android.core.common.result.AppError.Unknown(
+                                "Share link create returned no token",
+                            ),
+                        )
+                    ApiResult.Success(ShareMapper.linkFromDto(dto))
+                }
+                is ApiResult.Failure -> result
+            }
+        }
+
+    override suspend fun revokeShareLink(listId: String, token: String): ApiResult<Unit> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.revokeShareLink(listId, token) }.map { }
+        }
+
+    override suspend fun getSharedWithMe(): ApiResult<List<SharedList>> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.getWatchingLists() }
+                .map { response -> response.items.map(ShareMapper::sharedFromDto) }
+        }
+
+    override suspend fun resolveSharedList(token: String): ApiResult<SharedListResolution> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.resolveSharedList(token) }
+                .map { response -> ShareMapper.resolutionFromResponse(token, response) }
+        }
+
+    override suspend fun claimSharedList(token: String): ApiResult<Unit> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.claimSharedList(token) }.map { }
         }
 
     /** Blank form fields are dropped so we don't overwrite server values with empty strings. */

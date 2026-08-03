@@ -3,6 +3,7 @@ package com.interlinedlist.android.feature.lists
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
 import com.interlinedlist.android.feature.lists.data.ListsRepository
+import com.interlinedlist.android.feature.lists.domain.Contributor
 import com.interlinedlist.android.feature.lists.domain.ListConnection
 import com.interlinedlist.android.feature.lists.domain.ListDetail
 import com.interlinedlist.android.feature.lists.domain.ListFolder
@@ -11,6 +12,10 @@ import com.interlinedlist.android.feature.lists.domain.ListSchema
 import com.interlinedlist.android.feature.lists.domain.ListSummary
 import com.interlinedlist.android.feature.lists.domain.Paged
 import com.interlinedlist.android.feature.lists.domain.RefreshResult
+import com.interlinedlist.android.feature.lists.domain.ShareLink
+import com.interlinedlist.android.feature.lists.domain.ShareRole
+import com.interlinedlist.android.feature.lists.domain.SharedList
+import com.interlinedlist.android.feature.lists.domain.SharedListResolution
 import com.interlinedlist.android.feature.lists.domain.Watcher
 import com.interlinedlist.android.feature.lists.domain.WatcherCandidate
 import com.interlinedlist.android.feature.lists.domain.WatcherRole
@@ -31,11 +36,19 @@ class FakeListsRepository : ListsRepository {
     var loadMoreResult: ApiResult<Paged<ListSummary>> = refreshResult
     var searchResult: ApiResult<List<ListSummary>> = ApiResult.Success(emptyList())
     var createResult: ApiResult<ListSummary>? = null
+    var updateListResult: ApiResult<ListSummary>? = null
     var deleteResult: ApiResult<Unit> = ApiResult.Success(Unit)
     var detailResult: ApiResult<ListDetail>? = null
+    var getRowResult: ApiResult<ListRow>? = null
     var addRowResult: ApiResult<ListRow>? = null
     var updateRowResult: ApiResult<ListRow>? = null
     var deleteRowResult: ApiResult<Unit> = ApiResult.Success(Unit)
+
+    // Folder management + contributors.
+    var foldersResult: ApiResult<List<ListFolder>> = ApiResult.Success(emptyList())
+    var updateFolderResult: ApiResult<ListFolder>? = null
+    var deleteFolderResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var contributorsResult: ApiResult<List<Contributor>> = ApiResult.Success(emptyList())
 
     // Round-2 deferred features.
     var updateSchemaResult: ApiResult<ListSchema>? = null
@@ -51,14 +64,38 @@ class FakeListsRepository : ListsRepository {
     var createConnectionResult: ApiResult<ListConnection>? = null
     var deleteConnectionResult: ApiResult<Unit> = ApiResult.Success(Unit)
 
+    // Sharing.
+    var shareLinksResult: ApiResult<List<ShareLink>> = ApiResult.Success(emptyList())
+    var createShareLinkResult: ApiResult<ShareLink>? = null
+    var revokeShareLinkResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var sharedWithMeResult: ApiResult<List<SharedList>> = ApiResult.Success(emptyList())
+    var resolveSharedResult: ApiResult<SharedListResolution>? = null
+    var claimSharedResult: ApiResult<Unit> = ApiResult.Success(Unit)
+
     var refreshCount = 0
     var loadMoreCount = 0
+    var updateListCount = 0
+    var updateFolderCount = 0
+    var deleteFolderCount = 0
+    var lastUpdatedTitle: String? = null
+    var lastUpdatedDescription: String? = null
+    var lastUpdatedIsPublic: Boolean? = null
+    var lastUpdatedFolderName: String? = null
+    var lastUpdatedFolderParentId: String? = null
+    var lastDeletedFolderId: String? = null
     var updateSchemaCount = 0
     var refreshGithubCount = 0
     var addWatcherCount = 0
     var removeWatcherCount = 0
+    var createShareLinkCount = 0
+    var revokeShareLinkCount = 0
+    var claimSharedCount = 0
     var lastSchemaUpdate: ListSchema? = null
     var lastWatcherSearch: String? = null
+    var lastCreatedShareRole: ShareRole? = null
+    var lastRevokedToken: String? = null
+    var lastResolvedToken: String? = null
+    var lastClaimedToken: String? = null
 
     override fun observeLists(): Flow<List<ListSummary>> = cache
 
@@ -81,6 +118,37 @@ class FakeListsRepository : ListsRepository {
             ListSummary("new", title, description, 0, null, isPublic, null),
         )
 
+    override suspend fun updateList(
+        id: String,
+        title: String?,
+        description: String?,
+        isPublic: Boolean?,
+        folderId: String?,
+    ): ApiResult<ListSummary> {
+        updateListCount++
+        lastUpdatedTitle = title
+        lastUpdatedDescription = description
+        lastUpdatedIsPublic = isPublic
+        val result = updateListResult ?: run {
+            val current = cache.value.firstOrNull { it.id == id }
+            ApiResult.Success(
+                ListSummary(
+                    id = id,
+                    title = title ?: current?.title.orEmpty(),
+                    description = description ?: current?.description,
+                    itemCount = current?.itemCount ?: 0,
+                    folderId = folderId ?: current?.folderId,
+                    isPublic = isPublic ?: current?.isPublic ?: false,
+                    updatedAt = current?.updatedAt,
+                ),
+            )
+        }
+        (result as? ApiResult.Success)?.let { success ->
+            cache.value = cache.value.map { if (it.id == id) success.data else it }
+        }
+        return result
+    }
+
     override suspend fun deleteList(id: String): ApiResult<Unit> {
         if (deleteResult is ApiResult.Success) cache.value = cache.value.filterNot { it.id == id }
         return deleteResult
@@ -95,6 +163,9 @@ class FakeListsRepository : ListsRepository {
             ),
         )
 
+    override suspend fun getRow(listId: String, rowId: String): ApiResult<ListRow> =
+        getRowResult ?: ApiResult.Success(ListRow(rowId, emptyMap()))
+
     override suspend fun addRow(listId: String, values: Map<String, String>): ApiResult<ListRow> =
         addRowResult ?: ApiResult.Success(ListRow("row-new", values))
 
@@ -103,10 +174,29 @@ class FakeListsRepository : ListsRepository {
 
     override suspend fun deleteRow(listId: String, rowId: String): ApiResult<Unit> = deleteRowResult
 
-    override suspend fun getFolders(): ApiResult<List<ListFolder>> = ApiResult.Success(emptyList())
+    override suspend fun getFolders(): ApiResult<List<ListFolder>> = foldersResult
 
     override suspend fun createFolder(name: String, parentId: String?): ApiResult<ListFolder> =
         ApiResult.Success(ListFolder("f", name, parentId))
+
+    override suspend fun updateFolder(
+        id: String,
+        name: String?,
+        parentId: String?,
+    ): ApiResult<ListFolder> {
+        updateFolderCount++
+        lastUpdatedFolderName = name
+        lastUpdatedFolderParentId = parentId
+        return updateFolderResult ?: ApiResult.Success(ListFolder(id, name.orEmpty(), parentId))
+    }
+
+    override suspend fun deleteFolder(id: String): ApiResult<Unit> {
+        deleteFolderCount++
+        lastDeletedFolderId = id
+        return deleteFolderResult
+    }
+
+    override suspend fun getContributors(listId: String): ApiResult<List<Contributor>> = contributorsResult
 
     override suspend fun updateSchema(listId: String, schema: ListSchema): ApiResult<ListSchema> {
         updateSchemaCount++
@@ -158,6 +248,37 @@ class FakeListsRepository : ListsRepository {
         ?: ApiResult.Success(ListConnection("c-new", fromListId, toListId, label, fromListId, toListId))
 
     override suspend fun deleteConnection(id: String): ApiResult<Unit> = deleteConnectionResult
+
+    override suspend fun getShareLinks(listId: String): ApiResult<List<ShareLink>> = shareLinksResult
+
+    override suspend fun createShareLink(listId: String, role: ShareRole): ApiResult<ShareLink> {
+        createShareLinkCount++
+        lastCreatedShareRole = role
+        return createShareLinkResult ?: ApiResult.Success(
+            ShareLink("link-new", "token-new", role, null, null, null),
+        )
+    }
+
+    override suspend fun revokeShareLink(listId: String, token: String): ApiResult<Unit> {
+        revokeShareLinkCount++
+        lastRevokedToken = token
+        return revokeShareLinkResult
+    }
+
+    override suspend fun getSharedWithMe(): ApiResult<List<SharedList>> = sharedWithMeResult
+
+    override suspend fun resolveSharedList(token: String): ApiResult<SharedListResolution> {
+        lastResolvedToken = token
+        return resolveSharedResult ?: ApiResult.Success(
+            SharedListResolution(token, "L", "Untitled", null, null, ShareRole.VIEW, emptyList()),
+        )
+    }
+
+    override suspend fun claimSharedList(token: String): ApiResult<Unit> {
+        claimSharedCount++
+        lastClaimedToken = token
+        return claimSharedResult
+    }
 
     companion object {
         fun subscriptionFailure(): ApiResult.Failure =

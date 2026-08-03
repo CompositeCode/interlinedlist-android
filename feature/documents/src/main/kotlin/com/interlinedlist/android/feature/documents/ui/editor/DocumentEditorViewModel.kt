@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.feature.documents.data.DocumentsRepository
+import com.interlinedlist.android.feature.documents.data.SaveOutcome
 import com.interlinedlist.android.feature.documents.ui.common.isSubscriptionGate
 import com.interlinedlist.android.feature.documents.ui.common.toUserMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -22,11 +23,17 @@ data class DocumentEditorUiState(
     val content: String = "",
     val isPublic: Boolean = false,
     val folderId: String? = null,
+    /** Server version token used for optimistic-concurrency on save (PATCH If-Match). */
+    val version: Int? = null,
     val isLoading: Boolean = true,
     val isSaving: Boolean = false,
     val isUploadingImage: Boolean = false,
     val isPreview: Boolean = false,
     val hasUnsavedChanges: Boolean = false,
+    /** True when the last save was rejected because another writer changed the doc. */
+    val hasConflict: Boolean = false,
+    /** True when the last save could not reach the server and was queued to sync later. */
+    val isQueuedOffline: Boolean = false,
     val errorMessage: String? = null,
     val subscriptionRequired: Boolean = false,
 ) {
@@ -65,6 +72,7 @@ class DocumentEditorViewModel @Inject constructor(
                             content = cached.content ?: it.content,
                             isPublic = cached.isPublic,
                             folderId = cached.folderId,
+                            version = cached.version ?: it.version,
                         )
                     }
                 }
@@ -73,21 +81,26 @@ class DocumentEditorViewModel @Inject constructor(
     }
 
     /** Fetches the full document (with body) from the API. */
-    fun refresh() {
+    fun refresh(discardLocalEdits: Boolean = false) {
         _uiState.update { it.copy(isLoading = true, errorMessage = null) }
         viewModelScope.launch {
             when (val result = repository.refreshDocument(documentId)) {
                 is ApiResult.Success -> _uiState.update {
-                    // Don't clobber in-progress edits with the server copy.
-                    if (it.hasUnsavedChanges) {
-                        it.copy(isLoading = false)
+                    // Don't clobber in-progress edits with the server copy, unless the
+                    // caller explicitly resolves a conflict by discarding them.
+                    if (it.hasUnsavedChanges && !discardLocalEdits) {
+                        it.copy(isLoading = false, version = result.data.version ?: it.version)
                     } else {
                         it.copy(
                             title = result.data.title,
                             content = result.data.content ?: "",
                             isPublic = result.data.isPublic,
                             folderId = result.data.folderId,
+                            version = result.data.version ?: it.version,
                             isLoading = false,
+                            hasUnsavedChanges = false,
+                            hasConflict = false,
+                            isQueuedOffline = false,
                             subscriptionRequired = false,
                         )
                     }
@@ -103,11 +116,18 @@ class DocumentEditorViewModel @Inject constructor(
         }
     }
 
+    /** Resolves a save conflict by reloading the latest server copy, discarding local edits. */
+    fun reloadForConflict() = refresh(discardLocalEdits = true)
+
     fun onTitleChange(value: String) =
-        _uiState.update { it.copy(title = value, hasUnsavedChanges = true, errorMessage = null) }
+        _uiState.update {
+            it.copy(title = value, hasUnsavedChanges = true, hasConflict = false, isQueuedOffline = false, errorMessage = null)
+        }
 
     fun onContentChange(value: String) =
-        _uiState.update { it.copy(content = value, hasUnsavedChanges = true, errorMessage = null) }
+        _uiState.update {
+            it.copy(content = value, hasUnsavedChanges = true, hasConflict = false, isQueuedOffline = false, errorMessage = null)
+        }
 
     fun togglePreview() = _uiState.update { it.copy(isPreview = !it.isPreview) }
 
@@ -136,26 +156,53 @@ class DocumentEditorViewModel @Inject constructor(
         }
     }
 
-    /** Persists edits; invokes [onSaved] on success. */
+    /**
+     * Persists edits via `PATCH` with the current version token so a concurrent
+     * writer's change is detected rather than clobbered. On success (or an offline
+     * queue) invokes [onSaved]; on a version conflict raises [DocumentEditorUiState.hasConflict]
+     * so the screen can offer reload/retry.
+     */
     fun save(onSaved: () -> Unit = {}) {
         val state = _uiState.value
         if (!state.canSave) return
-        _uiState.update { it.copy(isSaving = true, errorMessage = null) }
+        _uiState.update { it.copy(isSaving = true, errorMessage = null, hasConflict = false, isQueuedOffline = false) }
         viewModelScope.launch {
-            val result = repository.updateDocument(
+            val outcome = repository.patchDocument(
                 id = documentId,
                 title = state.title.trim().ifBlank { "Untitled" },
                 content = state.content,
                 isPublic = state.isPublic,
                 folderId = state.folderId,
+                expectedVersion = state.version,
             )
-            when (result) {
-                is ApiResult.Success -> {
-                    _uiState.update { it.copy(isSaving = false, hasUnsavedChanges = false) }
+            when (outcome) {
+                is SaveOutcome.Success -> {
+                    _uiState.update {
+                        it.copy(
+                            isSaving = false,
+                            hasUnsavedChanges = false,
+                            version = outcome.document.version ?: it.version,
+                        )
+                    }
                     onSaved()
                 }
-                is ApiResult.Failure -> _uiState.update {
-                    it.copy(isSaving = false, errorMessage = result.error.toUserMessage())
+                is SaveOutcome.Queued -> {
+                    // Persisted locally; the sync worker will push it. Treat as saved for UX.
+                    _uiState.update {
+                        it.copy(isSaving = false, hasUnsavedChanges = false, isQueuedOffline = true)
+                    }
+                    onSaved()
+                }
+                is SaveOutcome.Conflict -> _uiState.update {
+                    it.copy(
+                        isSaving = false,
+                        hasConflict = true,
+                        errorMessage = outcome.message
+                            ?: "This document changed since you opened it. Reload to see the latest, or retry to overwrite.",
+                    )
+                }
+                is SaveOutcome.Error -> _uiState.update {
+                    it.copy(isSaving = false, errorMessage = outcome.message ?: "Couldn't save. Please try again.")
                 }
             }
         }

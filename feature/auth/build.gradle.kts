@@ -44,12 +44,19 @@ dependencies {
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
     implementation(libs.androidx.hilt.navigation.compose)
+    // The module owns its unauthenticated nav sub-graph (Login/Register/Forgot/Reset/Verify).
+    implementation(libs.androidx.navigation.compose)
 
     // Unit tests
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.turbine)
     testImplementation(libs.truth)
+    // Repository tests exercise the module-local AuthApi over MockWebServer.
+    testImplementation(libs.retrofit.core)
+    testImplementation(libs.okhttp.mockwebserver)
+    testImplementation(libs.kotlinx.serialization.json)
+    testImplementation(libs.retrofit.kotlinx.serialization)
 
     // Instrumented / UI tests
     androidTestImplementation(libs.androidx.test.ext.junit)

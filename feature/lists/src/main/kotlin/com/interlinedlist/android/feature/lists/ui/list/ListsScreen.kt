@@ -14,7 +14,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Hub
+import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Card
@@ -49,6 +51,8 @@ object ListsTestTags {
     const val EMPTY = "listsEmpty"
     const val PROGRESS = "listsProgress"
     const val SUBSCRIPTION = "listsSubscription"
+    const val SHARED_WITH_ME = "listsSharedWithMe"
+    const val FOLDERS = "listsFolders"
     fun row(id: String) = "listRow_$id"
 }
 
@@ -61,6 +65,8 @@ fun ListsRoute(
     onOpenList: (String) -> Unit,
     onOpenConnections: () -> Unit,
     modifier: Modifier = Modifier,
+    onOpenSharedWithMe: () -> Unit = {},
+    onOpenFolders: () -> Unit = {},
     viewModel: ListsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -68,6 +74,8 @@ fun ListsRoute(
         state = state,
         onOpenList = onOpenList,
         onOpenConnections = onOpenConnections,
+        onOpenSharedWithMe = onOpenSharedWithMe,
+        onOpenFolders = onOpenFolders,
         onSearchQueryChange = viewModel::onSearchQueryChange,
         onLoadMore = viewModel::loadMore,
         onCreateList = { title -> viewModel.createList(title, description = null, onCreated = { onOpenList(it.id) }) },
@@ -86,6 +94,8 @@ fun ListsScreen(
     onLoadMore: () -> Unit,
     onCreateList: (String) -> Unit,
     modifier: Modifier = Modifier,
+    onOpenSharedWithMe: () -> Unit = {},
+    onOpenFolders: () -> Unit = {},
 ) {
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -93,6 +103,18 @@ fun ListsScreen(
             TopAppBar(
                 title = { Text("Lists") },
                 actions = {
+                    IconButton(
+                        onClick = onOpenFolders,
+                        modifier = Modifier.testTag(ListsTestTags.FOLDERS),
+                    ) {
+                        Icon(Icons.Default.Folder, contentDescription = "Folders")
+                    }
+                    IconButton(
+                        onClick = onOpenSharedWithMe,
+                        modifier = Modifier.testTag(ListsTestTags.SHARED_WITH_ME),
+                    ) {
+                        Icon(Icons.Default.People, contentDescription = "Shared with me")
+                    }
                     IconButton(onClick = onOpenConnections) {
                         Icon(Icons.Default.Hub, contentDescription = "List connections")
                     }

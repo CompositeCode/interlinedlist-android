@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
 
@@ -19,6 +20,33 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!--
+                App Links: verified https:// deep links routed to the in-app nav
+                destinations (shared list/document tokens, password reset, email
+                verification). autoVerify enables Android App Links verification.
+            -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="interlinedlist.com" />
+                <data android:pathPrefix="/lists/shared/" />
+                <data android:pathPrefix="/documents/shared/" />
+                <data android:path="/reset-password" />
+                <data android:path="/verify-email" />
+            </intent-filter>
+
+            <!-- Custom-scheme equivalents for the same in-app deep-link routes. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="interlinedlist" android:host="lists" />
+                <data android:scheme="interlinedlist" android:host="documents" />
+                <data android:scheme="interlinedlist" android:host="reset-password" />
+                <data android:scheme="interlinedlist" android:host="verify-email" />
             </intent-filter>
         </activity>
     </application>

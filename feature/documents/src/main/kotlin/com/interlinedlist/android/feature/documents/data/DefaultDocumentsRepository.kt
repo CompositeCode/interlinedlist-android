@@ -7,16 +7,31 @@ import com.interlinedlist.android.core.common.result.map
 import com.interlinedlist.android.core.network.error.safeApiCall
 import com.interlinedlist.android.feature.documents.data.local.DocumentDao
 import com.interlinedlist.android.feature.documents.data.local.FolderDao
+import com.interlinedlist.android.feature.documents.data.local.PendingOpDao
+import com.interlinedlist.android.feature.documents.data.local.PendingOpEntity
+import com.interlinedlist.android.feature.documents.data.local.SyncMetaDao
+import com.interlinedlist.android.feature.documents.data.local.SyncMetaEntity
 import com.interlinedlist.android.feature.documents.data.local.toDomain
 import com.interlinedlist.android.feature.documents.data.local.toEntity
+import com.interlinedlist.android.feature.documents.data.mapper.toCandidate
 import com.interlinedlist.android.feature.documents.data.mapper.toDomain
+import com.interlinedlist.android.feature.documents.data.mapper.toSharedDocument
 import com.interlinedlist.android.feature.documents.data.mapper.toTemplate
 import com.interlinedlist.android.feature.documents.data.remote.DocumentsApi
 import com.interlinedlist.android.feature.documents.data.remote.dto.CreateDocumentRequest
+import com.interlinedlist.android.feature.documents.data.remote.dto.CreateFolderDocumentRequest
 import com.interlinedlist.android.feature.documents.data.remote.dto.CreateFolderRequest
+import com.interlinedlist.android.feature.documents.data.remote.dto.CreateShareLinkRequest
 import com.interlinedlist.android.feature.documents.data.remote.dto.FromTemplateRequest
+import com.interlinedlist.android.feature.documents.data.remote.dto.InviteCollaboratorRequest
+import com.interlinedlist.android.feature.documents.data.remote.dto.SyncOperationDto
+import com.interlinedlist.android.feature.documents.data.remote.dto.SyncPushRequest
+import com.interlinedlist.android.feature.documents.data.remote.dto.UpdateCollaboratorRoleRequest
 import com.interlinedlist.android.feature.documents.data.remote.dto.UpdateDocumentRequest
 import com.interlinedlist.android.feature.documents.data.remote.dto.UpdateFolderRequest
+import com.interlinedlist.android.feature.documents.domain.Collaborator
+import com.interlinedlist.android.feature.documents.domain.CollaboratorCandidate
+import com.interlinedlist.android.feature.documents.domain.CollaboratorRole
 import com.interlinedlist.android.feature.documents.domain.Document
 import com.interlinedlist.android.feature.documents.domain.DocumentFolder
 import com.interlinedlist.android.feature.documents.domain.DocumentTemplate
@@ -24,6 +39,10 @@ import com.interlinedlist.android.feature.documents.domain.FolderContents
 import com.interlinedlist.android.feature.documents.domain.FolderNode
 import com.interlinedlist.android.feature.documents.domain.FolderSummary
 import com.interlinedlist.android.feature.documents.domain.FolderTree
+import com.interlinedlist.android.feature.documents.domain.Presence
+import com.interlinedlist.android.feature.documents.domain.ShareLink
+import com.interlinedlist.android.feature.documents.domain.ShareRole
+import com.interlinedlist.android.feature.documents.domain.SharedDocument
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
@@ -45,6 +64,8 @@ class DefaultDocumentsRepository @Inject constructor(
     private val api: DocumentsApi,
     private val documentDao: DocumentDao,
     private val folderDao: FolderDao,
+    private val pendingOpDao: PendingOpDao,
+    private val syncMetaDao: SyncMetaDao,
     private val json: Json,
     private val dispatchers: DispatcherProvider,
 ) : DocumentsRepository {
@@ -65,6 +86,8 @@ class DefaultDocumentsRepository @Inject constructor(
 
     override fun observeDocument(id: String): Flow<Document?> =
         documentDao.observeDocument(id).map { it?.toDomain() }
+
+    override fun observePendingCount(): Flow<Int> = pendingOpDao.observeCount()
 
     override suspend fun refreshTree(): ApiResult<Unit> = withContext(dispatchers.io) {
         // One call returns the nested folder tree with embedded docs; a second returns
@@ -138,6 +161,34 @@ class DefaultDocumentsRepository @Inject constructor(
                     // Best-effort move so the server record matches the cache.
                     safeApiCall(json) { api.updateDocument(domain.id, UpdateDocumentRequest(folderId = folderId)) }
                 }
+                ApiResult.Success(domain)
+            }
+            is ApiResult.Failure -> result
+        }
+    }
+
+    override suspend fun createDocumentInFolder(
+        folderId: String,
+        title: String,
+        content: String,
+        isPublic: Boolean,
+    ): ApiResult<Document> = withContext(dispatchers.io) {
+        val result = safeApiCall(json) {
+            api.createFolderDocument(
+                folderId,
+                CreateFolderDocumentRequest(title = title, content = content, isPublic = isPublic),
+            ).documentOrSelf
+        }
+        when (result) {
+            is ApiResult.Success -> {
+                val dto = result.data
+                    ?: return@withContext ApiResult.Failure(
+                        AppError.Unknown("Document create returned no body"),
+                    )
+                // The endpoint files the doc in the folder; ensure the cached row agrees
+                // even if the response omitted (or differed on) the folderId.
+                val domain = dto.toDomain().copy(folderId = folderId)
+                documentDao.upsert(domain.toEntity(sortOrder = documentDao.maxSortOrder() + 1))
                 ApiResult.Success(domain)
             }
             is ApiResult.Failure -> result
@@ -291,6 +342,15 @@ class DefaultDocumentsRepository @Inject constructor(
                 .map { response -> response.documentsOrEmpty.map { it.toTemplate() } }
         }
 
+    override suspend fun seedDefaultTemplates(): ApiResult<List<DocumentTemplate>> =
+        withContext(dispatchers.io) {
+            when (val seed = safeApiCall(json) { api.seedDefaultTemplates() }) {
+                // Re-fetch so the surface shows the freshly seeded templates.
+                is ApiResult.Success -> getTemplates()
+                is ApiResult.Failure -> seed
+            }
+        }
+
     override suspend fun createFromTemplate(
         templateId: String,
         targetFolderId: String?,
@@ -318,7 +378,253 @@ class DefaultDocumentsRepository @Inject constructor(
                 .map { response -> response.documentsOrEmpty.map { it.toDomain() } }
         }
 
+    override suspend fun getShareLinks(documentId: String): ApiResult<List<ShareLink>> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.getShareLinks(documentId) }
+                .map { response -> response.items.map { it.toDomain() } }
+        }
+
+    override suspend fun createShareLink(documentId: String, role: ShareRole): ApiResult<ShareLink> =
+        withContext(dispatchers.io) {
+            when (val result = safeApiCall(json) {
+                api.createShareLink(documentId, CreateShareLinkRequest(role = role.apiValue))
+            }) {
+                is ApiResult.Success -> {
+                    val dto = result.data.linkOrSelf
+                        ?: return@withContext ApiResult.Failure(
+                            AppError.Unknown("Share link create returned no token"),
+                        )
+                    ApiResult.Success(dto.toDomain())
+                }
+                is ApiResult.Failure -> result
+            }
+        }
+
+    override suspend fun revokeShareLink(documentId: String, token: String): ApiResult<Unit> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.revokeShareLink(documentId, token) }.map { }
+        }
+
+    override suspend fun resolveSharedDocument(token: String): ApiResult<SharedDocument> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.resolveSharedDocument(token) }
+                .map { response -> response.toSharedDocument(token) }
+        }
+
+    override suspend fun claimSharedDocument(token: String): ApiResult<Unit> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.claimSharedDocument(token) }.map { }
+        }
+
+    // --- Versioned save (PATCH + If-Match) --------------------------------
+
+    override suspend fun patchDocument(
+        id: String,
+        title: String,
+        content: String,
+        isPublic: Boolean,
+        folderId: String?,
+        expectedVersion: Int?,
+    ): SaveOutcome = withContext(dispatchers.io) {
+        val body = UpdateDocumentRequest(
+            title = title,
+            content = content,
+            isPublic = isPublic,
+            folderId = folderId,
+        )
+        val result = safeApiCall(json) {
+            api.patchDocument(id, body, ifMatch = expectedVersion?.toString()).documentOrSelf
+        }
+        when (result) {
+            is ApiResult.Success -> {
+                val domain = result.data?.toDomain()?.let {
+                    it.copy(content = it.content ?: content)
+                } ?: Document(
+                    id = id,
+                    title = title,
+                    content = content,
+                    snippet = Document.snippetFrom(content),
+                    folderId = folderId,
+                    folderName = null,
+                    isPublic = isPublic,
+                    updatedAt = null,
+                    version = expectedVersion?.plus(1),
+                )
+                documentDao.upsert(domain.toEntity(sortOrder = existingOrder(id)))
+                // A successful save supersedes anything queued for this doc.
+                pendingOpDao.deleteById(id)
+                SaveOutcome.Success(domain)
+            }
+            is ApiResult.Failure -> when (result.error) {
+                // Version mismatch → let the UI reload/retry; do NOT clobber or queue.
+                is AppError.Conflict -> SaveOutcome.Conflict(result.error.message)
+                // Offline → persist locally to push on the next sync.
+                is AppError.Network -> {
+                    pendingOpDao.upsert(
+                        PendingOpEntity(
+                            documentId = id,
+                            op = PendingOpEntity.OP_UPDATE,
+                            title = title,
+                            content = content,
+                            isPublic = isPublic,
+                            folderId = folderId,
+                            version = expectedVersion,
+                            queuedAt = System.currentTimeMillis(),
+                        ),
+                    )
+                    SaveOutcome.Queued
+                }
+                else -> SaveOutcome.Error(result.error.message)
+            }
+        }
+    }
+
+    // --- Delta sync --------------------------------------------------------
+
+    override suspend fun pullDelta(): ApiResult<Unit> = withContext(dispatchers.io) {
+        val cursor = syncMetaDao.get(SyncMetaEntity.KEY_CURSOR)
+        when (val result = safeApiCall(json) { api.pullSync(cursor) }) {
+            is ApiResult.Success -> {
+                reconcile(result.data.folders, result.data.documents)
+                result.data.lastSyncAt?.let {
+                    syncMetaDao.put(SyncMetaEntity(SyncMetaEntity.KEY_CURSOR, it))
+                }
+                ApiResult.Success(Unit)
+            }
+            is ApiResult.Failure -> result
+        }
+    }
+
+    override suspend fun pushPendingOps(): ApiResult<Unit> = withContext(dispatchers.io) {
+        val pending = pendingOpDao.all()
+        if (pending.isEmpty()) return@withContext ApiResult.Success(Unit)
+
+        val operations = pending.map { op ->
+            SyncOperationDto(
+                id = op.documentId,
+                op = op.op,
+                title = op.title,
+                content = op.content,
+                isPublic = op.isPublic,
+                folderId = op.folderId,
+                version = op.version,
+            )
+        }
+        when (val result = safeApiCall(json) { api.pushSync(SyncPushRequest(operations)) }) {
+            is ApiResult.Success -> {
+                pendingOpDao.deleteAllByIds(pending.map { it.documentId })
+                // Fold any server echo back into the cache and advance the cursor.
+                reconcile(result.data.folders, result.data.documents)
+                result.data.lastSyncAt?.let {
+                    syncMetaDao.put(SyncMetaEntity(SyncMetaEntity.KEY_CURSOR, it))
+                }
+                ApiResult.Success(Unit)
+            }
+            is ApiResult.Failure -> result
+        }
+    }
+
+    // --- Collaborators -----------------------------------------------------
+
+    override suspend fun getCollaborators(documentId: String): ApiResult<List<Collaborator>> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.getCollaborators(documentId) }
+                .map { response -> response.items.map { it.toDomain() } }
+        }
+
+    override suspend fun searchCollaboratorUsers(
+        documentId: String,
+        query: String,
+    ): ApiResult<List<CollaboratorCandidate>> = withContext(dispatchers.io) {
+        safeApiCall(json) {
+            api.searchCollaboratorUsers(
+                id = documentId,
+                search = query.takeIf { it.isNotBlank() },
+                excludeCollaborators = true,
+            )
+        }.map { response -> response.users.map { it.toCandidate() } }
+    }
+
+    override suspend fun inviteCollaborator(
+        documentId: String,
+        userId: String,
+        role: CollaboratorRole,
+    ): ApiResult<Collaborator> = withContext(dispatchers.io) {
+        when (val result = safeApiCall(json) {
+            api.inviteCollaborator(documentId, InviteCollaboratorRequest(userId, role.apiValue))
+        }) {
+            is ApiResult.Success -> {
+                val dto = result.data.collaboratorOrNull
+                val domain = dto?.toDomain()
+                    ?: Collaborator(userId, role, null, null, null, null)
+                ApiResult.Success(domain)
+            }
+            is ApiResult.Failure -> result
+        }
+    }
+
+    override suspend fun updateCollaboratorRole(
+        documentId: String,
+        userId: String,
+        role: CollaboratorRole,
+    ): ApiResult<Unit> = withContext(dispatchers.io) {
+        safeApiCall(json) {
+            api.updateCollaboratorRole(documentId, userId, UpdateCollaboratorRoleRequest(role.apiValue))
+        }.map { }
+    }
+
+    override suspend fun removeCollaborator(documentId: String, userId: String): ApiResult<Unit> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.removeCollaborator(documentId, userId) }.map { }
+        }
+
+    // --- Presence ----------------------------------------------------------
+
+    override suspend fun sendPresence(documentId: String): ApiResult<List<Presence>> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.sendPresence(documentId) }
+                .map { response -> response.items.map { it.toDomain() } }
+        }
+
+    override suspend fun leavePresence(documentId: String): ApiResult<Unit> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.leavePresence(documentId) }.map { }
+        }
+
     // --- Helpers -----------------------------------------------------------
+
+    /**
+     * Reconciles a batch of flat, versioned sync rows into Room: tombstones drop the
+     * cached row; upserts replace by id (append at the tail if new, keep the slot if
+     * known). Server ordering within a delta is not authoritative, so we sort new
+     * rows after existing ones.
+     */
+    private suspend fun reconcile(
+        folders: List<com.interlinedlist.android.feature.documents.data.remote.dto.SyncFolderDto>,
+        documents: List<com.interlinedlist.android.feature.documents.data.remote.dto.SyncDocumentDto>,
+    ) {
+        folders.forEach { dto ->
+            if (dto.isDeleted) {
+                pruneFolderCascade(dto.id)
+            } else {
+                val existing = folderDao.getFolder(dto.id)
+                val order = existing?.sortOrder ?: (folderDao.maxSortOrder() + 1)
+                folderDao.upsert(dto.toDomain().toEntity(sortOrder = order))
+            }
+        }
+        documents.forEach { dto ->
+            if (dto.isDeleted) {
+                documentDao.deleteById(dto.id)
+            } else {
+                val existing = documentDao.getDocument(dto.id)
+                val order = existing?.sortOrder ?: (documentDao.maxSortOrder() + 1)
+                // Preserve a locally cached body if the delta row omits content.
+                documentDao.upsert(
+                    dto.toDomain().toEntity(sortOrder = order, existingContent = existing?.content),
+                )
+            }
+        }
+    }
 
     private fun buildTree(folders: List<DocumentFolder>, documents: List<Document>): FolderNode {
         val byFolder = documents.filter { it.folderId != null }.groupBy { it.folderId!! }

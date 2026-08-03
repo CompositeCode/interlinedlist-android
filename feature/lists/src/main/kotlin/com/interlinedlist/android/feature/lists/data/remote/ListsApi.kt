@@ -3,20 +3,29 @@ package com.interlinedlist.android.feature.lists.data.remote
 import com.interlinedlist.android.feature.lists.data.remote.dto.AddWatcherRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.ConnectionEnvelope
 import com.interlinedlist.android.feature.lists.data.remote.dto.ConnectionsResponse
+import com.interlinedlist.android.feature.lists.data.remote.dto.ContributorsResponse
 import com.interlinedlist.android.feature.lists.data.remote.dto.CreateConnectionRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.CreateFolderRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.CreateListRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.FolderDto
+import com.interlinedlist.android.feature.lists.data.remote.dto.FolderEnvelope
 import com.interlinedlist.android.feature.lists.data.remote.dto.FoldersResponse
 import com.interlinedlist.android.feature.lists.data.remote.dto.ListEnvelope
 import com.interlinedlist.android.feature.lists.data.remote.dto.ListsResponse
 import com.interlinedlist.android.feature.lists.data.remote.dto.RefreshResultDto
 import com.interlinedlist.android.feature.lists.data.remote.dto.RowEnvelope
 import com.interlinedlist.android.feature.lists.data.remote.dto.RowWriteRequest
+import com.interlinedlist.android.feature.lists.data.remote.dto.CreateShareLinkRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.RowsResponse
 import com.interlinedlist.android.feature.lists.data.remote.dto.SchemaEnvelope
+import com.interlinedlist.android.feature.lists.data.remote.dto.ShareLinkEnvelope
+import com.interlinedlist.android.feature.lists.data.remote.dto.ShareLinksResponse
+import com.interlinedlist.android.feature.lists.data.remote.dto.SharedListResponse
+import com.interlinedlist.android.feature.lists.data.remote.dto.UpdateFolderRequest
+import com.interlinedlist.android.feature.lists.data.remote.dto.UpdateListRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.UpdateSchemaRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.UpdateWatcherRoleRequest
+import com.interlinedlist.android.feature.lists.data.remote.dto.WatchingResponse
 import com.interlinedlist.android.feature.lists.data.remote.dto.WatcherUsersResponse
 import com.interlinedlist.android.feature.lists.data.remote.dto.WatchersResponse
 import com.interlinedlist.android.feature.lists.data.remote.dto.WatchingStatusDto
@@ -55,8 +64,19 @@ interface ListsApi {
     @GET("api/lists/{id}")
     suspend fun getList(@Path("id") id: String): ListEnvelope
 
+    /** Updates a list's metadata (title/description/visibility/folder). */
+    @PUT("api/lists/{id}")
+    suspend fun updateList(
+        @Path("id") id: String,
+        @Body body: UpdateListRequest,
+    ): ListEnvelope
+
     @DELETE("api/lists/{id}")
     suspend fun deleteList(@Path("id") id: String)
+
+    /** People who have contributed rows to a list (read-only, unpaged). */
+    @GET("api/lists/{id}/contributors")
+    suspend fun getContributors(@Path("id") id: String): ContributorsResponse
 
     /** The schema DSL — shape is dynamic, so it is received as a raw element. */
     @GET("api/lists/{id}/schema")
@@ -127,6 +147,13 @@ interface ListsApi {
         @Query("offset") offset: Int,
     ): RowsResponse
 
+    /** Fetches a single data row by id. */
+    @GET("api/lists/{id}/data/{rowId}")
+    suspend fun getRow(
+        @Path("id") id: String,
+        @Path("rowId") rowId: String,
+    ): RowEnvelope
+
     @POST("api/lists/{id}/data")
     suspend fun createRow(
         @Path("id") id: String,
@@ -151,4 +178,47 @@ interface ListsApi {
 
     @POST("api/folders")
     suspend fun createFolder(@Body body: CreateFolderRequest): FolderDto
+
+    /** Renames and/or moves a folder. */
+    @PUT("api/folders/{id}")
+    suspend fun updateFolder(
+        @Path("id") id: String,
+        @Body body: UpdateFolderRequest,
+    ): FolderEnvelope
+
+    /** Soft-deletes a folder; its lists move to the root. */
+    @DELETE("api/folders/{id}")
+    suspend fun deleteFolder(@Path("id") id: String)
+
+    // --- Sharing -----------------------------------------------------------
+
+    /** Existing public share links for a list. */
+    @GET("api/lists/{id}/share-links")
+    suspend fun getShareLinks(@Path("id") id: String): ShareLinksResponse
+
+    /** Creates a share link granting the requested role (optionally expiring). */
+    @POST("api/lists/{id}/share-links")
+    suspend fun createShareLink(
+        @Path("id") id: String,
+        @Body body: CreateShareLinkRequest,
+    ): ShareLinkEnvelope
+
+    /** Revokes (deletes) a share link by its token. */
+    @DELETE("api/lists/{id}/share-links/{token}")
+    suspend fun revokeShareLink(
+        @Path("id") id: String,
+        @Path("token") token: String,
+    )
+
+    /** Lists owned by other users that the current user has access to ("Shared with me"). */
+    @GET("api/lists/watching")
+    suspend fun getWatchingLists(): WatchingResponse
+
+    /** Resolves a public share link to a read-only preview of the shared list. */
+    @GET("api/lists/shared/{token}")
+    suspend fun resolveSharedList(@Path("token") token: String): SharedListResponse
+
+    /** Claims edit/admin access to a shared list as the logged-in user. */
+    @POST("api/lists/shared/{token}")
+    suspend fun claimSharedList(@Path("token") token: String)
 }

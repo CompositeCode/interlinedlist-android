@@ -9,11 +9,18 @@ import androidx.room.RoomDatabase
  * engineering brief). Disposable during development via destructive migration.
  */
 @Database(
-    entities = [DocumentEntity::class, FolderEntity::class],
-    version = 2,
+    entities = [
+        DocumentEntity::class,
+        FolderEntity::class,
+        PendingOpEntity::class,
+        SyncMetaEntity::class,
+    ],
+    version = 3,
     exportSchema = false,
 )
 abstract class DocumentsDatabase : RoomDatabase() {
     abstract fun documentDao(): DocumentDao
     abstract fun folderDao(): FolderDao
+    abstract fun pendingOpDao(): PendingOpDao
+    abstract fun syncMetaDao(): SyncMetaDao
 }

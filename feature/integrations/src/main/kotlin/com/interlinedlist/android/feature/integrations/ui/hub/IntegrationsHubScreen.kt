@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material3.Card
@@ -41,6 +42,7 @@ import com.interlinedlist.android.feature.integrations.domain.PlanLimits
 object IntegrationsHubTestTags {
     const val EXPORT = "hubExport"
     const val ACCOUNTS = "hubAccounts"
+    const val GITHUB = "hubGitHub"
     const val LIMITS = "hubLimits"
 }
 
@@ -52,12 +54,15 @@ object IntegrationsHubTestTags {
  * @param onBack pop back to the Account hub.
  * @param onOpenExport navigate to the export sub-route (see ExportRoute).
  * @param onOpenConnectedAccounts navigate to the connected-accounts sub-route.
+ * @param onOpenGitHub navigate to the GitHub sub-route (see GitHubRoute). Defaulted
+ *   to a no-op so existing app-level nav that hasn't wired it yet still compiles.
  */
 @Composable
 fun IntegrationsRoute(
     onBack: () -> Unit,
     onOpenExport: () -> Unit,
     onOpenConnectedAccounts: () -> Unit,
+    onOpenGitHub: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: IntegrationsHubViewModel = hiltViewModel(),
 ) {
@@ -67,6 +72,7 @@ fun IntegrationsRoute(
         onBack = onBack,
         onOpenExport = onOpenExport,
         onOpenConnectedAccounts = onOpenConnectedAccounts,
+        onOpenGitHub = onOpenGitHub,
         modifier = modifier,
     )
 }
@@ -79,6 +85,7 @@ fun IntegrationsHubScreen(
     onBack: () -> Unit,
     onOpenExport: () -> Unit,
     onOpenConnectedAccounts: () -> Unit,
+    onOpenGitHub: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -118,6 +125,15 @@ fun IntegrationsHubScreen(
                     subtitle = "See which social accounts are linked.",
                     onClick = onOpenConnectedAccounts,
                     testTag = IntegrationsHubTestTags.ACCOUNTS,
+                )
+            }
+            item {
+                HubEntry(
+                    icon = Icons.Default.BugReport,
+                    title = "GitHub",
+                    subtitle = "Browse connected repos and manage issues.",
+                    onClick = onOpenGitHub,
+                    testTag = IntegrationsHubTestTags.GITHUB,
                 )
             }
             state.limits?.takeIf { it.limits.isNotEmpty() }?.let { limits ->

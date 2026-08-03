@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.feature.lists.data.ListsRepository
+import com.interlinedlist.android.feature.lists.domain.Contributor
 import com.interlinedlist.android.feature.lists.domain.Watcher
 import com.interlinedlist.android.feature.lists.domain.WatcherCandidate
 import com.interlinedlist.android.feature.lists.domain.WatcherRole
@@ -23,6 +24,7 @@ const val WATCHERS_LIST_ID_ARG = "listId"
 /** UI state for the watchers screen. */
 data class WatchersUiState(
     val watchers: List<Watcher> = emptyList(),
+    val contributors: List<Contributor> = emptyList(),
     val isWatching: Boolean = false,
     val isLoading: Boolean = true,
     val errorMessage: String? = null,
@@ -62,6 +64,11 @@ class WatchersViewModel @Inject constructor(
             // The "am I watching?" flag is best-effort; a failure just leaves it false.
             when (val status = repository.isWatching(listId)) {
                 is ApiResult.Success -> _uiState.update { it.copy(isWatching = status.data) }
+                is ApiResult.Failure -> Unit
+            }
+            // Contributors are read-only supplementary detail; a failure leaves them empty.
+            when (val contributors = repository.getContributors(listId)) {
+                is ApiResult.Success -> _uiState.update { it.copy(contributors = contributors.data) }
                 is ApiResult.Failure -> Unit
             }
         }

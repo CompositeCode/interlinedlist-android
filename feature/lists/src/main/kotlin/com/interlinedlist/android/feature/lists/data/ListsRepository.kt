@@ -1,6 +1,7 @@
 package com.interlinedlist.android.feature.lists.data
 
 import com.interlinedlist.android.core.common.result.ApiResult
+import com.interlinedlist.android.feature.lists.domain.Contributor
 import com.interlinedlist.android.feature.lists.domain.ListConnection
 import com.interlinedlist.android.feature.lists.domain.ListDetail
 import com.interlinedlist.android.feature.lists.domain.ListFolder
@@ -9,6 +10,10 @@ import com.interlinedlist.android.feature.lists.domain.ListSchema
 import com.interlinedlist.android.feature.lists.domain.ListSummary
 import com.interlinedlist.android.feature.lists.domain.Paged
 import com.interlinedlist.android.feature.lists.domain.RefreshResult
+import com.interlinedlist.android.feature.lists.domain.ShareLink
+import com.interlinedlist.android.feature.lists.domain.ShareRole
+import com.interlinedlist.android.feature.lists.domain.SharedList
+import com.interlinedlist.android.feature.lists.domain.SharedListResolution
 import com.interlinedlist.android.feature.lists.domain.Watcher
 import com.interlinedlist.android.feature.lists.domain.WatcherCandidate
 import com.interlinedlist.android.feature.lists.domain.WatcherRole
@@ -36,11 +41,27 @@ interface ListsRepository {
     /** Creates a list; caches the result and returns its summary. */
     suspend fun createList(title: String, description: String?, isPublic: Boolean): ApiResult<ListSummary>
 
+    /**
+     * Updates a list's metadata (title/description/visibility/folder). Only the
+     * supplied fields change; the returned summary reflects the server's echo and
+     * the cache is updated to match.
+     */
+    suspend fun updateList(
+        id: String,
+        title: String? = null,
+        description: String? = null,
+        isPublic: Boolean? = null,
+        folderId: String? = null,
+    ): ApiResult<ListSummary>
+
     /** Deletes a list and evicts it from the cache. */
     suspend fun deleteList(id: String): ApiResult<Unit>
 
     /** Loads a list's metadata, schema, and first page of rows for the detail screen. */
     suspend fun getListDetail(id: String, rowLimit: Int = DEFAULT_PAGE_SIZE): ApiResult<ListDetail>
+
+    /** Fetches a single data row by id (e.g. for a row-detail view). */
+    suspend fun getRow(listId: String, rowId: String): ApiResult<ListRow>
 
     suspend fun addRow(listId: String, values: Map<String, String>): ApiResult<ListRow>
 
@@ -51,6 +72,22 @@ interface ListsRepository {
     suspend fun getFolders(): ApiResult<List<ListFolder>>
 
     suspend fun createFolder(name: String, parentId: String?): ApiResult<ListFolder>
+
+    /**
+     * Renames and/or moves a folder. Pass only the fields to change; the returned
+     * folder reflects the server's echo.
+     */
+    suspend fun updateFolder(
+        id: String,
+        name: String? = null,
+        parentId: String? = null,
+    ): ApiResult<ListFolder>
+
+    /** Soft-deletes a folder; its lists move to the root on the server. */
+    suspend fun deleteFolder(id: String): ApiResult<Unit>
+
+    /** People who have contributed rows to a list, ranked (read-only). */
+    suspend fun getContributors(listId: String): ApiResult<List<Contributor>>
 
     /** Replaces a list's schema (add/edit/remove columns) and returns the parsed result. */
     suspend fun updateSchema(listId: String, schema: ListSchema): ApiResult<ListSchema>
@@ -92,6 +129,26 @@ interface ListsRepository {
 
     /** Removes a connection between lists. */
     suspend fun deleteConnection(id: String): ApiResult<Unit>
+
+    // --- Sharing -----------------------------------------------------------
+
+    /** Existing public share links for a list. */
+    suspend fun getShareLinks(listId: String): ApiResult<List<ShareLink>>
+
+    /** Creates a share link granting [role]; returns the created link. */
+    suspend fun createShareLink(listId: String, role: ShareRole): ApiResult<ShareLink>
+
+    /** Revokes a share link by its token. */
+    suspend fun revokeShareLink(listId: String, token: String): ApiResult<Unit>
+
+    /** Lists shared with the current user by other owners, with the granted role. */
+    suspend fun getSharedWithMe(): ApiResult<List<SharedList>>
+
+    /** Resolves a public `…/shared/{token}` link to a read-only preview. */
+    suspend fun resolveSharedList(token: String): ApiResult<SharedListResolution>
+
+    /** Claims edit/admin access to a shared list via its token. */
+    suspend fun claimSharedList(token: String): ApiResult<Unit>
 
     companion object {
         const val DEFAULT_PAGE_SIZE = 20

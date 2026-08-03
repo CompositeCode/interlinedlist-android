@@ -18,15 +18,20 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.outlined.Group
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -38,7 +43,9 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.interlinedlist.android.core.designsystem.theme.InterlinedListTheme
+import com.interlinedlist.android.feature.documents.domain.Presence
 import com.interlinedlist.android.feature.documents.ui.common.MarkdownText
+import com.interlinedlist.android.feature.documents.ui.presence.PresenceIndicator
 
 /** Stable test tags for the editor. */
 object DocumentEditorTestTags {
@@ -48,9 +55,15 @@ object DocumentEditorTestTags {
     const val SAVE = "editorSave"
     const val DELETE = "editorDelete"
     const val UPLOAD_IMAGE = "editorUploadImage"
+    const val SHARE = "editorShare"
+    const val MANAGE_ACCESS = "editorManageAccess"
     const val TOGGLE_PREVIEW = "editorTogglePreview"
     const val PROGRESS = "editorProgress"
     const val ERROR = "editorError"
+    const val CONFLICT_BANNER = "editorConflictBanner"
+    const val CONFLICT_RELOAD = "editorConflictReload"
+    const val CONFLICT_RETRY = "editorConflictRetry"
+    const val OFFLINE_HINT = "editorOfflineHint"
 }
 
 /**
@@ -63,10 +76,20 @@ fun DocumentEditorRoute(
     onBack: () -> Unit,
     onDeleted: () -> Unit,
     modifier: Modifier = Modifier,
+    onOpenShare: () -> Unit = {},
+    onOpenManageAccess: () -> Unit = {},
+    presenceViewModel: com.interlinedlist.android.feature.documents.ui.presence.DocumentPresenceViewModel = hiltViewModel(),
     viewModel: DocumentEditorViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val presenceState by presenceViewModel.uiState.collectAsStateWithLifecycle()
     val context = androidx.compose.ui.platform.LocalContext.current
+
+    // Heartbeat presence while the editor is on screen; leave when it disappears.
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        presenceViewModel.start()
+        onDispose { presenceViewModel.stop() }
+    }
 
     // Android Photo Picker: reads the picked image's bytes and hands them to the VM.
     val pickImage = rememberLauncherForActivityResult(
@@ -98,6 +121,11 @@ fun DocumentEditorRoute(
             )
         },
         onBack = onBack,
+        onOpenShare = onOpenShare,
+        onOpenManageAccess = onOpenManageAccess,
+        onReloadConflict = viewModel::reloadForConflict,
+        onRetrySave = { viewModel.save() },
+        presenceParticipants = presenceState.participants,
         modifier = modifier,
     )
 }
@@ -115,6 +143,11 @@ fun DocumentEditorScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     onPickImage: () -> Unit = {},
+    onOpenShare: () -> Unit = {},
+    onOpenManageAccess: () -> Unit = {},
+    onReloadConflict: () -> Unit = {},
+    onRetrySave: () -> Unit = {},
+    presenceParticipants: List<Presence> = emptyList(),
 ) {
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -133,6 +166,10 @@ fun DocumentEditorScreen(
                     }
                 },
                 actions = {
+                    PresenceIndicator(
+                        participants = presenceParticipants,
+                        modifier = Modifier.padding(end = 4.dp),
+                    )
                     IconButton(
                         onClick = onPickImage,
                         enabled = !state.isUploadingImage && !state.isSaving,
@@ -143,6 +180,18 @@ fun DocumentEditorScreen(
                         } else {
                             Icon(Icons.Default.Image, contentDescription = "Insert image")
                         }
+                    }
+                    IconButton(
+                        onClick = onOpenManageAccess,
+                        modifier = Modifier.testTag(DocumentEditorTestTags.MANAGE_ACCESS),
+                    ) {
+                        Icon(Icons.Outlined.Group, contentDescription = "Manage access")
+                    }
+                    IconButton(
+                        onClick = onOpenShare,
+                        modifier = Modifier.testTag(DocumentEditorTestTags.SHARE),
+                    ) {
+                        Icon(Icons.Outlined.Share, contentDescription = "Share")
                     }
                     IconButton(
                         onClick = onTogglePreview,
@@ -193,7 +242,14 @@ fun DocumentEditorScreen(
                 .imePadding()
                 .padding(horizontal = 16.dp),
         ) {
-            if (state.errorMessage != null) {
+            if (state.hasConflict) {
+                ConflictBanner(
+                    message = state.errorMessage
+                        ?: "This document changed since you opened it.",
+                    onReload = onReloadConflict,
+                    onRetry = onRetrySave,
+                )
+            } else if (state.errorMessage != null) {
                 Text(
                     text = state.errorMessage,
                     color = MaterialTheme.colorScheme.error,
@@ -202,6 +258,18 @@ fun DocumentEditorScreen(
                         .fillMaxWidth()
                         .padding(vertical = 8.dp)
                         .testTag(DocumentEditorTestTags.ERROR),
+                )
+            }
+
+            if (state.isQueuedOffline) {
+                Text(
+                    text = "Saved offline. Changes will sync when you're back online.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp)
+                        .testTag(DocumentEditorTestTags.OFFLINE_HINT),
                 )
             }
 
@@ -236,6 +304,40 @@ fun DocumentEditorScreen(
                         .verticalScroll(rememberScrollState())
                         .testTag(DocumentEditorTestTags.BODY),
                 )
+            }
+        }
+    }
+}
+
+/** A save-conflict banner offering Reload (take server copy) or Retry (overwrite). */
+@Composable
+private fun ConflictBanner(
+    message: String,
+    onReload: () -> Unit,
+    onRetry: () -> Unit,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.errorContainer,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp)
+            .testTag(DocumentEditorTestTags.CONFLICT_BANNER),
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(
+                    onClick = onReload,
+                    modifier = Modifier.testTag(DocumentEditorTestTags.CONFLICT_RELOAD),
+                ) { Text("Reload latest") }
+                TextButton(
+                    onClick = onRetry,
+                    modifier = Modifier.testTag(DocumentEditorTestTags.CONFLICT_RETRY),
+                ) { Text("Retry") }
             }
         }
     }

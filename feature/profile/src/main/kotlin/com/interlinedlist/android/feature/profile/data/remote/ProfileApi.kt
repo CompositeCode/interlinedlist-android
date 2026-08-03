@@ -2,11 +2,28 @@ package com.interlinedlist.android.feature.profile.data.remote
 
 import com.interlinedlist.android.feature.profile.data.remote.dto.AvatarFromUrlRequest
 import com.interlinedlist.android.feature.profile.data.remote.dto.AvatarResponse
+import com.interlinedlist.android.feature.profile.data.remote.dto.BlockStatusResponse
+import com.interlinedlist.android.feature.profile.data.remote.dto.BlocksResponse
+import com.interlinedlist.android.feature.profile.data.remote.dto.ChangeEmailRequest
+import com.interlinedlist.android.feature.profile.data.remote.dto.DeleteAccountRequest
+import com.interlinedlist.android.feature.profile.data.remote.dto.MuteStatusResponse
+import com.interlinedlist.android.feature.profile.data.remote.dto.MutesResponse
+import com.interlinedlist.android.feature.profile.data.remote.dto.ReportUserRequest
 import com.interlinedlist.android.feature.profile.data.remote.dto.FollowCountsResponse
 import com.interlinedlist.android.feature.profile.data.remote.dto.FollowListResponse
 import com.interlinedlist.android.feature.profile.data.remote.dto.FollowRequestsResponse
 import com.interlinedlist.android.feature.profile.data.remote.dto.FollowStatusResponse
+import com.interlinedlist.android.feature.profile.data.remote.dto.IdentitiesResponse
+import com.interlinedlist.android.feature.profile.data.remote.dto.MutualConnectionsResponse
 import com.interlinedlist.android.feature.profile.data.remote.dto.ProfileResponse
+import com.interlinedlist.android.feature.profile.data.remote.dto.PublicDocumentDetailResponse
+import com.interlinedlist.android.feature.profile.data.remote.dto.PublicDocumentsResponse
+import com.interlinedlist.android.feature.profile.data.remote.dto.PublicListDataResponse
+import com.interlinedlist.android.feature.profile.data.remote.dto.PublicListDetailResponse
+import com.interlinedlist.android.feature.profile.data.remote.dto.PublicListsResponse
+import com.interlinedlist.android.feature.profile.data.remote.dto.PublicPostsResponse
+import com.interlinedlist.android.feature.profile.data.remote.dto.SessionsResponse
+import com.interlinedlist.android.feature.profile.data.remote.dto.UserLookupResponse
 import com.interlinedlist.android.feature.profile.data.remote.dto.UpdateProfileRequest
 import com.interlinedlist.android.feature.profile.data.remote.dto.UserSearchResponse
 import okhttp3.MultipartBody
@@ -55,6 +72,60 @@ interface ProfileApi {
         @Query("q") query: String,
         @Query("limit") limit: Int? = null,
     ): UserSearchResponse
+
+    /** Looks up a single user by handle (e.g. `@username`). */
+    @GET("api/users/lookup")
+    suspend fun lookupUser(@Query("handle") handle: String): UserLookupResponse
+
+    // --- Public content (another user's posts / lists / documents) ---
+
+    /**
+     * A user's public posts. Note the SINGULAR `user` path segment — confirmed
+     * against the OpenAPI spec and live calls (`/api/user/{username}/messages`),
+     * unlike the plural `users` used by the lists/documents endpoints below.
+     */
+    @GET("api/user/{username}/messages")
+    suspend fun getUserMessages(
+        @Path("username") username: String,
+        @Query("limit") limit: Int? = null,
+        @Query("offset") offset: Int? = null,
+    ): PublicPostsResponse
+
+    /** A user's public lists. */
+    @GET("api/users/{username}/lists")
+    suspend fun getUserLists(
+        @Path("username") username: String,
+        @Query("limit") limit: Int? = null,
+        @Query("offset") offset: Int? = null,
+    ): PublicListsResponse
+
+    /** A single public list's metadata. */
+    @GET("api/users/{username}/lists/{id}")
+    suspend fun getUserList(
+        @Path("username") username: String,
+        @Path("id") listId: String,
+    ): PublicListDetailResponse
+
+    /** A single public list's rows. */
+    @GET("api/users/{username}/lists/{id}/data")
+    suspend fun getUserListData(
+        @Path("username") username: String,
+        @Path("id") listId: String,
+        @Query("limit") limit: Int? = null,
+        @Query("offset") offset: Int? = null,
+    ): PublicListDataResponse
+
+    /** A user's public documents. */
+    @GET("api/users/{username}/documents")
+    suspend fun getUserDocuments(@Path("username") username: String): PublicDocumentsResponse
+
+    /** A single public document, including its content. */
+    @GET("api/documents/{id}")
+    suspend fun getDocument(@Path("id") documentId: String): PublicDocumentDetailResponse
+
+    /** Mutual-connection counts between the current user and [userId]. */
+    @GET("api/follow/{userId}/mutual")
+    suspend fun getMutualConnections(@Path("userId") userId: String): MutualConnectionsResponse
 
     // --- Following ---
 
@@ -105,4 +176,80 @@ interface ProfileApi {
     /** Removes a follower (only callable by the user being followed). */
     @DELETE("api/follow/{userId}/remove")
     suspend fun removeFollower(@Path("userId") userId: String)
+
+    // --- Account & Security ---
+
+    /** The current user's active login sessions (sync tokens / devices). */
+    @GET("api/user/sessions")
+    suspend fun getSessions(): SessionsResponse
+
+    /** Revokes (signs out) a single session by id. */
+    @DELETE("api/user/sessions/{id}")
+    suspend fun revokeSession(@Path("id") id: String)
+
+    /** The current user's linked social identities. */
+    @GET("api/user/identities")
+    suspend fun getIdentities(): IdentitiesResponse
+
+    /**
+     * Unlinks a social identity. The API keys on the `provider` query parameter
+     * (verified against the OpenAPI spec — it is a query param, not a body).
+     */
+    @DELETE("api/user/identities")
+    suspend fun unlinkIdentity(@Query("provider") provider: String)
+
+    /** Requests an email change; the server emails a verification link to the new address. */
+    @POST("api/user/change-email/request")
+    suspend fun requestEmailChange(@Body body: ChangeEmailRequest)
+
+    /** Deletes the current user's account (requires the username + email to confirm). */
+    @POST("api/user/delete")
+    suspend fun deleteAccount(@Body body: DeleteAccountRequest)
+
+    // --- Moderation (block / mute / report) ---
+
+    /** The users the current user has blocked (`{ "blockedUsers": [...], "pagination": {...} }`). */
+    @GET("api/user/blocks")
+    suspend fun getBlocks(
+        @Query("limit") limit: Int? = null,
+        @Query("offset") offset: Int? = null,
+    ): BlocksResponse
+
+    /** The users the current user has muted (`{ "mutedUsers": [...], "pagination": {...} }`). */
+    @GET("api/user/mutes")
+    suspend fun getMutes(
+        @Query("limit") limit: Int? = null,
+        @Query("offset") offset: Int? = null,
+    ): MutesResponse
+
+    /** Whether the current user is blocking [username] (`{ "blocked": true }`). */
+    @GET("api/users/{username}/block")
+    suspend fun getBlockStatus(@Path("username") username: String): BlockStatusResponse
+
+    /** Whether the current user is muting [username] (`{ "muted": true }`). */
+    @GET("api/users/{username}/mute")
+    suspend fun getMuteStatus(@Path("username") username: String): MuteStatusResponse
+
+    /** Blocks [username]. */
+    @POST("api/users/{username}/block")
+    suspend fun blockUser(@Path("username") username: String)
+
+    /** Unblocks [username]. */
+    @DELETE("api/users/{username}/block")
+    suspend fun unblockUser(@Path("username") username: String)
+
+    /** Mutes [username]. */
+    @POST("api/users/{username}/mute")
+    suspend fun muteUser(@Path("username") username: String)
+
+    /** Unmutes [username]. */
+    @DELETE("api/users/{username}/mute")
+    suspend fun unmuteUser(@Path("username") username: String)
+
+    /** Reports [username] with a reason and optional free-text detail. */
+    @POST("api/users/{username}/report")
+    suspend fun reportUser(
+        @Path("username") username: String,
+        @Body body: ReportUserRequest,
+    )
 }

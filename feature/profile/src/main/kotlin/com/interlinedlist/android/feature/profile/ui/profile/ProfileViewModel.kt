@@ -6,6 +6,8 @@ import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.feature.profile.data.ProfileRepository
 import com.interlinedlist.android.feature.profile.domain.FollowCounts
 import com.interlinedlist.android.feature.profile.domain.FollowStatus
+import com.interlinedlist.android.feature.profile.domain.ModerationStatus
+import com.interlinedlist.android.feature.profile.domain.MutualConnections
 import com.interlinedlist.android.feature.profile.domain.ProfileUser
 import com.interlinedlist.android.feature.profile.ui.common.toUserMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -31,12 +33,26 @@ data class ProfileUiState(
     val followStatus: FollowStatus = FollowStatus.SELF,
     val followCounts: FollowCounts = FollowCounts(),
     val isFollowActionInProgress: Boolean = false,
+    // Public-content tabs — populated only on another user's profile (Milestone L).
+    val selectedTab: ProfileContentTab = ProfileContentTab.POSTS,
+    val content: PublicContentState = PublicContentState(),
+    val mutualConnections: MutualConnections? = null,
+    // Moderation — populated only on another user's profile (Milestone D). Drives the
+    // overflow menu's blocked/muted state; [isModerationActionInProgress] disables it
+    // while a block/mute/report is in flight.
+    val moderationStatus: ModerationStatus = ModerationStatus(),
+    val isModerationActionInProgress: Boolean = false,
+    // A one-shot flag set after a successful report so the UI can confirm and dismiss.
+    val reportSubmitted: Boolean = false,
 ) {
     /** No cached user and not loading — nothing to render yet. */
     val isEmpty: Boolean get() = user == null && !isLoading
 
     /** Whether a follow/unfollow affordance should be shown (another user, status known). */
     val canFollow: Boolean get() = followStatus != FollowStatus.SELF
+
+    /** Whether the moderation overflow menu should be offered (another user, not yourself). */
+    val canModerate: Boolean get() = user != null && !user.isCurrentUser
 }
 
 /**

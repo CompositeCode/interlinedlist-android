@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import com.google.common.truth.Truth.assertThat
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
+import com.interlinedlist.android.feature.documents.data.SaveOutcome
 import com.interlinedlist.android.feature.documents.ui.editor.DOCUMENT_ID_ARG
 import com.interlinedlist.android.feature.documents.ui.editor.DocumentEditorViewModel
 import kotlinx.coroutines.Dispatchers
@@ -63,9 +64,9 @@ class DocumentEditorViewModelTest {
     }
 
     @Test
-    fun `save persists edits and clears the unsaved flag`() = runTest(dispatcher) {
+    fun `save persists edits via PATCH and clears the unsaved flag`() = runTest(dispatcher) {
         repo.refreshDocumentResult = ApiResult.Success(testDocument("d1", title = "T", content = "orig"))
-        repo.updateResult = ApiResult.Success(testDocument("d1", title = "T", content = "edited"))
+        repo.patchOutcome = SaveOutcome.Success(testDocument("d1", title = "T", content = "edited"))
         val vm = viewModel()
         advanceUntilIdle()
 
@@ -76,13 +77,13 @@ class DocumentEditorViewModelTest {
 
         assertThat(saved).isTrue()
         assertThat(vm.uiState.value.hasUnsavedChanges).isFalse()
-        assertThat(repo.lastUpdate?.content).isEqualTo("edited")
+        assertThat(repo.lastPatch?.content).isEqualTo("edited")
     }
 
     @Test
     fun `save failure surfaces an error and keeps the unsaved flag`() = runTest(dispatcher) {
         repo.refreshDocumentResult = ApiResult.Success(testDocument("d1", content = "orig"))
-        repo.updateResult = ApiResult.Failure(AppError.Server("boom"))
+        repo.patchOutcome = SaveOutcome.Error("InterlinedList is having trouble right now. Try again shortly.")
         val vm = viewModel()
         advanceUntilIdle()
 
@@ -92,6 +93,61 @@ class DocumentEditorViewModelTest {
 
         assertThat(vm.uiState.value.errorMessage).isEqualTo("InterlinedList is having trouble right now. Try again shortly.")
         assertThat(vm.uiState.value.hasUnsavedChanges).isTrue()
+    }
+
+    @Test
+    fun `save conflict surfaces a conflict state and keeps the unsaved edit`() = runTest(dispatcher) {
+        repo.refreshDocumentResult = ApiResult.Success(testDocument("d1", content = "orig"))
+        repo.patchOutcome = SaveOutcome.Conflict("Modified elsewhere")
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.onContentChange("my edit")
+        vm.save()
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.hasConflict).isTrue()
+        assertThat(vm.uiState.value.hasUnsavedChanges).isTrue()
+        assertThat(vm.uiState.value.isSaving).isFalse()
+    }
+
+    @Test
+    fun `reloadForConflict pulls the latest and clears the conflict and local edits`() =
+        runTest(dispatcher) {
+            repo.refreshDocumentResult = ApiResult.Success(testDocument("d1", content = "orig"))
+            repo.patchOutcome = SaveOutcome.Conflict("Modified elsewhere")
+            val vm = viewModel()
+            advanceUntilIdle()
+            vm.onContentChange("my edit")
+            vm.save()
+            advanceUntilIdle()
+            assertThat(vm.uiState.value.hasConflict).isTrue()
+
+            repo.refreshDocumentResult = ApiResult.Success(testDocument("d1", content = "server latest"))
+            vm.reloadForConflict()
+            advanceUntilIdle()
+
+            assertThat(vm.uiState.value.hasConflict).isFalse()
+            assertThat(vm.uiState.value.hasUnsavedChanges).isFalse()
+            assertThat(vm.uiState.value.content).isEqualTo("server latest")
+        }
+
+    @Test
+    fun `save queued shows an offline hint but keeps the doc editable`() = runTest(dispatcher) {
+        repo.refreshDocumentResult = ApiResult.Success(testDocument("d1", content = "orig"))
+        repo.patchOutcome = SaveOutcome.Queued
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.onContentChange("edited offline")
+        var saved = false
+        vm.save { saved = true }
+        advanceUntilIdle()
+
+        // Queued counts as a local save: unsaved flag clears, onSaved fires, offline hint set.
+        assertThat(saved).isTrue()
+        assertThat(vm.uiState.value.isQueuedOffline).isTrue()
+        assertThat(vm.uiState.value.hasUnsavedChanges).isFalse()
     }
 
     @Test
