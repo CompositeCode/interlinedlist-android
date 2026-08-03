@@ -46,6 +46,10 @@ class FakeMessageDao : MessageDao {
         rows.value = rows.value.toMutableMap().apply { remove(id) }
     }
 
+    override suspend fun deleteByAuthorUsername(username: String) {
+        rows.value = rows.value.filterValues { it.authorUsername != username }
+    }
+
     override suspend fun clearFeed() {
         rows.value = rows.value.filterValues { it.parentId != null || it.scheduledAt != null }
     }

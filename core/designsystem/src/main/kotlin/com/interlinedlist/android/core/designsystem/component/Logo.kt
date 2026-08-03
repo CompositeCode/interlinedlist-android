@@ -13,21 +13,24 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import com.interlinedlist.android.core.designsystem.R
-import com.interlinedlist.android.core.designsystem.theme.EmeraldGreen
-import com.interlinedlist.android.core.designsystem.theme.OceanBlue
+import com.interlinedlist.android.core.designsystem.theme.ILGreen
+import com.interlinedlist.android.core.designsystem.theme.ILGreenDark
+import com.interlinedlist.android.core.designsystem.theme.ILTeal
+import com.interlinedlist.android.core.designsystem.theme.ILTealAccent
 import com.interlinedlist.android.core.designsystem.theme.PlayFontFamily
 
 /**
- * The InterlinedList icon mark. Picks the light or dark asset variant to suit
- * the current theme, per the brand rule (light mark on dark surfaces and vice
- * versa). The provided files are used as-is — never recoloured or distorted.
+ * The InterlinedList "Strata" icon mark (the interlinked list ladder). The tri-colour
+ * mark reads on either surface, but on dark the deep teal is lifted to the accent so
+ * the structure stays legible. The vector is the same art shipped on interlinedlist.com;
+ * never recoloured beyond this light/dark pairing or distorted.
  */
 @Composable
 fun InterlinedListLogoMark(
     modifier: Modifier = Modifier,
     darkTheme: Boolean = isSystemInDarkTheme(),
 ) {
-    val markRes = if (darkTheme) R.drawable.il_mark_light else R.drawable.il_mark_dark
+    val markRes = if (darkTheme) R.drawable.il_logo_mark_dark else R.drawable.il_logo_mark
     Image(
         painter = painterResource(markRes),
         contentDescription = "InterlinedList",
@@ -36,9 +39,8 @@ fun InterlinedListLogoMark(
 }
 
 /**
- * The "InterlinedList" wordmark rendered in the brand typeface: Ocean Blue
- * "Interlined" (switching to the theme's on-background colour in dark mode for
- * legibility) + Emerald "List", with the optional tagline.
+ * The "InterlinedList" wordmark in the brand typeface: teal "Interlined" (lifted to the
+ * teal accent on dark surfaces for legibility) + green "List", with an optional tagline.
  */
 @Composable
 fun InterlinedListWordmark(
@@ -46,7 +48,8 @@ fun InterlinedListWordmark(
     showTagline: Boolean = true,
     darkTheme: Boolean = isSystemInDarkTheme(),
 ) {
-    val interlinedColor = if (darkTheme) MaterialTheme.colorScheme.onBackground else OceanBlue
+    val interlinedColor = if (darkTheme) ILTealAccent else ILTeal
+    val listColor = if (darkTheme) ILGreenDark else ILGreen
     Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Row {
             Text(
@@ -61,7 +64,7 @@ fun InterlinedListWordmark(
                 fontFamily = PlayFontFamily,
                 fontWeight = FontWeight.Bold,
                 fontSize = 28.sp,
-                color = EmeraldGreen,
+                color = listColor,
             )
         }
         if (showTagline) {

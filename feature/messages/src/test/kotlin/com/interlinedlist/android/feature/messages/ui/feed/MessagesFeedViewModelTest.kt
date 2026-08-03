@@ -4,9 +4,11 @@ import app.cash.turbine.test
 import com.google.common.truth.Truth.assertThat
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
+import com.interlinedlist.android.feature.messages.domain.CrossPostStatus
 import com.interlinedlist.android.feature.messages.domain.ReportReason
 import com.interlinedlist.android.feature.messages.ui.FakeMessagesRepository
 import com.interlinedlist.android.feature.messages.ui.sampleMessage
+import com.interlinedlist.android.feature.messages.ui.sampleNetwork
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
@@ -284,6 +286,275 @@ class MessagesFeedViewModelTest {
         assertThat(report.reason).isEqualTo(ReportReason.HARASSMENT)
         assertThat(report.detail).isEqualTo("please review")
         assertThat(vm.uiState.value.reportTarget).isNull()
+    }
+
+    @Test
+    fun `edit seeds the sheet and saves the new content marking it edited`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            editResult = ApiResult.Success(
+                sampleMessage(id = "own", content = "updated body", mine = true, editedAt = "2026-07-31T12:00:00Z"),
+            )
+        }
+        repo.emitFeed(listOf(sampleMessage(id = "own", content = "original body", mine = true)))
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.openEdit(sampleMessage(id = "own", content = "original body", mine = true))
+        advanceUntilIdle()
+        // Editor is seeded with the current content.
+        assertThat(vm.uiState.value.editTarget?.id).isEqualTo("own")
+        assertThat(vm.uiState.value.editText).isEqualTo("original body")
+
+        vm.onEditTextChange("updated body")
+        vm.saveEdit()
+        advanceUntilIdle()
+
+        assertThat(repo.lastEdit).isEqualTo("own" to "updated body")
+        // Sheet closed and the feed reflects the edited, marked message.
+        assertThat(vm.uiState.value.editTarget).isNull()
+        val edited = vm.uiState.value.messages.first { it.id == "own" }
+        assertThat(edited.content).isEqualTo("updated body")
+        assertThat(edited.isEdited).isTrue()
+    }
+
+    @Test
+    fun `edit failure keeps the sheet open and surfaces an error`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            editResult = ApiResult.Failure(AppError.Server("nope"))
+        }
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.openEdit(sampleMessage(id = "own", content = "original", mine = true))
+        vm.onEditTextChange("changed")
+        vm.saveEdit()
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertThat(state.editTarget?.id).isEqualTo("own")
+        assertThat(state.isSavingEdit).isFalse()
+        assertThat(state.errorMessage).isNotEmpty()
+    }
+
+    @Test
+    fun `block hides the author's messages from the feed`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository()
+        repo.emitFeed(
+            listOf(
+                sampleMessage(id = "1", authorUsername = "amy"),
+                sampleMessage(id = "2", authorUsername = "bob"),
+            ),
+        )
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.openModeration(sampleMessage(id = "1", authorUsername = "amy"), ModerationAction.BLOCK)
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.moderationTarget?.username).isEqualTo("amy")
+
+        vm.confirmModeration()
+        advanceUntilIdle()
+
+        assertThat(repo.blockedUsernames).containsExactly("amy")
+        assertThat(vm.uiState.value.moderationTarget).isNull()
+        assertThat(vm.uiState.value.messages.map { it.id }).containsExactly("2")
+    }
+
+    @Test
+    fun `block failure surfaces an error and keeps the feed`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            blockResult = ApiResult.Failure(AppError.Server("boom"))
+        }
+        repo.emitFeed(listOf(sampleMessage(id = "1", authorUsername = "amy")))
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.openModeration(sampleMessage(id = "1", authorUsername = "amy"), ModerationAction.BLOCK)
+        vm.confirmModeration()
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.errorMessage).isNotEmpty()
+        assertThat(vm.uiState.value.messages.map { it.id }).containsExactly("1")
+    }
+
+    @Test
+    fun `mute delegates to the repository`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository()
+        repo.emitFeed(listOf(sampleMessage(id = "1", authorUsername = "amy")))
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.openModeration(sampleMessage(id = "1", authorUsername = "amy"), ModerationAction.MUTE)
+        vm.confirmModeration()
+        advanceUntilIdle()
+
+        assertThat(repo.mutedUsernames).containsExactly("amy")
+        assertThat(vm.uiState.value.messages).isEmpty()
+    }
+
+    @Test
+    fun `report user submits the chosen reason and detail`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository()
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.openModeration(sampleMessage(id = "1", authorUsername = "amy"), ModerationAction.REPORT)
+        vm.confirmModeration(ReportReason.HARASSMENT, "abusive")
+        advanceUntilIdle()
+
+        val report = repo.lastReportUser!!
+        assertThat(report.username).isEqualTo("amy")
+        assertThat(report.reason).isEqualTo(ReportReason.HARASSMENT)
+        assertThat(report.detail).isEqualTo("abusive")
+        assertThat(vm.uiState.value.moderationTarget).isNull()
+    }
+
+    // --- cross-posting -----------------------------------------------------
+
+    @Test
+    fun `linked networks are loaded on init`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            linkedNetworksResult = ApiResult.Success(
+                listOf(
+                    sampleNetwork(id = "m1", provider = "mastodon:techhub.social"),
+                    sampleNetwork(id = "l1", provider = "linkedin"),
+                ),
+            )
+        }
+        val vm = MessagesFeedViewModel(repo)
+
+        vm.uiState.test {
+            advanceUntilIdle()
+            val state = expectMostRecentItem()
+            assertThat(state.linkedNetworks.map { it.id }).containsExactly("m1", "l1").inOrder()
+            assertThat(state.hasNoLinkedNetworks).isFalse()
+        }
+    }
+
+    @Test
+    fun `empty linked networks yields the no-networks state`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            linkedNetworksResult = ApiResult.Success(emptyList())
+        }
+        val vm = MessagesFeedViewModel(repo)
+
+        vm.uiState.test {
+            advanceUntilIdle()
+            val state = expectMostRecentItem()
+            assertThat(state.linkedNetworks).isEmpty()
+            assertThat(state.hasNoLinkedNetworks).isTrue()
+        }
+    }
+
+    @Test
+    fun `toggling a network selects then deselects it`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            linkedNetworksResult = ApiResult.Success(
+                listOf(sampleNetwork(id = "l1", provider = "linkedin")),
+            )
+        }
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.onToggleNetwork("l1")
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.selectedNetworkIds).containsExactly("l1")
+
+        vm.onToggleNetwork("l1")
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.selectedNetworkIds).isEmpty()
+    }
+
+    @Test
+    fun `post includes the selected networks as cross-post targets`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            linkedNetworksResult = ApiResult.Success(
+                listOf(
+                    sampleNetwork(id = "m1", provider = "mastodon:techhub.social"),
+                    sampleNetwork(id = "l1", provider = "linkedin"),
+                    sampleNetwork(id = "b1", provider = "bluesky"),
+                ),
+            )
+            createResult = ApiResult.Success(sampleMessage(id = "new"))
+        }
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.openCompose()
+        vm.onComposeTextChange("hello networks")
+        vm.onToggleNetwork("m1")
+        vm.onToggleNetwork("l1")
+        advanceUntilIdle()
+        vm.post()
+        advanceUntilIdle()
+
+        val crossPost = repo.lastCreate!!.crossPost
+        assertThat(crossPost.mastodonProviderIds).containsExactly("m1")
+        assertThat(crossPost.linkedIn).isTrue()
+        // Bluesky was never toggled.
+        assertThat(crossPost.bluesky).isFalse()
+        assertThat(crossPost.twitter).isFalse()
+        // Selection is cleared after a successful post.
+        assertThat(vm.uiState.value.selectedNetworkIds).isEmpty()
+    }
+
+    @Test
+    fun `post with no targets sends an empty selection`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            linkedNetworksResult = ApiResult.Success(
+                listOf(sampleNetwork(id = "l1", provider = "linkedin")),
+            )
+            createResult = ApiResult.Success(sampleMessage(id = "new"))
+        }
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.openCompose()
+        vm.onComposeTextChange("just il")
+        vm.post()
+        advanceUntilIdle()
+
+        assertThat(repo.lastCreate!!.crossPost.hasTargets).isFalse()
+    }
+
+    @Test
+    fun `a successful cross-post surfaces the per-network statuses`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            linkedNetworksResult = ApiResult.Success(
+                listOf(sampleNetwork(id = "l1", provider = "linkedin")),
+            )
+            createResult = ApiResult.Success(sampleMessage(id = "new"))
+            createCrossPosts = listOf(
+                CrossPostStatus(provider = "linkedin", status = "success", url = "https://li/1"),
+            )
+        }
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.openCompose()
+        vm.onComposeTextChange("cross-posted")
+        vm.onToggleNetwork("l1")
+        advanceUntilIdle()
+        vm.post()
+        advanceUntilIdle()
+
+        val statuses = vm.uiState.value.crossPostStatuses
+        assertThat(statuses.map { it.provider }).containsExactly("linkedin")
+        assertThat(statuses.first().isSuccess).isTrue()
+
+        vm.dismissCrossPostStatuses()
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.crossPostStatuses).isEmpty()
     }
 
     @Test

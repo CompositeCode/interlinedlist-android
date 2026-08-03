@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Near-black splash background in dark mode, matching the app's dark surface. -->
+    <color name="il_splash_background">#121317</color>
+</resources>

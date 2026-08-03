@@ -29,6 +29,19 @@ class NotificationsResponseTest {
     }
 
     @Test
+    fun `reads the list from the live items key`() {
+        // The production API returns `{ "unreadCount": N, "items": [...] }`. Regression
+        // guard: this key was previously unmapped, silently emptying the notifications
+        // feed and the background push poll.
+        val response = json.decodeFromString(
+            NotificationsResponse.serializer(),
+            """{ "unreadCount": 3, "items": [ { "id": "x" }, { "id": "y" } ] }""",
+        )
+        assertThat(response.items.map { it.id }).containsExactly("x", "y").inOrder()
+        assertThat(response.unreadCount).isEqualTo(3)
+    }
+
+    @Test
     fun `an empty body decodes with sane defaults`() {
         val response = json.decodeFromString(NotificationsResponse.serializer(), "{}")
         assertThat(response.items).isEmpty()

@@ -8,10 +8,15 @@ import com.interlinedlist.android.feature.messages.data.local.toDomain
 import com.interlinedlist.android.feature.messages.data.local.toEntity
 import com.interlinedlist.android.feature.messages.data.remote.MessagesApi
 import com.interlinedlist.android.feature.messages.data.remote.dto.CreateMessageRequest
+import com.interlinedlist.android.feature.messages.data.remote.dto.EditMessageRequest
 import com.interlinedlist.android.feature.messages.data.remote.dto.PaginationDto
 import com.interlinedlist.android.feature.messages.data.remote.dto.ReportRequest
+import com.interlinedlist.android.feature.messages.data.remote.dto.UserReportRequest
 import com.interlinedlist.android.feature.messages.data.remote.dto.toDomain
 import com.interlinedlist.android.core.network.error.safeApiCall
+import com.interlinedlist.android.feature.messages.domain.CreatedMessage
+import com.interlinedlist.android.feature.messages.domain.CrossPostSelection
+import com.interlinedlist.android.feature.messages.domain.LinkedNetwork
 import com.interlinedlist.android.feature.messages.domain.Message
 import com.interlinedlist.android.feature.messages.domain.ReportReason
 import kotlinx.coroutines.flow.Flow
@@ -81,16 +86,23 @@ class DefaultMessagesRepository @Inject constructor(
         imageUrls: List<String>,
         videoUrls: List<String>,
         scheduledAt: String?,
-    ): ApiResult<Message> = withContext(dispatchers.io) {
+        crossPost: CrossPostSelection,
+    ): ApiResult<CreatedMessage> = withContext(dispatchers.io) {
         val request = CreateMessageRequest(
             content = content,
             imageUrls = imageUrls.ifEmpty { null },
             videoUrls = videoUrls.ifEmpty { null },
             scheduledAt = scheduledAt,
+            // Encode cross-post targets per the create schema. explicitNulls=false
+            // drops these when empty/false, so a plain post keeps its original body.
+            mastodonProviderIds = crossPost.mastodonProviderIds.ifEmpty { null },
+            crossPostToBluesky = crossPost.bluesky.takeIf { it },
+            crossPostToLinkedIn = crossPost.linkedIn.takeIf { it },
+            crossPostToTwitter = crossPost.twitter.takeIf { it },
         )
         when (val result = safeCall { api.createMessage(request) }) {
             is ApiResult.Success -> {
-                val message = result.data.message.toDomain(currentUserId())
+                val message = result.data.data.toDomain(currentUserId())
                 if (message.scheduledAt != null) {
                     // Scheduled messages are cached in the scheduled view, not the feed.
                     messageDao.upsert(message.toEntity(feedOrder = 0L))
@@ -99,8 +111,16 @@ class DefaultMessagesRepository @Inject constructor(
                     val topOrder = (messageDao.maxFeedOrder() ?: 0L)
                     messageDao.upsert(message.toEntity(feedOrder = topOrder - 1L))
                 }
-                ApiResult.Success(message)
+                val crossPosts = result.data.crossPosts.mapNotNull { it.toDomainOrNull() }
+                ApiResult.Success(CreatedMessage(message = message, crossPosts = crossPosts))
             }
+            is ApiResult.Failure -> result
+        }
+    }
+
+    override suspend fun getLinkedNetworks(): ApiResult<List<LinkedNetwork>> = withContext(dispatchers.io) {
+        when (val result = safeCall { api.getIdentities() }) {
+            is ApiResult.Success -> ApiResult.Success(result.data.identities.map { it.toDomain() })
             is ApiResult.Failure -> result
         }
     }
@@ -153,7 +173,7 @@ class DefaultMessagesRepository @Inject constructor(
                 api.createMessage(CreateMessageRequest(content = content, parentId = parentId))
             }) {
                 is ApiResult.Success -> {
-                    val reply = result.data.message.toDomain(currentUserId()).copy(parentId = parentId)
+                    val reply = result.data.data.toDomain(currentUserId()).copy(parentId = parentId)
                     val base = (messageDao.maxFeedOrder() ?: 0L) + 1L
                     messageDao.upsert(reply.toEntity(feedOrder = base))
                     // Reflect the new reply count on the parent if it is cached.
@@ -195,6 +215,33 @@ class DefaultMessagesRepository @Inject constructor(
         }
     }
 
+    override suspend fun editMessage(messageId: String, content: String): ApiResult<Message> =
+        withContext(dispatchers.io) {
+            // Optimistically apply the new content + an "edited" marker so the feed
+            // and detail react immediately; roll back the whole row on failure.
+            val previous = currentEntity(messageId)
+            val editedAt = nowIso()
+            if (previous != null) {
+                messageDao.upsert(previous.copy(content = content, editedAt = editedAt))
+            }
+            when (val result = safeCall { api.editMessage(messageId, EditMessageRequest(content = content)) }) {
+                is ApiResult.Success -> {
+                    val updated = (previous?.copy(content = content, editedAt = editedAt))?.toDomain()
+                        ?: Message(
+                            id = messageId, content = content, authorId = "", authorUsername = "",
+                            authorDisplayName = null, authorAvatarUrl = null, createdAt = null,
+                            digCount = 0, replyCount = 0, dugByMe = false, parentId = null,
+                            mine = true, editedAt = editedAt,
+                        )
+                    ApiResult.Success(updated)
+                }
+                is ApiResult.Failure -> {
+                    if (previous != null) messageDao.upsert(previous)
+                    result
+                }
+            }
+        }
+
     override suspend fun refreshScheduled(): ApiResult<Unit> = withContext(dispatchers.io) {
         when (val result = safeCall { api.getScheduled() }) {
             is ApiResult.Success -> {
@@ -228,6 +275,44 @@ class DefaultMessagesRepository @Inject constructor(
             api.report(
                 id = messageId,
                 body = ReportRequest(reason = reason.wireValue, detail = detail?.takeIf { it.isNotBlank() }),
+            )
+        }
+    }
+
+    override suspend fun blockUser(username: String): ApiResult<Unit> = withContext(dispatchers.io) {
+        when (val result = safeCall { api.blockUser(username) }) {
+            is ApiResult.Success -> {
+                // Hide the blocked author's messages from the local cache.
+                messageDao.deleteByAuthorUsername(username)
+                ApiResult.Success(Unit)
+            }
+            is ApiResult.Failure -> result
+        }
+    }
+
+    override suspend fun muteUser(username: String): ApiResult<Unit> = withContext(dispatchers.io) {
+        when (val result = safeCall { api.muteUser(username) }) {
+            is ApiResult.Success -> {
+                // Hide the muted author's messages from the local cache.
+                messageDao.deleteByAuthorUsername(username)
+                ApiResult.Success(Unit)
+            }
+            is ApiResult.Failure -> result
+        }
+    }
+
+    override suspend fun reportUser(
+        username: String,
+        reason: ReportReason,
+        detail: String?,
+    ): ApiResult<Unit> = withContext(dispatchers.io) {
+        safeCall {
+            api.reportUser(
+                username = username,
+                body = UserReportRequest(
+                    reason = reason.wireValue,
+                    detail = detail?.takeIf { it.isNotBlank() },
+                ),
             )
         }
     }
@@ -283,6 +368,9 @@ class DefaultMessagesRepository @Inject constructor(
         safeApiCall(json, block)
 
     private fun currentUserId(): String? = sessionStore.userId
+
+    /** Current instant as an ISO-8601 string, for the optimistic "edited" marker. */
+    private fun nowIso(): String = java.time.Instant.now().toString()
 
     /** Shared multipart upload path; extracts the hosted URL from the response. */
     private suspend fun upload(

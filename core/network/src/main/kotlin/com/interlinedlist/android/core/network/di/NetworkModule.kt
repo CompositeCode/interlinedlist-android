@@ -24,6 +24,10 @@ object NetworkModule {
     fun provideJson(): Json = Json {
         ignoreUnknownKeys = true
         explicitNulls = false
+        // The API sends explicit `null` for many optional fields (e.g. imageUrls,
+        // videoUrls on a freshly created message). Coerce those to the property's
+        // default instead of failing to deserialize a non-nullable type.
+        coerceInputValues = true
     }
 
     @Provides

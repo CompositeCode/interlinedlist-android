@@ -34,6 +34,8 @@ data class MessageEntity(
     val linkPreview: LinkPreview? = null,
     /** Future send time for a scheduled message; null for a normal message. */
     val scheduledAt: String? = null,
+    /** Last-edited instant; null when the message has not been edited. */
+    val editedAt: String? = null,
 )
 
 fun MessageEntity.toDomain(): Message = Message(
@@ -53,6 +55,7 @@ fun MessageEntity.toDomain(): Message = Message(
     videoUrls = videoUrls,
     linkPreview = linkPreview,
     scheduledAt = scheduledAt,
+    editedAt = editedAt,
 )
 
 fun Message.toEntity(feedOrder: Long): MessageEntity = MessageEntity(
@@ -73,4 +76,5 @@ fun Message.toEntity(feedOrder: Long): MessageEntity = MessageEntity(
     videoUrls = videoUrls,
     linkPreview = linkPreview,
     scheduledAt = scheduledAt,
+    editedAt = editedAt,
 )

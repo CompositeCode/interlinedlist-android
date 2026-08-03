@@ -34,12 +34,20 @@ data class Message(
      * normal message. Present on rows returned by the scheduled endpoint.
      */
     val scheduledAt: String? = null,
+    /**
+     * ISO-8601 last-edited instant for a message whose content was changed after
+     * it was posted; null for an un-edited message. Drives the "edited" indicator.
+     */
+    val editedAt: String? = null,
 ) {
     /** Best available display label for the author. */
     val authorLabel: String get() = authorDisplayName?.takeIf { it.isNotBlank() } ?: authorUsername
 
     /** True when any image or video media is attached. */
     val hasMedia: Boolean get() = imageUrls.isNotEmpty() || videoUrls.isNotEmpty()
+
+    /** True when the message has been edited since it was posted. */
+    val isEdited: Boolean get() = editedAt != null
 }
 
 /**

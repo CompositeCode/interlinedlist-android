@@ -17,7 +17,12 @@ data class MessageDto(
     val id: String,
     val content: String = "",
     val author: MessageAuthorDto? = null,
+    /** The create/detail endpoints key the author sub-object as `user` rather than
+     *  `author`; [toDomain] falls back to whichever the payload used. */
+    val user: MessageAuthorDto? = null,
     val createdAt: String? = null,
+    /** Last-modified instant; when it differs from [createdAt] the message was edited. */
+    val updatedAt: String? = null,
     val digCount: Int = 0,
     val replyCount: Int = 0,
     val dugByCurrentUser: Boolean = false,
@@ -59,24 +64,31 @@ data class LinkMetadataDto(
  * Maps the wire model into the domain [Message]. [currentUserId] lets us flag
  * the caller's own messages (for delete) even when the API omits `isOwn`.
  */
-fun MessageDto.toDomain(currentUserId: String?): Message = Message(
-    id = id,
-    content = content,
-    authorId = author?.id.orEmpty(),
-    authorUsername = author?.username.orEmpty(),
-    authorDisplayName = author?.displayName,
-    authorAvatarUrl = author?.avatar,
-    createdAt = createdAt,
-    digCount = digCount,
-    replyCount = replyCount,
-    dugByMe = dugByCurrentUser,
-    parentId = parentId,
-    mine = isOwn || (currentUserId != null && author?.id == currentUserId),
-    imageUrls = imageUrls,
-    videoUrls = videoUrls,
-    linkPreview = linkMetadata?.toDomain(),
-    scheduledAt = scheduledAt,
-)
+fun MessageDto.toDomain(currentUserId: String?): Message {
+    // The API is inconsistent about the author key: the feed uses `author`, the
+    // create/detail endpoints use `user`. Prefer whichever the payload populated.
+    val person = author ?: user
+    return Message(
+        id = id,
+        content = content,
+        authorId = person?.id.orEmpty(),
+        authorUsername = person?.username.orEmpty(),
+        authorDisplayName = person?.displayName,
+        authorAvatarUrl = person?.avatar,
+        createdAt = createdAt,
+        // Treat the message as edited only when it was modified after creation.
+        editedAt = updatedAt?.takeIf { createdAt == null || it != createdAt },
+        digCount = digCount,
+        replyCount = replyCount,
+        dugByMe = dugByCurrentUser,
+        parentId = parentId,
+        mine = isOwn || (currentUserId != null && person?.id == currentUserId),
+        imageUrls = imageUrls,
+        videoUrls = videoUrls,
+        linkPreview = linkMetadata?.toDomain(),
+        scheduledAt = scheduledAt,
+    )
+}
 
 /** Maps link-preview metadata into the domain, dropping empty previews. */
 fun LinkMetadataDto.toDomain(): LinkPreview? {

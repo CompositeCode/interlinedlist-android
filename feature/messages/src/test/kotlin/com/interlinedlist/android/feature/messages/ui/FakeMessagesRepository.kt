@@ -3,6 +3,10 @@ package com.interlinedlist.android.feature.messages.ui
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
 import com.interlinedlist.android.feature.messages.data.MessagesRepository
+import com.interlinedlist.android.feature.messages.domain.CreatedMessage
+import com.interlinedlist.android.feature.messages.domain.CrossPostSelection
+import com.interlinedlist.android.feature.messages.domain.CrossPostStatus
+import com.interlinedlist.android.feature.messages.domain.LinkedNetwork
 import com.interlinedlist.android.feature.messages.domain.Message
 import com.interlinedlist.android.feature.messages.domain.ReportReason
 import kotlinx.coroutines.flow.Flow
@@ -24,11 +28,18 @@ class FakeMessagesRepository : MessagesRepository {
     var refreshResult: ApiResult<Boolean> = ApiResult.Success(false)
     var loadMoreResult: ApiResult<Boolean> = ApiResult.Success(false)
     var createResult: ApiResult<Message>? = null
+    /** Cross-post statuses returned alongside a successful [createResult]. */
+    var createCrossPosts: List<CrossPostStatus> = emptyList()
+    var linkedNetworksResult: ApiResult<List<LinkedNetwork>> = ApiResult.Success(emptyList())
     var fetchResult: ApiResult<Message>? = null
     var refreshRepliesResult: ApiResult<Unit> = ApiResult.Success(Unit)
     var postReplyResult: ApiResult<Message>? = null
     var setDugResult: ApiResult<Unit> = ApiResult.Success(Unit)
     var deleteResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var editResult: ApiResult<Message>? = null
+    var blockResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var muteResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var reportUserResult: ApiResult<Unit> = ApiResult.Success(Unit)
     var searchResult: ApiResult<List<Message>> = ApiResult.Success(emptyList())
     var uploadImageResult: ApiResult<String> = ApiResult.Success("https://cdn/image.png")
     var uploadVideoResult: ApiResult<String> = ApiResult.Success("https://cdn/video.mp4")
@@ -48,6 +59,10 @@ class FakeMessagesRepository : MessagesRepository {
     var cancelledScheduledIds = mutableListOf<String>()
     var lastReport: ReportArgs? = null
     var metadataFetchedIds = mutableListOf<String>()
+    var lastEdit: Pair<String, String>? = null
+    var blockedUsernames = mutableListOf<String>()
+    var mutedUsernames = mutableListOf<String>()
+    var lastReportUser: ReportUserArgs? = null
 
     /** Snapshot of the arguments passed to the last [createMessage] call. */
     data class CreateArgs(
@@ -55,10 +70,14 @@ class FakeMessagesRepository : MessagesRepository {
         val imageUrls: List<String>,
         val videoUrls: List<String>,
         val scheduledAt: String?,
+        val crossPost: CrossPostSelection = CrossPostSelection.NONE,
     )
 
     /** Snapshot of the arguments passed to the last [report] call. */
     data class ReportArgs(val messageId: String, val reason: ReportReason, val detail: String?)
+
+    /** Snapshot of the arguments passed to the last [reportUser] call. */
+    data class ReportUserArgs(val username: String, val reason: ReportReason, val detail: String?)
 
     fun emitFeed(messages: List<Message>) { feed.value = messages }
     fun emitReplies(parentId: String, messages: List<Message>) {
@@ -92,10 +111,17 @@ class FakeMessagesRepository : MessagesRepository {
         imageUrls: List<String>,
         videoUrls: List<String>,
         scheduledAt: String?,
-    ): ApiResult<Message> {
-        lastCreate = CreateArgs(content, imageUrls, videoUrls, scheduledAt)
-        return createResult ?: ApiResult.Failure(AppError.Unknown("createResult not set"))
+        crossPost: CrossPostSelection,
+    ): ApiResult<CreatedMessage> {
+        lastCreate = CreateArgs(content, imageUrls, videoUrls, scheduledAt, crossPost)
+        return when (val result = createResult) {
+            is ApiResult.Success -> ApiResult.Success(CreatedMessage(result.data, createCrossPosts))
+            is ApiResult.Failure -> result
+            null -> ApiResult.Failure(AppError.Unknown("createResult not set"))
+        }
     }
+
+    override suspend fun getLinkedNetworks(): ApiResult<List<LinkedNetwork>> = linkedNetworksResult
 
     override suspend fun uploadImage(bytes: ByteArray, fileName: String, mimeType: String): ApiResult<String> {
         uploadedImages++
@@ -125,6 +151,17 @@ class FakeMessagesRepository : MessagesRepository {
         return deleteResult
     }
 
+    override suspend fun editMessage(messageId: String, content: String): ApiResult<Message> {
+        lastEdit = messageId to content
+        val result = editResult ?: ApiResult.Failure(AppError.Unknown("editResult not set"))
+        if (result is ApiResult.Success) {
+            // Reflect the edit into the observable feed/message so the UI re-emits.
+            feed.value = feed.value.map { if (it.id == messageId) result.data else it }
+            single.value = single.value + (messageId to result.data)
+        }
+        return result
+    }
+
     override suspend fun refreshScheduled(): ApiResult<Unit> {
         refreshScheduledCount++
         return refreshScheduledResult
@@ -140,6 +177,30 @@ class FakeMessagesRepository : MessagesRepository {
         return reportResult
     }
 
+    override suspend fun blockUser(username: String): ApiResult<Unit> {
+        blockedUsernames += username
+        val result = blockResult
+        if (result is ApiResult.Success) {
+            // Mirror the repository's hide-on-block behaviour for ViewModel tests.
+            feed.value = feed.value.filterNot { it.authorUsername == username }
+        }
+        return result
+    }
+
+    override suspend fun muteUser(username: String): ApiResult<Unit> {
+        mutedUsernames += username
+        val result = muteResult
+        if (result is ApiResult.Success) {
+            feed.value = feed.value.filterNot { it.authorUsername == username }
+        }
+        return result
+    }
+
+    override suspend fun reportUser(username: String, reason: ReportReason, detail: String?): ApiResult<Unit> {
+        lastReportUser = ReportUserArgs(username, reason, detail)
+        return reportUserResult
+    }
+
     override suspend fun fetchMetadata(messageId: String): ApiResult<Message> {
         metadataFetchedIds += messageId
         return metadataResult ?: ApiResult.Failure(AppError.Unknown("metadataResult not set"))
@@ -147,6 +208,17 @@ class FakeMessagesRepository : MessagesRepository {
 
     override suspend fun search(query: String): ApiResult<List<Message>> = searchResult
 }
+
+/** Builds a sample [LinkedNetwork] for tests. */
+fun sampleNetwork(
+    id: String,
+    provider: String,
+    providerUsername: String = "handle",
+) = LinkedNetwork(
+    id = id,
+    provider = provider,
+    providerUsername = providerUsername,
+)
 
 /** Builds a sample [Message] for tests. */
 fun sampleMessage(
@@ -160,11 +232,13 @@ fun sampleMessage(
     imageUrls: List<String> = emptyList(),
     videoUrls: List<String> = emptyList(),
     scheduledAt: String? = null,
+    authorUsername: String = "adron",
+    editedAt: String? = null,
 ) = Message(
     id = id,
     content = content,
     authorId = "u1",
-    authorUsername = "adron",
+    authorUsername = authorUsername,
     authorDisplayName = "Adron",
     authorAvatarUrl = null,
     createdAt = null,
@@ -176,4 +250,5 @@ fun sampleMessage(
     imageUrls = imageUrls,
     videoUrls = videoUrls,
     scheduledAt = scheduledAt,
+    editedAt = editedAt,
 )

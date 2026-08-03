@@ -4,6 +4,8 @@ import com.google.common.truth.Truth.assertThat
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
 import com.interlinedlist.android.feature.messages.data.remote.MessagesApi
+import com.interlinedlist.android.feature.messages.domain.CrossPostSelection
+import com.interlinedlist.android.feature.messages.domain.NetworkProvider
 import com.interlinedlist.android.feature.messages.domain.ReportReason
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -23,7 +25,13 @@ import retrofit2.Retrofit
 class DefaultMessagesRepositoryTest {
 
     private val dispatcher = StandardTestDispatcher()
-    private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
+    // Mirrors the production Json (see core:network NetworkModule): coerce explicit
+    // nulls (e.g. `crossPosts: null`) to the property's default rather than failing.
+    private val json = Json {
+        ignoreUnknownKeys = true
+        explicitNulls = false
+        coerceInputValues = true
+    }
 
     private lateinit var server: MockWebServer
     private lateinit var api: MessagesApi
@@ -130,17 +138,20 @@ class DefaultMessagesRepositoryTest {
             """{ "data": [ { "id": "old", "content": "old" } ],
                 "pagination": { "hasMore": false } }""",
         )
+        // The create endpoint returns the new message under `data` (and keys the
+        // author sub-object as `user`); `message` is a status string.
         enqueueJson(
             201,
-            """{ "message": { "id": "new", "content": "brand new",
-                "author": { "id": "me", "username": "me" } } }""",
+            """{ "message": "Message created successfully",
+                "data": { "id": "new", "content": "brand new",
+                    "user": { "id": "me", "username": "me" } } }""",
         )
         val repo = repository()
         repo.refreshFeed()
 
         val result = repo.createMessage("brand new")
 
-        assertThat((result as ApiResult.Success).data.id).isEqualTo("new")
+        assertThat((result as ApiResult.Success).data.message.id).isEqualTo("new")
         val ids = repo.observeFeed().first().map { it.id }
         assertThat(ids.first()).isEqualTo("new")
     }
@@ -210,7 +221,8 @@ class DefaultMessagesRepositoryTest {
         )
         enqueueJson(
             201,
-            """{ "message": { "id": "r", "content": "a reply", "author": { "id": "me" } } }""",
+            """{ "message": "Message created successfully",
+                "data": { "id": "r", "content": "a reply", "user": { "id": "me" } } }""",
         )
         val repo = repository()
         repo.refreshFeed()
@@ -274,8 +286,9 @@ class DefaultMessagesRepositoryTest {
     fun `createMessage with media sends the attached urls`() = runTest(dispatcher) {
         enqueueJson(
             201,
-            """{ "message": { "id": "m1", "content": "with media",
-                "imageUrls": ["https://cdn/a.png"] } }""",
+            """{ "message": "Message created successfully",
+                "data": { "id": "m1", "content": "with media",
+                    "imageUrls": ["https://cdn/a.png"] } }""",
         )
         val repo = repository()
 
@@ -284,7 +297,7 @@ class DefaultMessagesRepositoryTest {
             imageUrls = listOf("https://cdn/a.png"),
         )
 
-        assertThat((result as ApiResult.Success).data.imageUrls).containsExactly("https://cdn/a.png")
+        assertThat((result as ApiResult.Success).data.message.imageUrls).containsExactly("https://cdn/a.png")
         val body = server.takeRequest().body.readUtf8()
         assertThat(body).contains("https://cdn/a.png")
         assertThat(body).contains("imageUrls")
@@ -294,14 +307,15 @@ class DefaultMessagesRepositoryTest {
     fun `createMessage scheduled is cached in the scheduled view not the feed`() = runTest(dispatcher) {
         enqueueJson(
             201,
-            """{ "message": { "id": "sch1", "content": "later",
-                "scheduledAt": "2026-07-19T09:00:00Z" } }""",
+            """{ "message": "Message created successfully",
+                "data": { "id": "sch1", "content": "later",
+                    "scheduledAt": "2026-07-19T09:00:00Z" } }""",
         )
         val repo = repository()
 
         val result = repo.createMessage(content = "later", scheduledAt = "2026-07-19T09:00:00Z")
 
-        assertThat((result as ApiResult.Success).data.scheduledAt).isEqualTo("2026-07-19T09:00:00Z")
+        assertThat((result as ApiResult.Success).data.message.scheduledAt).isEqualTo("2026-07-19T09:00:00Z")
         assertThat(repo.observeFeed().first()).isEmpty()
         assertThat(repo.observeScheduled().first().map { it.id }).containsExactly("sch1")
     }
@@ -361,6 +375,276 @@ class DefaultMessagesRepositoryTest {
 
         val body = server.takeRequest().body.readUtf8()
         assertThat(body).doesNotContain("detail")
+    }
+
+    @Test
+    fun `editMessage PATCHes the content and updates the cached message`() = runTest(dispatcher) {
+        enqueueJson(
+            200,
+            """{ "data": [ { "id": "1", "content": "original", "author": { "id": "me", "username": "me" } } ],
+                "pagination": { "hasMore": false } }""",
+        )
+        enqueueJson(200, "") // PATCH response body is not modelled; a 2xx is success.
+        val repo = repository()
+        repo.refreshFeed()
+
+        val result = repo.editMessage("1", content = "edited body")
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        assertThat((result as ApiResult.Success).data.content).isEqualTo("edited body")
+        // The cache reflects the new content and now carries an "edited" marker.
+        val cached = repo.observeMessage("1").first()
+        assertThat(cached?.content).isEqualTo("edited body")
+        assertThat(cached?.isEdited).isTrue()
+
+        server.takeRequest() // the refresh GET
+        val patch = server.takeRequest()
+        assertThat(patch.method).isEqualTo("PATCH")
+        assertThat(patch.path).contains("api/messages/1")
+        assertThat(patch.body.readUtf8()).contains("\"content\":\"edited body\"")
+    }
+
+    @Test
+    fun `editMessage rolls back the cached content on failure`() = runTest(dispatcher) {
+        enqueueJson(
+            200,
+            """{ "data": [ { "id": "1", "content": "original", "author": { "id": "me", "username": "me" } } ],
+                "pagination": { "hasMore": false } }""",
+        )
+        enqueueJson(500, """{ "error": "boom" }""")
+        val repo = repository()
+        repo.refreshFeed()
+
+        val result = repo.editMessage("1", content = "will not stick")
+
+        assertThat(result).isInstanceOf(ApiResult.Failure::class.java)
+        val cached = repo.observeMessage("1").first()
+        assertThat(cached?.content).isEqualTo("original")
+        assertThat(cached?.isEdited).isFalse()
+    }
+
+    @Test
+    fun `blockUser posts and hides the author's messages from the feed`() = runTest(dispatcher) {
+        enqueueJson(
+            200,
+            """{ "data": [
+                  { "id": "1", "content": "by amy", "author": { "id": "a", "username": "amy" } },
+                  { "id": "2", "content": "by bob", "author": { "id": "b", "username": "bob" } }
+                ], "pagination": { "hasMore": false } }""",
+        )
+        enqueueJson(201, "")
+        val repo = repository()
+        repo.refreshFeed()
+
+        val result = repo.blockUser("amy")
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        val request = server.let { it.takeRequest(); it.takeRequest() }
+        assertThat(request.method).isEqualTo("POST")
+        assertThat(request.path).contains("api/users/amy/block")
+        // Amy's message is gone; bob's remains.
+        assertThat(repo.observeFeed().first().map { it.id }).containsExactly("2")
+    }
+
+    @Test
+    fun `muteUser posts and hides the author's messages from the feed`() = runTest(dispatcher) {
+        enqueueJson(
+            200,
+            """{ "data": [
+                  { "id": "1", "content": "by amy", "author": { "id": "a", "username": "amy" } }
+                ], "pagination": { "hasMore": false } }""",
+        )
+        enqueueJson(201, "")
+        val repo = repository()
+        repo.refreshFeed()
+
+        val result = repo.muteUser("amy")
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        server.takeRequest()
+        assertThat(server.takeRequest().path).contains("api/users/amy/mute")
+        assertThat(repo.observeFeed().first()).isEmpty()
+    }
+
+    @Test
+    fun `blockUser failure leaves the feed intact`() = runTest(dispatcher) {
+        enqueueJson(
+            200,
+            """{ "data": [
+                  { "id": "1", "content": "by amy", "author": { "id": "a", "username": "amy" } }
+                ], "pagination": { "hasMore": false } }""",
+        )
+        enqueueJson(500, """{ "error": "boom" }""")
+        val repo = repository()
+        repo.refreshFeed()
+
+        val result = repo.blockUser("amy")
+
+        assertThat(result).isInstanceOf(ApiResult.Failure::class.java)
+        assertThat(repo.observeFeed().first().map { it.id }).containsExactly("1")
+    }
+
+    @Test
+    fun `reportUser posts the reason and detail to the user report endpoint`() = runTest(dispatcher) {
+        enqueueJson(201, "")
+        val repo = repository()
+
+        val result = repo.reportUser("amy", ReportReason.HARASSMENT, detail = "abusive dms")
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        val request = server.takeRequest()
+        assertThat(request.path).contains("api/users/amy/report")
+        val body = request.body.readUtf8()
+        assertThat(body).contains("\"reason\":\"harassment\"")
+        assertThat(body).contains("abusive dms")
+    }
+
+    @Test
+    fun `reportUser omits blank detail`() = runTest(dispatcher) {
+        enqueueJson(201, "")
+        val repo = repository()
+
+        repo.reportUser("amy", ReportReason.OTHER, detail = "   ")
+
+        val body = server.takeRequest().body.readUtf8()
+        assertThat(body).doesNotContain("detail")
+    }
+
+    // --- cross-posting -----------------------------------------------------
+
+    @Test
+    fun `getLinkedNetworks parses varied providers`() = runTest(dispatcher) {
+        enqueueJson(
+            200,
+            """
+            { "identities": [
+                { "id": "m1", "provider": "mastodon:techhub.social",
+                  "providerUsername": "crew@techhub.social",
+                  "profileUrl": "https://techhub.social/@crew", "avatarUrl": null,
+                  "connectedAt": "2026-04-07T16:35:32.476Z", "lastVerifiedAt": null },
+                { "id": "l1", "provider": "linkedin", "providerUsername": "Adron Hall" },
+                { "id": "t1", "provider": "twitter", "providerUsername": "interlinedlist" },
+                { "id": "b1", "provider": "bluesky", "providerUsername": "il.bsky.social" }
+            ] }
+            """.trimIndent(),
+        )
+        val repo = repository()
+
+        val result = repo.getLinkedNetworks()
+
+        val networks = (result as ApiResult.Success).data
+        assertThat(networks.map { it.id }).containsExactly("m1", "l1", "t1", "b1").inOrder()
+        assertThat(networks.map { it.networkProvider }).containsExactly(
+            NetworkProvider.MASTODON,
+            NetworkProvider.LINKEDIN,
+            NetworkProvider.TWITTER,
+            NetworkProvider.BLUESKY,
+        ).inOrder()
+        // The mastodon chip label surfaces the instance host.
+        assertThat(networks.first().chipLabel).isEqualTo("techhub.social")
+        assertThat(server.takeRequest().path).contains("api/user/identities")
+    }
+
+    @Test
+    fun `getLinkedNetworks returns empty when nothing is linked`() = runTest(dispatcher) {
+        enqueueJson(200, """{ "identities": [] }""")
+        val repo = repository()
+
+        val result = repo.getLinkedNetworks()
+
+        assertThat((result as ApiResult.Success).data).isEmpty()
+    }
+
+    @Test
+    fun `createMessage with targets sends the cross-post fields`() = runTest(dispatcher) {
+        enqueueJson(
+            201,
+            """{ "message": "Message created successfully",
+                "data": { "id": "x1", "content": "cross-posted" } }""",
+        )
+        val repo = repository()
+
+        val result = repo.createMessage(
+            content = "cross-posted",
+            crossPost = CrossPostSelection(
+                mastodonProviderIds = listOf("m1"),
+                linkedIn = true,
+                twitter = true,
+            ),
+        )
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        val body = server.takeRequest().body.readUtf8()
+        assertThat(body).contains("\"mastodonProviderIds\":[\"m1\"]")
+        assertThat(body).contains("\"crossPostToLinkedIn\":true")
+        assertThat(body).contains("\"crossPostToTwitter\":true")
+        // Unselected networks are omitted entirely (explicitNulls = false).
+        assertThat(body).doesNotContain("crossPostToBluesky")
+    }
+
+    @Test
+    fun `createMessage without targets keeps the original body`() = runTest(dispatcher) {
+        enqueueJson(
+            201,
+            """{ "message": "Message created successfully",
+                "data": { "id": "plain", "content": "just il" } }""",
+        )
+        val repo = repository()
+
+        repo.createMessage(content = "just il")
+
+        val body = server.takeRequest().body.readUtf8()
+        assertThat(body).contains("\"content\":\"just il\"")
+        // None of the cross-post fields are present on a plain post.
+        assertThat(body).doesNotContain("mastodonProviderIds")
+        assertThat(body).doesNotContain("crossPostToBluesky")
+        assertThat(body).doesNotContain("crossPostToLinkedIn")
+        assertThat(body).doesNotContain("crossPostToTwitter")
+    }
+
+    @Test
+    fun `createMessage parses the crossPosts statuses from the response`() = runTest(dispatcher) {
+        enqueueJson(
+            201,
+            """{ "message": "Message created successfully",
+                "data": { "id": "x2", "content": "cross-posted" },
+                "crossPosts": [
+                    { "provider": "linkedin", "status": "success",
+                      "url": "https://linkedin.com/post/1" },
+                    { "provider": "mastodon:techhub.social", "status": "pending" },
+                    { "provider": "twitter", "status": "failed", "error": "rate limited" }
+                ] }""",
+        )
+        val repo = repository()
+
+        val result = repo.createMessage(
+            content = "cross-posted",
+            crossPost = CrossPostSelection(linkedIn = true, twitter = true),
+        )
+
+        val created = (result as ApiResult.Success).data
+        assertThat(created.crossPosts.map { it.provider })
+            .containsExactly("linkedin", "mastodon:techhub.social", "twitter").inOrder()
+        val linkedIn = created.crossPosts.first { it.provider == "linkedin" }
+        assertThat(linkedIn.isSuccess).isTrue()
+        assertThat(linkedIn.url).isEqualTo("https://linkedin.com/post/1")
+        val twitter = created.crossPosts.first { it.provider == "twitter" }
+        assertThat(twitter.isFailed).isTrue()
+        assertThat(twitter.error).isEqualTo("rate limited")
+    }
+
+    @Test
+    fun `createMessage defaults crossPosts to empty when absent`() = runTest(dispatcher) {
+        enqueueJson(
+            201,
+            """{ "message": "Message created successfully",
+                "data": { "id": "x3", "content": "plain" }, "crossPosts": null }""",
+        )
+        val repo = repository()
+
+        val result = repo.createMessage(content = "plain")
+
+        assertThat((result as ApiResult.Success).data.crossPosts).isEmpty()
     }
 
     @Test

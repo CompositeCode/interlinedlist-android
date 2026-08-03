@@ -1,5 +1,6 @@
 package com.interlinedlist.android.feature.notifications.data.remote.dto
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
@@ -12,6 +13,8 @@ import kotlinx.serialization.Serializable
  */
 @Serializable
 data class NotificationsResponse(
+    /** Primary key the live API uses: `{ unreadCount, items: [...] }`. */
+    @SerialName("items") private val itemsKey: List<NotificationDto> = emptyList(),
     val data: List<NotificationDto> = emptyList(),
     /** Alternate key some payloads use for the list. */
     val notifications: List<NotificationDto> = emptyList(),
@@ -19,8 +22,8 @@ data class NotificationsResponse(
     /** Server-provided unread count, when present; otherwise derived from [items]. */
     val unreadCount: Int? = null,
 ) {
-    /** The notification list, whichever key the server populated. */
-    val items: List<NotificationDto> get() = data.ifEmpty { notifications }
+    /** The notification list, whichever key the server populated (`items`, `data`, or `notifications`). */
+    val items: List<NotificationDto> get() = itemsKey.ifEmpty { data.ifEmpty { notifications } }
 }
 
 /** Pagination cursor returned alongside a list of notifications. */
