@@ -7,6 +7,10 @@ import com.interlinedlist.android.feature.notifications.data.NotificationsReposi
 import com.interlinedlist.android.feature.notifications.data.local.NotificationDao
 import com.interlinedlist.android.feature.notifications.data.local.NotificationsDatabase
 import com.interlinedlist.android.feature.notifications.data.remote.NotificationsApi
+import com.interlinedlist.android.feature.notifications.push.LastSeenNotificationStore
+import com.interlinedlist.android.feature.notifications.push.SharedPrefsLastSeenNotificationStore
+import com.interlinedlist.android.feature.notifications.push.SystemNotificationPoster
+import com.interlinedlist.android.feature.notifications.push.SystemNotificationRaiser
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
@@ -26,6 +30,13 @@ abstract class NotificationsRepositoryModule {
     abstract fun bindNotificationsRepository(
         impl: DefaultNotificationsRepository,
     ): NotificationsRepository
+
+    /** Persists the background-poll last-seen marker (see NotificationsPollWorker). */
+    @Binds
+    @Singleton
+    abstract fun bindLastSeenNotificationStore(
+        impl: SharedPrefsLastSeenNotificationStore,
+    ): LastSeenNotificationStore
 }
 
 /**
@@ -56,4 +67,11 @@ object NotificationsDataModule {
 
     @Provides
     fun provideNotificationDao(db: NotificationsDatabase): NotificationDao = db.notificationDao()
+
+    /** The system-tray poster used by the background notification poll worker. */
+    @Provides
+    @Singleton
+    fun provideSystemNotificationRaiser(
+        @ApplicationContext context: Context,
+    ): SystemNotificationRaiser = SystemNotificationPoster(context)
 }

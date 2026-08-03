@@ -22,6 +22,13 @@ interface NotificationsRepository {
     fun observeUnreadCount(): Flow<Int>
 
     /**
+     * Fetches the first page of notifications from the API as domain models WITHOUT
+     * touching the Room cache. Used by the background poll worker, which must not
+     * disturb the offline-first feed the UI observes.
+     */
+    suspend fun fetchLatest(): ApiResult<List<Notification>>
+
+    /**
      * Refreshes the first page from the API and replaces the cached list.
      * Returns whether more pages are available.
      */
