@@ -39,6 +39,13 @@ interface MessageDao {
     @Query("DELETE FROM message WHERE id = :id")
     suspend fun deleteById(id: String)
 
+    /**
+     * Removes every cached message authored by [username] (used to hide a blocked
+     * or muted author's messages from the local feed/replies immediately).
+     */
+    @Query("DELETE FROM message WHERE authorUsername = :username")
+    suspend fun deleteByAuthorUsername(username: String)
+
     /** Clears the top-level feed (used before writing a fresh refresh page). */
     @Query("DELETE FROM message WHERE parentId IS NULL AND scheduledAt IS NULL")
     suspend fun clearFeed()

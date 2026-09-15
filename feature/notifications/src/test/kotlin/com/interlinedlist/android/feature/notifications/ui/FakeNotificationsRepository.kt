@@ -18,12 +18,14 @@ class FakeNotificationsRepository : NotificationsRepository {
 
     private val notifications = MutableStateFlow<List<Notification>>(emptyList())
 
+    var fetchLatestResult: ApiResult<List<Notification>> = ApiResult.Success(emptyList())
     var refreshResult: ApiResult<Boolean> = ApiResult.Success(false)
     var loadMoreResult: ApiResult<Boolean> = ApiResult.Success(false)
     var markReadResult: ApiResult<Unit> = ApiResult.Success(Unit)
     var markAllReadResult: ApiResult<Unit> = ApiResult.Success(Unit)
     var dismissResult: ApiResult<Unit> = ApiResult.Success(Unit)
 
+    var fetchLatestCount = 0
     var refreshCount = 0
     var loadMoreCount = 0
     var markReadIds = mutableListOf<String>()
@@ -36,6 +38,11 @@ class FakeNotificationsRepository : NotificationsRepository {
 
     override fun observeUnreadCount(): Flow<Int> =
         notifications.map { list -> list.count { !it.read } }
+
+    override suspend fun fetchLatest(): ApiResult<List<Notification>> {
+        fetchLatestCount++
+        return fetchLatestResult
+    }
 
     override suspend fun refresh(): ApiResult<Boolean> {
         refreshCount++

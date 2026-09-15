@@ -6,6 +6,7 @@ import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
 import com.interlinedlist.android.feature.messages.domain.ReportReason
 import com.interlinedlist.android.feature.messages.ui.FakeMessagesRepository
+import com.interlinedlist.android.feature.messages.ui.feed.ModerationAction
 import com.interlinedlist.android.feature.messages.ui.sampleMessage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -146,6 +147,92 @@ class MessageDetailViewModelTest {
         assertThat(repo.lastReport?.messageId).isEqualTo("r1")
         assertThat(repo.lastReport?.reason).isEqualTo(ReportReason.SPAM)
         assertThat(vm.uiState.value.reportTarget).isNull()
+    }
+
+    @Test
+    fun `edit seeds and saves the current message content`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            fetchResult = ApiResult.Success(sampleMessage(id = "m1", content = "original", mine = true))
+            editResult = ApiResult.Success(
+                sampleMessage(id = "m1", content = "edited", mine = true, editedAt = "2026-07-31T12:00:00Z"),
+            )
+        }
+        repo.emitMessage(sampleMessage(id = "m1", content = "original", mine = true))
+        val vm = MessageDetailViewModel(repo, handle("m1"))
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.openEdit(sampleMessage(id = "m1", content = "original", mine = true))
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.editText).isEqualTo("original")
+
+        vm.onEditTextChange("edited")
+        vm.saveEdit()
+        advanceUntilIdle()
+
+        assertThat(repo.lastEdit).isEqualTo("m1" to "edited")
+        assertThat(vm.uiState.value.editTarget).isNull()
+        assertThat(vm.uiState.value.message?.content).isEqualTo("edited")
+        assertThat(vm.uiState.value.message?.isEdited).isTrue()
+    }
+
+    @Test
+    fun `edit failure keeps the sheet open and shows an error`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            fetchResult = ApiResult.Success(sampleMessage(id = "m1", mine = true))
+            editResult = ApiResult.Failure(AppError.Server("nope"))
+        }
+        val vm = MessageDetailViewModel(repo, handle("m1"))
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.openEdit(sampleMessage(id = "m1", content = "original", mine = true))
+        vm.onEditTextChange("changed")
+        vm.saveEdit()
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.editTarget?.id).isEqualTo("m1")
+        assertThat(vm.uiState.value.errorMessage).isNotEmpty()
+    }
+
+    @Test
+    fun `block on a reply delegates to the repository`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            fetchResult = ApiResult.Success(sampleMessage(id = "m1"))
+        }
+        val vm = MessageDetailViewModel(repo, handle("m1"))
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        val reply = sampleMessage(id = "r1", parentId = "m1", authorUsername = "amy")
+        vm.openModeration(reply, ModerationAction.BLOCK)
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.moderationTarget?.username).isEqualTo("amy")
+
+        vm.confirmModeration()
+        advanceUntilIdle()
+
+        assertThat(repo.blockedUsernames).containsExactly("amy")
+        assertThat(vm.uiState.value.moderationTarget).isNull()
+    }
+
+    @Test
+    fun `report user submits the reason and detail`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            fetchResult = ApiResult.Success(sampleMessage(id = "m1"))
+        }
+        val vm = MessageDetailViewModel(repo, handle("m1"))
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.openModeration(sampleMessage(id = "m1", authorUsername = "amy"), ModerationAction.REPORT)
+        vm.confirmModeration(ReportReason.SPAM, "spammer")
+        advanceUntilIdle()
+
+        val report = repo.lastReportUser!!
+        assertThat(report.username).isEqualTo("amy")
+        assertThat(report.reason).isEqualTo(ReportReason.SPAM)
+        assertThat(report.detail).isEqualTo("spammer")
     }
 
     @Test

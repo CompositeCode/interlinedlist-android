@@ -1,5 +1,10 @@
 package com.interlinedlist.android.navigation
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
@@ -13,9 +18,13 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -36,6 +45,7 @@ import com.interlinedlist.android.feature.directmessages.navigation.navigateToNe
 import com.interlinedlist.android.feature.documents.ui.browser.DocumentsFolderRoute
 import com.interlinedlist.android.feature.documents.ui.browser.DocumentsRoute
 import com.interlinedlist.android.feature.documents.ui.editor.DocumentEditorRoute
+import com.interlinedlist.android.feature.documents.sync.DocumentsSyncScheduler
 import com.interlinedlist.android.feature.documents.ui.share.DocumentShareRoute
 import com.interlinedlist.android.feature.documents.ui.share.SharedDocumentRoute
 import com.interlinedlist.android.feature.documents.ui.collaborators.DocumentCollaboratorsRoute
@@ -56,6 +66,7 @@ import com.interlinedlist.android.feature.lists.ui.watchers.WatchersRoute
 import com.interlinedlist.android.feature.messages.ui.detail.MessageDetailRoute
 import com.interlinedlist.android.feature.messages.ui.feed.MessagesRoute
 import com.interlinedlist.android.feature.messages.ui.scheduled.ScheduledMessagesRoute
+import com.interlinedlist.android.feature.notifications.push.NotificationsSyncScheduler
 import com.interlinedlist.android.feature.notifications.ui.NotificationPreferencesRoute
 import com.interlinedlist.android.feature.notifications.ui.NotificationsRoute
 import com.interlinedlist.android.feature.organizations.ui.detail.OrganizationDetailRoute
@@ -177,7 +188,10 @@ private enum class HomeTab(val route: String, val label: String, val icon: Image
  * back stack; sign-out returns to login.
  */
 @Composable
-fun InterlinedListNavHost(startLoggedIn: Boolean) {
+fun InterlinedListNavHost(
+    startLoggedIn: Boolean,
+    notificationRoute: String? = null,
+) {
     val navController = rememberNavController()
     NavHost(
         navController = navController,
@@ -197,8 +211,14 @@ fun InterlinedListNavHost(startLoggedIn: Boolean) {
             )
         }
         composable(Routes.MAIN) {
+            val context = LocalContext.current
             MainShell(
+                notificationRoute = notificationRoute,
                 onLoggedOut = {
+                    // Stop background sync/poll for the signed-out session. Cancellation
+                    // must never crash the sign-out flow, so any failure is swallowed.
+                    runCatching { DocumentsSyncScheduler.cancelAll(context) }
+                    runCatching { NotificationsSyncScheduler.cancelAll(context) }
                     navController.navigate(AuthRoutes.GRAPH) {
                         popUpTo(Routes.MAIN) { inclusive = true }
                     }
@@ -214,11 +234,45 @@ fun InterlinedListNavHost(startLoggedIn: Boolean) {
  * their own back navigation.
  */
 @Composable
-private fun MainShell(onLoggedOut: () -> Unit) {
+private fun MainShell(
+    notificationRoute: String? = null,
+    onLoggedOut: () -> Unit,
+) {
     val tabNav = rememberNavController()
     val backStackEntry by tabNav.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
     val onTabRoot = HomeTab.entries.any { it.route == currentRoute }
+    val context = LocalContext.current
+
+    // Bootstrap the notification poll for the signed-in session: register the periodic
+    // near-real-time poll and kick a one-shot so the last-seen marker seeds immediately.
+    // On Android 13+ request POST_NOTIFICATIONS first (silently ignored below 13, where
+    // the permission does not exist). Scheduling must never crash the shell, so failures
+    // are swallowed. Runs once when the shell enters.
+    val requestNotificationsPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { /* result ignored: the poll still runs; posting is a no-op if denied */ }
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val granted = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS,
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!granted) requestNotificationsPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        runCatching {
+            NotificationsSyncScheduler.schedulePeriodic(context)
+            NotificationsSyncScheduler.syncNow(context)
+        }
+    }
+
+    // Route straight to a tapped notification's destination once, when present.
+    val pendingRoute by rememberUpdatedState(notificationRoute)
+    LaunchedEffect(Unit) {
+        pendingRoute?.let { route ->
+            runCatching { tabNav.navigate(route) }
+        }
+    }
 
     Scaffold(
         bottomBar = {
@@ -345,6 +399,16 @@ private fun MainShell(onLoggedOut: () -> Unit) {
 
             // ---- Documents ----
             composable(Routes.DOCUMENTS) {
+                // Bootstrap the documents delta-sync: register the periodic pull/push and
+                // kick a one-shot sync when the Documents tab is opened. Scheduling must
+                // never crash the UI, so any failure is swallowed defensively.
+                val context = LocalContext.current
+                LaunchedEffect(Unit) {
+                    runCatching {
+                        DocumentsSyncScheduler.schedulePeriodic(context)
+                        DocumentsSyncScheduler.syncNow(context)
+                    }
+                }
                 DocumentsRoute(
                     onOpenFolder = { id -> tabNav.navigate(Routes.documentFolder(id)) },
                     onOpenDocument = { id -> tabNav.navigate(Routes.documentEditor(id)) },

@@ -119,6 +119,43 @@ class MessageDtoMapperTest {
     }
 
     @Test
+    fun `flags an edited message when updatedAt differs from createdAt`() {
+        val message = MessageDto(
+            id = "m8",
+            content = "edited",
+            createdAt = "2026-07-18T10:00:00Z",
+            updatedAt = "2026-07-18T11:30:00Z",
+        ).toDomain(currentUserId = null)
+
+        assertThat(message.isEdited).isTrue()
+        assertThat(message.editedAt).isEqualTo("2026-07-18T11:30:00Z")
+    }
+
+    @Test
+    fun `does not flag as edited when updatedAt equals createdAt`() {
+        val message = MessageDto(
+            id = "m9",
+            content = "fresh",
+            createdAt = "2026-07-18T10:00:00Z",
+            updatedAt = "2026-07-18T10:00:00Z",
+        ).toDomain(currentUserId = null)
+
+        assertThat(message.isEdited).isFalse()
+        assertThat(message.editedAt).isNull()
+    }
+
+    @Test
+    fun `is not edited when updatedAt is absent`() {
+        val message = MessageDto(
+            id = "m10",
+            content = "no updatedAt",
+            createdAt = "2026-07-18T10:00:00Z",
+        ).toDomain(currentUserId = null)
+
+        assertThat(message.isEdited).isFalse()
+    }
+
+    @Test
     fun `drops a link preview without a url`() {
         val message = MessageDto(
             id = "m7",

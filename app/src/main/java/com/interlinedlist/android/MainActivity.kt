@@ -13,6 +13,7 @@ import com.interlinedlist.android.core.datastore.ThemeMode
 import com.interlinedlist.android.core.datastore.ThemeSettingsStore
 import com.interlinedlist.android.core.designsystem.theme.InterlinedListTheme
 import com.interlinedlist.android.navigation.InterlinedListNavHost
+import com.interlinedlist.android.navigation.NotificationLaunch
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
@@ -31,6 +32,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         // Resolve the entry screen before composing so there's no login flash.
         val startLoggedIn = sessionStore.isLoggedIn
+        // A tapped system notification launches us with deep-link extras; resolve the
+        // pending in-app route so the signed-in shell can navigate straight to it.
+        val notificationRoute = NotificationLaunch.fromIntent(intent)?.route
         enableEdgeToEdge()
         setContent {
             val themeMode by themeSettingsStore.themeMode.collectAsStateWithLifecycle()
@@ -40,7 +44,10 @@ class MainActivity : ComponentActivity() {
                 ThemeMode.SYSTEM -> isSystemInDarkTheme()
             }
             InterlinedListTheme(darkTheme = darkTheme) {
-                InterlinedListNavHost(startLoggedIn = startLoggedIn)
+                InterlinedListNavHost(
+                    startLoggedIn = startLoggedIn,
+                    notificationRoute = notificationRoute,
+                )
             }
         }
     }

@@ -8,6 +8,8 @@ import com.interlinedlist.android.core.common.result.AppError
 import com.interlinedlist.android.feature.messages.data.MessagesRepository
 import com.interlinedlist.android.feature.messages.domain.Message
 import com.interlinedlist.android.feature.messages.domain.ReportReason
+import com.interlinedlist.android.feature.messages.ui.feed.ModerationAction
+import com.interlinedlist.android.feature.messages.ui.feed.ModerationTarget
 import com.interlinedlist.android.feature.messages.ui.isSubscriptionGate
 import com.interlinedlist.android.feature.messages.ui.toUserMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -35,8 +37,16 @@ data class MessageDetailUiState(
     /** The message (root or a reply) being reported, if any. */
     val reportTarget: Message? = null,
     val isReporting: Boolean = false,
+    /** The message (root or a reply) being edited in-place, if any. */
+    val editTarget: Message? = null,
+    val editText: String = "",
+    val isSavingEdit: Boolean = false,
+    /** A pending author-moderation action awaiting confirmation, if any. */
+    val moderationTarget: ModerationTarget? = null,
+    val isModerating: Boolean = false,
 ) {
     val canReply: Boolean get() = replyText.isNotBlank() && !isPostingReply
+    val canSaveEdit: Boolean get() = editText.isNotBlank() && !isSavingEdit
 }
 
 private data class DetailTransientState(
@@ -47,6 +57,11 @@ private data class DetailTransientState(
     val isPostingReply: Boolean = false,
     val reportTarget: Message? = null,
     val isReporting: Boolean = false,
+    val editTarget: Message? = null,
+    val editText: String = "",
+    val isSavingEdit: Boolean = false,
+    val moderationTarget: ModerationTarget? = null,
+    val isModerating: Boolean = false,
 )
 
 @HiltViewModel
@@ -77,6 +92,11 @@ class MessageDetailViewModel @Inject constructor(
                 isPostingReply = t.isPostingReply,
                 reportTarget = t.reportTarget,
                 isReporting = t.isReporting,
+                editTarget = t.editTarget,
+                editText = t.editText,
+                isSavingEdit = t.isSavingEdit,
+                moderationTarget = t.moderationTarget,
+                isModerating = t.isModerating,
             )
         }.stateIn(
             scope = viewModelScope,
@@ -147,6 +167,66 @@ class MessageDetailViewModel @Inject constructor(
                 is ApiResult.Success -> transient.update { it.copy(isReporting = false, reportTarget = null) }
                 is ApiResult.Failure -> transient.update {
                     it.copy(isReporting = false, reportTarget = null).withError(result.error)
+                }
+            }
+        }
+    }
+
+    // --- edit own message --------------------------------------------------
+
+    fun openEdit(message: Message) = transient.update {
+        it.copy(editTarget = message, editText = message.content, errorMessage = null)
+    }
+
+    fun onEditTextChange(value: String) = transient.update { it.copy(editText = value) }
+
+    fun dismissEdit() = transient.update {
+        it.copy(editTarget = null, editText = "", isSavingEdit = false)
+    }
+
+    fun saveEdit() {
+        val target = transient.value.editTarget ?: return
+        val text = transient.value.editText.trim()
+        if (text.isBlank()) return
+        transient.update { it.copy(isSavingEdit = true, errorMessage = null) }
+        viewModelScope.launch {
+            when (val result = repository.editMessage(target.id, text)) {
+                is ApiResult.Success -> transient.update {
+                    it.copy(isSavingEdit = false, editTarget = null, editText = "")
+                }
+                is ApiResult.Failure -> transient.update {
+                    it.copy(isSavingEdit = false).withError(result.error)
+                }
+            }
+        }
+    }
+
+    // --- author moderation -------------------------------------------------
+
+    fun openModeration(message: Message, action: ModerationAction) = transient.update {
+        it.copy(moderationTarget = ModerationTarget(message, action), errorMessage = null)
+    }
+
+    fun dismissModeration() = transient.update {
+        it.copy(moderationTarget = null, isModerating = false)
+    }
+
+    fun confirmModeration(reason: ReportReason? = null, detail: String = "") {
+        val target = transient.value.moderationTarget ?: return
+        transient.update { it.copy(isModerating = true, errorMessage = null) }
+        viewModelScope.launch {
+            val result = when (target.action) {
+                ModerationAction.BLOCK -> repository.blockUser(target.username)
+                ModerationAction.MUTE -> repository.muteUser(target.username)
+                ModerationAction.REPORT ->
+                    repository.reportUser(target.username, reason ?: ReportReason.OTHER, detail)
+            }
+            when (result) {
+                is ApiResult.Success -> transient.update {
+                    it.copy(isModerating = false, moderationTarget = null)
+                }
+                is ApiResult.Failure -> transient.update {
+                    it.copy(isModerating = false, moderationTarget = null).withError(result.error)
                 }
             }
         }

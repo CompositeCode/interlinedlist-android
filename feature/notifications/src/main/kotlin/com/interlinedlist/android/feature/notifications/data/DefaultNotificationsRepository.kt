@@ -30,6 +30,13 @@ class DefaultNotificationsRepository @Inject constructor(
 
     override fun observeUnreadCount(): Flow<Int> = notificationDao.observeUnreadCount()
 
+    override suspend fun fetchLatest(): ApiResult<List<Notification>> = withContext(dispatchers.io) {
+        when (val result = safeCall { api.getNotifications(limit = PaginationDto.DEFAULT_LIMIT, offset = 0) }) {
+            is ApiResult.Success -> ApiResult.Success(result.data.items.map { it.toDomain() })
+            is ApiResult.Failure -> result
+        }
+    }
+
     override suspend fun refresh(): ApiResult<Boolean> = withContext(dispatchers.io) {
         when (val result = safeCall { api.getNotifications(limit = PaginationDto.DEFAULT_LIMIT, offset = 0) }) {
             is ApiResult.Success -> {

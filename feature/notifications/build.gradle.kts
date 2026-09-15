@@ -32,6 +32,10 @@ dependencies {
     implementation(project(":core:network"))
     implementation(project(":core:datastore"))
 
+    // core-ktx provides NotificationManagerCompat / NotificationCompat and
+    // getSystemService used by the system-notification poll (push tray).
+    implementation(libs.androidx.core.ktx)
+
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.material3)
@@ -52,6 +56,11 @@ dependencies {
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
     implementation(libs.androidx.hilt.navigation.compose)
+
+    // Background notification polling via WorkManager, with Hilt-injected workers.
+    implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.androidx.hilt.work)
+    ksp(libs.androidx.hilt.compiler)
 
     implementation(libs.coil.compose)
 

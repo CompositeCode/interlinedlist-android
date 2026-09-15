@@ -38,8 +38,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.interlinedlist.android.core.designsystem.theme.InterlinedListTheme
 import com.interlinedlist.android.feature.messages.domain.Message
 import com.interlinedlist.android.feature.messages.domain.ReportReason
+import com.interlinedlist.android.feature.messages.ui.components.EditMessageSheet
 import com.interlinedlist.android.feature.messages.ui.components.MessageCard
+import com.interlinedlist.android.feature.messages.ui.components.ModerationDialog
 import com.interlinedlist.android.feature.messages.ui.components.ReportDialog
+import com.interlinedlist.android.feature.messages.ui.feed.ModerationAction
 
 /** Stable test tags for the detail screen. */
 object MessageDetailTags {
@@ -76,9 +79,18 @@ fun MessageDetailRoute(
         onPostReply = viewModel::postReply,
         onRetry = viewModel::load,
         onReport = viewModel::openReport,
+        onEdit = viewModel::openEdit,
+        onBlockUser = { viewModel.openModeration(it, ModerationAction.BLOCK) },
+        onMuteUser = { viewModel.openModeration(it, ModerationAction.MUTE) },
+        onReportUser = { viewModel.openModeration(it, ModerationAction.REPORT) },
         onFetchMetadata = { viewModel.onFetchMetadata() },
         onDismissReport = viewModel::dismissReport,
         onSubmitReport = viewModel::submitReport,
+        onEditTextChange = viewModel::onEditTextChange,
+        onDismissEdit = viewModel::dismissEdit,
+        onSaveEdit = viewModel::saveEdit,
+        onDismissModeration = viewModel::dismissModeration,
+        onConfirmModeration = viewModel::confirmModeration,
         modifier = modifier,
     )
 }
@@ -96,9 +108,18 @@ fun MessageDetailScreen(
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
     onReport: (Message) -> Unit = {},
+    onEdit: (Message) -> Unit = {},
+    onBlockUser: (Message) -> Unit = {},
+    onMuteUser: (Message) -> Unit = {},
+    onReportUser: (Message) -> Unit = {},
     onFetchMetadata: (Message) -> Unit = {},
     onDismissReport: () -> Unit = {},
     onSubmitReport: (ReportReason, String) -> Unit = { _, _ -> },
+    onEditTextChange: (String) -> Unit = {},
+    onDismissEdit: () -> Unit = {},
+    onSaveEdit: () -> Unit = {},
+    onDismissModeration: () -> Unit = {},
+    onConfirmModeration: (ReportReason?, String) -> Unit = { _, _ -> },
 ) {
     Scaffold(
         modifier = modifier
@@ -128,6 +149,10 @@ fun MessageDetailScreen(
                 onReplyTextChange = onReplyTextChange,
                 onPostReply = onPostReply,
                 onReport = onReport,
+                onEdit = onEdit,
+                onBlockUser = onBlockUser,
+                onMuteUser = onMuteUser,
+                onReportUser = onReportUser,
                 onFetchMetadata = onFetchMetadata,
             )
         }
@@ -138,6 +163,26 @@ fun MessageDetailScreen(
             onDismiss = onDismissReport,
             onSubmit = onSubmitReport,
             isSubmitting = state.isReporting,
+        )
+    }
+
+    if (state.editTarget != null) {
+        EditMessageSheet(
+            text = state.editText,
+            canSave = state.canSaveEdit,
+            isSaving = state.isSavingEdit,
+            onTextChange = onEditTextChange,
+            onDismiss = onDismissEdit,
+            onSave = onSaveEdit,
+        )
+    }
+
+    state.moderationTarget?.let { target ->
+        ModerationDialog(
+            target = target,
+            isSubmitting = state.isModerating,
+            onDismiss = onDismissModeration,
+            onConfirm = onConfirmModeration,
         )
     }
 }
@@ -151,6 +196,10 @@ private fun Content(
     onReplyTextChange: (String) -> Unit,
     onPostReply: () -> Unit,
     onReport: (Message) -> Unit,
+    onEdit: (Message) -> Unit,
+    onBlockUser: (Message) -> Unit,
+    onMuteUser: (Message) -> Unit,
+    onReportUser: (Message) -> Unit,
     onFetchMetadata: (Message) -> Unit,
 ) {
     val message = state.message
@@ -172,6 +221,10 @@ private fun Content(
                         onDig = onDig,
                         onDelete = {},
                         onReport = { onReport(message) },
+                        onEdit = { onEdit(message) },
+                        onBlockUser = { onBlockUser(message) },
+                        onMuteUser = { onMuteUser(message) },
+                        onReportUser = { onReportUser(message) },
                         onOpenLink = { onFetchMetadata(message) },
                     )
                     HorizontalDivider(thickness = 2.dp, color = MaterialTheme.colorScheme.outlineVariant)
@@ -189,6 +242,10 @@ private fun Content(
                     onDig = {},
                     onDelete = {},
                     onReport = { onReport(reply) },
+                    onEdit = { onEdit(reply) },
+                    onBlockUser = { onBlockUser(reply) },
+                    onMuteUser = { onMuteUser(reply) },
+                    onReportUser = { onReportUser(reply) },
                     onOpenLink = { onFetchMetadata(reply) },
                 )
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)

@@ -21,6 +21,8 @@ data class MessageDto(
      *  `author`; [toDomain] falls back to whichever the payload used. */
     val user: MessageAuthorDto? = null,
     val createdAt: String? = null,
+    /** Last-modified instant; when it differs from [createdAt] the message was edited. */
+    val updatedAt: String? = null,
     val digCount: Int = 0,
     val replyCount: Int = 0,
     val dugByCurrentUser: Boolean = false,
@@ -74,6 +76,8 @@ fun MessageDto.toDomain(currentUserId: String?): Message {
         authorDisplayName = person?.displayName,
         authorAvatarUrl = person?.avatar,
         createdAt = createdAt,
+        // Treat the message as edited only when it was modified after creation.
+        editedAt = updatedAt?.takeIf { createdAt == null || it != createdAt },
         digCount = digCount,
         replyCount = replyCount,
         dugByMe = dugByCurrentUser,
