@@ -9,6 +9,7 @@ import com.interlinedlist.android.feature.profile.domain.UserSettings
 import com.interlinedlist.android.feature.profile.domain.UserSettingsUpdate
 import com.interlinedlist.android.feature.profile.domain.ViewingPreference
 import com.interlinedlist.android.feature.profile.domain.defaultPubliclyVisibleOrDefault
+import com.interlinedlist.android.feature.profile.domain.isPrivateAccountOrDefault
 import com.interlinedlist.android.feature.profile.domain.maxMessageLengthOrDefault
 import com.interlinedlist.android.feature.profile.domain.messagesPerPageOrDefault
 import com.interlinedlist.android.feature.profile.domain.showAdvancedPostSettingsOrDefault
@@ -114,6 +115,25 @@ class SettingsViewModel @Inject constructor(
             optimistic = current.copy(showAdvancedPostSettings = enabled),
             previous = current,
             update = UserSettingsUpdate(showAdvancedPostSettings = enabled),
+        )
+    }
+
+    /**
+     * Makes the account private, or public again.
+     *
+     * Turning it on does not disturb existing followers — the help centre is explicit
+     * that "Existing followers are not affected; they remain followers unless you
+     * remove them" (`/help/people`, "Private accounts") — it only makes *new* follows
+     * arrive as requests to approve or reject. A failed save rolls back, so the switch
+     * never claims a privacy state the server did not accept.
+     */
+    fun setPrivateAccount(private: Boolean) {
+        val current = _uiState.value.settings ?: return
+        if (current.isPrivateAccountOrDefault == private) return
+        save(
+            optimistic = current.copy(isPrivateAccount = private),
+            previous = current,
+            update = UserSettingsUpdate(isPrivateAccount = private),
         )
     }
 

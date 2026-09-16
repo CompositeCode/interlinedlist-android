@@ -65,6 +65,7 @@ class DefaultSettingsRepositoryTest {
         defaultPubliclyVisible: Boolean = true,
         messagesPerPage: Int = 20,
         showAdvancedPostSettings: Boolean = false,
+        isPrivateAccount: Boolean = false,
     ) = server.enqueue(
         MockResponse().setResponseCode(200).setBody(
             """
@@ -82,7 +83,7 @@ class DefaultSettingsRepositoryTest {
                 "showAdvancedPostSettings": $showAdvancedPostSettings,
                 "latitude": 45.52,
                 "longitude": -122.68,
-                "isPrivateAccount": false,
+                "isPrivateAccount": $isPrivateAccount,
                 "githubDefaultRepo": "adron/notes",
                 "notificationTrayLimit": 25
               }
@@ -300,4 +301,49 @@ class DefaultSettingsRepositoryTest {
         assertThat(result).isInstanceOf(ApiResult.Failure::class.java)
         assertThat(repository.observeSettings().first()?.maxMessageLength).isEqualTo(666)
     }
+
+    // --- Private account (issue #34) -----------------------------------------
+
+    @Test
+    fun `isPrivateAccount PATCHes alone as a JSON boolean`() = runTest(testDispatcher) {
+        enqueueUser(isPrivateAccount = true)
+
+        val result = repository.update(UserSettingsUpdate(isPrivateAccount = true))
+
+        val body = server.takeJsonBody()
+        assertThat(body.keys).containsExactly("isPrivateAccount")
+        val sent = body.getValue("isPrivateAccount").jsonPrimitive
+        assertThat(sent.isString).isFalse()
+        assertThat(sent.booleanOrNull).isTrue()
+        assertThat((result as ApiResult.Success).data.isPrivateAccount).isTrue()
+        assertThat(repository.observeSettings().first()?.isPrivateAccount).isTrue()
+    }
+
+    @Test
+    fun `going public again PATCHes isPrivateAccount alone`() = runTest(testDispatcher) {
+        enqueueUser(isPrivateAccount = false)
+
+        val result = repository.update(UserSettingsUpdate(isPrivateAccount = false))
+
+        val body = server.takeJsonBody()
+        assertThat(body.keys).containsExactly("isPrivateAccount")
+        assertThat(body.getValue("isPrivateAccount").jsonPrimitive.booleanOrNull).isFalse()
+        assertThat((result as ApiResult.Success).data.isPrivateAccount).isFalse()
+    }
+
+    @Test
+    fun `a rejected private-account save leaves the cached value untouched`() =
+        runTest(testDispatcher) {
+            enqueueUser(isPrivateAccount = false)
+            repository.refresh()
+            server.takeRequest()
+
+            server.enqueue(
+                MockResponse().setResponseCode(500).setBody("""{ "error": "boom" }"""),
+            )
+            val result = repository.update(UserSettingsUpdate(isPrivateAccount = true))
+
+            assertThat(result).isInstanceOf(ApiResult.Failure::class.java)
+            assertThat(repository.observeSettings().first()?.isPrivateAccount).isFalse()
+        }
 }
