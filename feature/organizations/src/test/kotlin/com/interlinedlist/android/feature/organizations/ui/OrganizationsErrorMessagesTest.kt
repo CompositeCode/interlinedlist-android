@@ -48,4 +48,32 @@ class OrganizationsErrorMessagesTest {
         assertThat(AppError.NotFound("Organization not found").toJoinMessage())
             .isEqualTo("That organization could not be found.")
     }
+
+    @Test
+    fun `a last-owner demote rejection is explained in role-change terms`() {
+        // Live 400: {"error":"Cannot demote the last owner","code":"bad_request"}
+        val error = AppError.Unknown("Cannot demote the last owner")
+
+        assertThat(error.isLastOwnerRejection).isTrue()
+        assertThat(error.toRoleChangeMessage()).isEqualTo(LAST_OWNER_DEMOTE_EXPLANATION)
+        assertThat(error.toRoleChangeMessage()).contains("Make someone else an owner first")
+        assertThat(error.toRoleChangeMessage()).isNotEqualTo(error.toUserMessage())
+    }
+
+    @Test
+    fun `a last-owner remove rejection is explained in removal terms`() {
+        // Live 400: {"error":"Cannot remove the last owner","code":"bad_request"}
+        val error = AppError.Unknown("Cannot remove the last owner")
+
+        assertThat(error.toRemoveMemberMessage()).isEqualTo(LAST_OWNER_REMOVE_EXPLANATION)
+        assertThat(error.toRemoveMemberMessage()).contains("remove them")
+    }
+
+    @Test
+    fun `other member-management failures fall back to the shared mapping`() {
+        val forbidden = AppError.Forbidden("Nope")
+
+        assertThat(forbidden.toRoleChangeMessage()).isEqualTo(forbidden.toUserMessage())
+        assertThat(forbidden.toRemoveMemberMessage()).isEqualTo(forbidden.toUserMessage())
+    }
 }

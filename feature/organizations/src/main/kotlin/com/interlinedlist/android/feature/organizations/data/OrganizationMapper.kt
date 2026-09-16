@@ -17,6 +17,7 @@ object OrganizationMapper {
         memberCount = dto.resolvedMemberCount,
         role = dto.resolvedRole?.let(OrgRole::fromApi),
         updatedAt = dto.updatedAt,
+        isSystem = dto.isSystem ?: false,
     )
 
     fun toEntity(org: Organization): CachedOrganizationEntity = CachedOrganizationEntity(
@@ -28,6 +29,7 @@ object OrganizationMapper {
         memberCount = org.memberCount,
         role = org.role?.apiValue,
         updatedAt = org.updatedAt,
+        isSystem = org.isSystem,
     )
 
     fun fromEntity(entity: CachedOrganizationEntity): Organization = Organization(
@@ -39,5 +41,6 @@ object OrganizationMapper {
         memberCount = entity.memberCount,
         role = entity.role?.let(OrgRole::fromApi),
         updatedAt = entity.updatedAt,
+        isSystem = entity.isSystem,
     )
 }

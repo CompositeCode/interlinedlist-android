@@ -73,7 +73,7 @@ class DefaultOrganizationsRepository @Inject constructor(
         val body = CreateOrganizationRequest(
             name = name,
             description = description,
-            isPublic = isPublic.toString(),
+            isPublic = isPublic,
         )
         when (val result = safeApiCall(json) { api.createOrganization(body) }) {
             is ApiResult.Success -> {
@@ -115,20 +115,14 @@ class DefaultOrganizationsRepository @Inject constructor(
         val body = UpdateOrganizationRequest(
             name = name?.trim()?.ifBlank { null },
             description = description?.trim(),
-            isPublic = isPublic?.toString(),
+            isPublic = isPublic,
         )
         when (val result = safeApiCall(json) { api.updateOrganization(id, body) }) {
-            is ApiResult.Success -> {
-                // The API may echo the updated org; if not, re-fetch it for a fresh cache.
-                val dto = result.data.org
-                if (dto != null) {
-                    val org = OrganizationMapper.fromDto(dto)
-                    dao.upsert(OrganizationMapper.toEntity(org))
-                    ApiResult.Success(org)
-                } else {
-                    getOrganization(id)
-                }
-            }
+            // The PUT echo omits `userRole` and `memberCount` (verified live), so
+            // mapping it straight through would make the editor look like a
+            // non-member and hide the very actions they just used. Re-read instead,
+            // which is authoritative and refreshes the cache.
+            is ApiResult.Success -> getOrganization(id)
             is ApiResult.Failure -> result
         }
     }

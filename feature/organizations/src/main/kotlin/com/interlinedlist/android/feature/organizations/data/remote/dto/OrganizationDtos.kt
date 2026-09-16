@@ -26,6 +26,9 @@ data class OrganizationDto(
     val isPublic: Boolean? = null,
     @Serializable(with = FlexibleBooleanSerializer::class)
     val public: Boolean? = null,
+    // Built-in organizations ("The Public"); present on every index and detail row.
+    @Serializable(with = FlexibleBooleanSerializer::class)
+    val isSystem: Boolean? = null,
     // The API reports the member count under a few different names.
     val memberCount: Int? = null,
     val membersCount: Int? = null,
@@ -84,13 +87,19 @@ data class OrganizationEnvelope(
     val org: OrganizationDto? get() = organization ?: data
 }
 
-/** Body for `POST /api/organizations`. `isPublic` is serialised as a string per the API. */
+/**
+ * Body for `POST /api/organizations`.
+ *
+ * `isPublic` must be a JSON **boolean**. Verified live: sending it as a string
+ * (`"false"`) answers `500 {"error":"Internal server error"}`, so the visibility
+ * chosen at creation never reached the server.
+ */
 @Serializable
 data class CreateOrganizationRequest(
     val name: String,
     val description: String? = null,
     val avatar: String? = null,
-    val isPublic: String? = null,
+    val isPublic: Boolean? = null,
 )
 
 /**
@@ -103,11 +112,18 @@ data class JoinOrganizationRequest(
     val organizationId: String,
 )
 
-/** Body for `PUT /api/organizations/{id}` — partial metadata updates. */
+/**
+ * Body for `PUT /api/organizations/{id}` — partial metadata updates.
+ *
+ * `isPublic` must be a JSON **boolean**, exactly as for create: a string answers
+ * `500`. Verified live against `PUT /api/organizations/{id}`, which echoes the
+ * updated organization back under `organization` — but *without* `userRole` or
+ * `memberCount`, so the caller has to re-read to keep its membership state.
+ */
 @Serializable
 data class UpdateOrganizationRequest(
     val name: String? = null,
     val description: String? = null,
     val avatar: String? = null,
-    val isPublic: String? = null,
+    val isPublic: Boolean? = null,
 )

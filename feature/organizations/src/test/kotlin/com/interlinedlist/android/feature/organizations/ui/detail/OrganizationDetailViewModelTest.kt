@@ -9,7 +9,9 @@ import com.interlinedlist.android.feature.organizations.domain.MemberCandidate
 import com.interlinedlist.android.feature.organizations.domain.OrgMember
 import com.interlinedlist.android.feature.organizations.domain.OrgRole
 import com.interlinedlist.android.feature.organizations.domain.Organization
+import com.interlinedlist.android.feature.organizations.ui.LAST_OWNER_DEMOTE_EXPLANATION
 import com.interlinedlist.android.feature.organizations.ui.LAST_OWNER_EXPLANATION
+import com.interlinedlist.android.feature.organizations.ui.LAST_OWNER_REMOVE_EXPLANATION
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -333,5 +335,242 @@ class OrganizationDetailViewModelTest {
         assertThat(left).isFalse()
         assertThat(vm.uiState.value.isLeaving).isFalse()
         assertThat(vm.uiState.value.errorMessage).isEqualTo(LAST_OWNER_EXPLANATION)
+    }
+
+    // ---- Role-gated actions ------------------------------------------------
+
+    private fun repoWith(role: OrgRole?, vararg members: OrgMember) = FakeOrganizationsRepository().apply {
+        getResult = ApiResult.Success(Organization("o1", "Acme", null, null, true, 3, role, null))
+        membersResult = ApiResult.Success(members.toList())
+    }
+
+    @Test
+    fun `a member may not add remove or promote, and is offered no edit or delete`() = runTest(dispatcher) {
+        val repo = repoWith(OrgRole.MEMBER, member("u1", OrgRole.OWNER), member("u2"))
+        val vm = vmFor(repo)
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertThat(state.permissions.canAddMember).isFalse()
+        assertThat(state.permissions.canEditOrganization).isFalse()
+        assertThat(state.permissions.canDeleteOrganization).isFalse()
+        assertThat(state.canChangeRoleOf(state.members.last())).isFalse()
+        assertThat(state.canRemove(state.members.last())).isFalse()
+        // A plain member still sees the roster.
+        assertThat(state.permissions.canViewMembers).isTrue()
+    }
+
+    @Test
+    fun `an admin manages members but may not touch an owner or delete the org`() = runTest(dispatcher) {
+        val repo = repoWith(OrgRole.ADMIN, member("u1", OrgRole.OWNER), member("u2"))
+        val vm = vmFor(repo)
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        val owner = state.members.first { it.userId == "u1" }
+        val plain = state.members.first { it.userId == "u2" }
+
+        assertThat(state.permissions.canAddMember).isTrue()
+        assertThat(state.permissions.canEditOrganization).isTrue()
+        assertThat(state.permissions.canDeleteOrganization).isFalse()
+        // "change roles (except owner)"
+        assertThat(state.canChangeRoleOf(owner)).isFalse()
+        assertThat(state.canRemove(owner)).isFalse()
+        assertThat(state.canChangeRoleOf(plain)).isTrue()
+        assertThat(state.assignableRolesFor(plain)).containsExactly(OrgRole.MEMBER, OrgRole.ADMIN)
+    }
+
+    @Test
+    fun `an owner may manage every member and delete the org`() = runTest(dispatcher) {
+        val repo = repoWith(OrgRole.OWNER, member("u1", OrgRole.OWNER), member("u2", OrgRole.OWNER))
+        val vm = vmFor(repo)
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertThat(state.permissions.canDeleteOrganization).isTrue()
+        state.members.forEach {
+            assertThat(state.canChangeRoleOf(it)).isTrue()
+            assertThat(state.canRemove(it)).isTrue()
+        }
+        assertThat(state.assignableRolesFor(state.members.first()))
+            .containsExactly(OrgRole.MEMBER, OrgRole.ADMIN, OrgRole.OWNER)
+    }
+
+    @Test
+    fun `a non-member is offered neither edit nor delete`() = runTest(dispatcher) {
+        // No role: the API omits `role` (and reports `userRole: null`) for non-members.
+        val repo = repoWith(null)
+        val vm = vmFor(repo)
+        advanceUntilIdle()
+
+        val permissions = vm.uiState.value.permissions
+        assertThat(permissions.canEditOrganization).isFalse()
+        assertThat(permissions.canDeleteOrganization).isFalse()
+        assertThat(permissions.canAddMember).isFalse()
+        assertThat(permissions.hasAnyOrganizationAction).isFalse()
+    }
+
+    @Test
+    fun `a non-member's edit and delete are refused even if invoked`() = runTest(dispatcher) {
+        val repo = repoWith(null)
+        val vm = vmFor(repo)
+        advanceUntilIdle()
+
+        var edited = false
+        var deleted = false
+        vm.updateOrganization("Hijacked", null, isPublic = true) { edited = true }
+        vm.deleteOrganization { deleted = true }
+        advanceUntilIdle()
+
+        assertThat(edited).isFalse()
+        assertThat(deleted).isFalse()
+        assertThat(repo.lastUpdate).isNull()
+        assertThat(vm.uiState.value.organization?.name).isEqualTo("Acme")
+    }
+
+    @Test
+    fun `a system organization offers no leave and no delete`() = runTest(dispatcher) {
+        val repo = FakeOrganizationsRepository().apply {
+            // "You cannot leave the system \"The Public\" organization."
+            getResult = ApiResult.Success(
+                Organization("o1", "The Public", null, null, true, 33, OrgRole.OWNER, null, isSystem = true),
+            )
+            membersResult = ApiResult.Success(listOf(member("u1", OrgRole.OWNER), member("me")))
+        }
+        val vm = vmFor(repo)
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.permissions.canLeave).isFalse()
+        assertThat(vm.uiState.value.permissions.canDeleteOrganization).isFalse()
+
+        vm.leave()
+        advanceUntilIdle()
+        assertThat(repo.leftOrgIds).isEmpty()
+    }
+
+    // ---- Last-owner protection on demote and remove -------------------------
+
+    @Test
+    fun `demoting the only owner is explained instead of being sent`() = runTest(dispatcher) {
+        val repo = repoWith(OrgRole.OWNER, member("u1", OrgRole.OWNER), member("u2"))
+        val vm = vmFor(repo)
+        advanceUntilIdle()
+
+        val onlyOwner = vm.uiState.value.members.first { it.userId == "u1" }
+        assertThat(vm.uiState.value.isOnlyOwner(onlyOwner)).isTrue()
+        // They are offered no demotion at all, only the role they already hold.
+        assertThat(vm.uiState.value.assignableRolesFor(onlyOwner)).containsExactly(OrgRole.OWNER)
+
+        vm.changeRole(onlyOwner, OrgRole.MEMBER)
+        advanceUntilIdle()
+
+        assertThat(repo.updateRoleCount).isEqualTo(0)
+        assertThat(vm.uiState.value.errorMessage).isEqualTo(LAST_OWNER_DEMOTE_EXPLANATION)
+        assertThat(vm.uiState.value.members.first { it.userId == "u1" }.role).isEqualTo(OrgRole.OWNER)
+    }
+
+    @Test
+    fun `a server last-owner demote rejection is surfaced as the same explanation`() = runTest(dispatcher) {
+        // Two owners locally, so the client guard cannot fire; the server still refuses.
+        val repo = repoWith(OrgRole.OWNER, member("u1", OrgRole.OWNER), member("u2", OrgRole.OWNER)).apply {
+            updateRoleResult = FakeOrganizationsRepository.lastOwnerDemoteFailure()
+        }
+        val vm = vmFor(repo)
+        advanceUntilIdle()
+
+        vm.changeRole(vm.uiState.value.members.first { it.userId == "u1" }, OrgRole.MEMBER)
+        advanceUntilIdle()
+
+        assertThat(repo.updateRoleCount).isEqualTo(1)
+        assertThat(vm.uiState.value.errorMessage).isEqualTo(LAST_OWNER_DEMOTE_EXPLANATION)
+        // The local list is untouched, so it still matches the server.
+        assertThat(vm.uiState.value.members.first { it.userId == "u1" }.role).isEqualTo(OrgRole.OWNER)
+    }
+
+    @Test
+    fun `removing the only owner is explained instead of being sent`() = runTest(dispatcher) {
+        val repo = repoWith(OrgRole.OWNER, member("u1", OrgRole.OWNER), member("u2"))
+        val vm = vmFor(repo)
+        advanceUntilIdle()
+
+        vm.removeMember(vm.uiState.value.members.first { it.userId == "u1" })
+        advanceUntilIdle()
+
+        assertThat(repo.removeMemberCount).isEqualTo(0)
+        assertThat(vm.uiState.value.errorMessage).isEqualTo(LAST_OWNER_REMOVE_EXPLANATION)
+        assertThat(vm.uiState.value.members.map { it.userId }).containsExactly("u1", "u2")
+    }
+
+    @Test
+    fun `a server last-owner remove rejection is surfaced as the same explanation`() = runTest(dispatcher) {
+        val repo = repoWith(OrgRole.OWNER, member("u1", OrgRole.OWNER), member("u2", OrgRole.OWNER)).apply {
+            removeMemberResult = FakeOrganizationsRepository.lastOwnerFailure()
+        }
+        val vm = vmFor(repo)
+        advanceUntilIdle()
+
+        vm.removeMember(vm.uiState.value.members.first { it.userId == "u1" })
+        advanceUntilIdle()
+
+        assertThat(repo.removeMemberCount).isEqualTo(1)
+        assertThat(vm.uiState.value.errorMessage).isEqualTo(LAST_OWNER_REMOVE_EXPLANATION)
+        assertThat(vm.uiState.value.members).hasSize(2)
+    }
+
+    @Test
+    fun `an admin's attempt to manage an owner is not sent`() = runTest(dispatcher) {
+        val repo = repoWith(OrgRole.ADMIN, member("u1", OrgRole.OWNER), member("u2", OrgRole.OWNER))
+        val vm = vmFor(repo)
+        advanceUntilIdle()
+
+        val owner = vm.uiState.value.members.first { it.userId == "u1" }
+        vm.changeRole(owner, OrgRole.MEMBER)
+        vm.removeMember(owner)
+        advanceUntilIdle()
+
+        assertThat(repo.updateRoleCount).isEqualTo(0)
+        assertThat(repo.removeMemberCount).isEqualTo(0)
+    }
+
+    // ---- Visibility ---------------------------------------------------------
+
+    @Test
+    fun `visibility is readable and round-trips for a permitted role`() = runTest(dispatcher) {
+        val repo = repoWith(OrgRole.OWNER, member("u1", OrgRole.OWNER), member("u2", OrgRole.OWNER)).apply {
+            updateResult = ApiResult.Success(
+                Organization("o1", "Acme", null, null, false, 3, OrgRole.OWNER, null),
+            )
+        }
+        val vm = vmFor(repo)
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.organization?.isPublic).isTrue()
+        assertThat(vm.uiState.value.permissions.canEditVisibility).isTrue()
+
+        vm.updateOrganization(name = null, description = null, isPublic = false)
+        advanceUntilIdle()
+
+        assertThat(repo.lastUpdate).isEqualTo(Triple(null, null, false))
+        // The re-read result is what the header now shows.
+        assertThat(vm.uiState.value.organization?.isPublic).isFalse()
+        // Role and membership survive the edit.
+        assertThat(vm.uiState.value.isMember).isTrue()
+        assertThat(vm.uiState.value.permissions.canDeleteOrganization).isTrue()
+    }
+
+    @Test
+    fun `a member may read visibility but not change it`() = runTest(dispatcher) {
+        val repo = repoWith(OrgRole.MEMBER, member("u1", OrgRole.OWNER))
+        val vm = vmFor(repo)
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.organization?.isPublic).isTrue()
+        assertThat(vm.uiState.value.permissions.canEditVisibility).isFalse()
+
+        vm.updateOrganization(name = null, description = null, isPublic = false)
+        advanceUntilIdle()
+
+        assertThat(repo.lastUpdate).isNull()
+        assertThat(vm.uiState.value.organization?.isPublic).isTrue()
     }
 }

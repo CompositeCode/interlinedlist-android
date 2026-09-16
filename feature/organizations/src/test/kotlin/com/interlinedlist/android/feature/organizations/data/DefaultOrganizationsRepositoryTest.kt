@@ -133,8 +133,8 @@ class DefaultOrganizationsRepositoryTest {
         assertThat(request.path).isEqualTo("/api/organizations")
         val body = request.body.readUtf8()
         assertThat(body).contains("\"name\":\"Newco\"")
-        // isPublic is serialised as a string per the API contract.
-        assertThat(body).contains("\"isPublic\":\"true\"")
+        // isPublic must be a JSON boolean: the server answers 500 to a string.
+        assertThat(body).contains("\"isPublic\":true")
     }
 
     @Test
@@ -154,8 +154,15 @@ class DefaultOrganizationsRepositoryTest {
 
     @Test
     fun `updateOrganization sends the changed fields and refreshes the cache`() = runTest(dispatcher) {
+        // The PUT echo, then the re-read the repository performs afterwards.
         server.enqueue(
             MockResponse().setBody("""{ "organization": { "id": "o1", "name": "Renamed", "isPublic": false } }"""),
+        )
+        server.enqueue(
+            MockResponse().setBody(
+                """{ "organization": { "id": "o1", "name": "Renamed", "isPublic": false,
+                       "userRole": "owner", "memberCount": 4 } }""",
+            ),
         )
 
         val result = repository.updateOrganization("o1", name = "Renamed", description = null, isPublic = false)
@@ -168,8 +175,40 @@ class DefaultOrganizationsRepositoryTest {
         assertThat(request.path).isEqualTo("/api/organizations/o1")
         val body = request.body.readUtf8()
         assertThat(body).contains("\"name\":\"Renamed\"")
-        assertThat(body).contains("\"isPublic\":\"false\"")
+        // A JSON boolean, not a string — a string answers 500 (verified live).
+        assertThat(body).contains("\"isPublic\":false")
     }
+
+    @Test
+    fun `updateOrganization re-reads so the editor keeps their role and member count`() =
+        runTest(dispatcher) {
+            // Verified live: the PUT echo carries no `userRole`/`memberCount`, so
+            // trusting it would make the owner who just edited look like a
+            // non-member and hide Edit/Delete from them.
+            server.enqueue(
+                MockResponse().setBody(
+                    """{ "organization": { "id": "o1", "name": "Renamed", "isPublic": true } }""",
+                ),
+            )
+            server.enqueue(
+                MockResponse().setBody(
+                    """{ "organization": { "id": "o1", "name": "Renamed", "isPublic": true,
+                           "userRole": "owner", "memberCount": 4 } }""",
+                ),
+            )
+
+            val result = repository.updateOrganization("o1", name = "Renamed", description = null, isPublic = true)
+
+            val org = (result as ApiResult.Success).data
+            assertThat(org.role).isEqualTo(OrgRole.OWNER)
+            assertThat(org.memberCount).isEqualTo(4)
+            assertThat(org.isPublic).isTrue()
+
+            server.takeRequest() // the PUT
+            val reread = server.takeRequest()
+            assertThat(reread.method).isEqualTo("GET")
+            assertThat(reread.path).isEqualTo("/api/organizations/o1")
+        }
 
     @Test
     fun `deleteOrganization evicts from cache on success`() = runTest(dispatcher) {
