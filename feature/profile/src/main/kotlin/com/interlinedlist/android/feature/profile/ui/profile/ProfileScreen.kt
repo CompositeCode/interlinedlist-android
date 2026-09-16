@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.ManageAccounts
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -62,6 +63,7 @@ object AccountMenuTestTags {
     const val CONNECTED_ACCOUNTS = "accountMenuConnectedAccounts"
     const val BLOCKED_MUTED = "accountMenuBlockedMuted"
     const val ACCOUNT_SETTINGS = "accountMenuAccountSettings"
+    const val SETTINGS = "accountMenuSettings"
 }
 
 /**
@@ -85,6 +87,7 @@ object AccountMenuTestTags {
  * @param onOpenConnectedAccounts navigate to the Connected Accounts screen (within this module).
  * @param onOpenBlockedMuted navigate to the "Blocked & muted" screen (within this module).
  * @param onOpenAccountSettings navigate to the Account settings screen (within this module).
+ * @param onOpenSettings navigate to the Settings (preferences) screen (within this module).
  * @param onSignOut invoked after the caller performs sign-out; the profile module does
  *   not own session state, so the app wires this to the auth logout + navigation.
  */
@@ -105,6 +108,8 @@ fun ProfileRoute(
     // Defaulted so existing app nav wiring compiles unchanged; wire this to the
     // `account/blocked-muted` route to enable the Blocked & muted screen (Milestone D).
     onOpenBlockedMuted: () -> Unit = {},
+    // Defaulted likewise; wire this to the `settings` route for the preferences screen.
+    onOpenSettings: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: ProfileViewModel = hiltViewModel(),
 ) {
@@ -125,6 +130,7 @@ fun ProfileRoute(
         onOpenConnectedAccounts = onOpenConnectedAccounts,
         onOpenBlockedMuted = onOpenBlockedMuted,
         onOpenAccountSettings = onOpenAccountSettings,
+        onOpenSettings = onOpenSettings,
         onSignOut = onSignOut,
         onRetry = viewModel::refresh,
         modifier = modifier,
@@ -150,6 +156,7 @@ fun ProfileScreen(
     onSignOut: () -> Unit,
     onRetry: () -> Unit,
     onOpenBlockedMuted: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -239,6 +246,12 @@ fun ProfileScreen(
                     label = "Blocked & muted",
                     onClick = onOpenBlockedMuted,
                     tag = AccountMenuTestTags.BLOCKED_MUTED,
+                )
+                AccountMenuRow(
+                    icon = Icons.Default.Tune,
+                    label = "Settings",
+                    onClick = onOpenSettings,
+                    tag = AccountMenuTestTags.SETTINGS,
                 )
                 AccountMenuRow(
                     icon = Icons.Default.ManageAccounts,

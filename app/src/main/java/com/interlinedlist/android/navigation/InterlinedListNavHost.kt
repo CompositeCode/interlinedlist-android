@@ -84,6 +84,7 @@ import com.interlinedlist.android.feature.profile.ui.profile.PublicDocumentRoute
 import com.interlinedlist.android.feature.profile.ui.profile.PublicListRoute
 import com.interlinedlist.android.feature.profile.ui.profile.UserProfileRoute
 import com.interlinedlist.android.feature.profile.ui.search.UserSearchRoute
+import com.interlinedlist.android.feature.profile.ui.settings.SettingsRoute
 import com.interlinedlist.android.ui.home.HomeViewModel
 
 /** Navigation route keys. */
@@ -140,6 +141,9 @@ object Routes {
     const val ACCOUNT_CONNECTED = "account/connected-accounts"
     const val ACCOUNT_BLOCKED_MUTED = "account/blocked-muted"
     const val ACCOUNT_SETTINGS = "account/settings"
+
+    // Preferences (mirrors the web Settings page), reached from the Account hub.
+    const val SETTINGS = "settings"
 
     // Notifications / organizations / integrations (reached from the Account hub).
     const val NOTIFICATIONS = "notifications"
@@ -484,8 +488,12 @@ private fun MainShell(
                     onOpenConnectedAccounts = { tabNav.navigate(Routes.ACCOUNT_CONNECTED) },
                     onOpenBlockedMuted = { tabNav.navigate(Routes.ACCOUNT_BLOCKED_MUTED) },
                     onOpenAccountSettings = { tabNav.navigate(Routes.ACCOUNT_SETTINGS) },
+                    onOpenSettings = { tabNav.navigate(Routes.SETTINGS) },
                     onSignOut = { logoutViewModel.logout(onLoggedOut) },
                 )
+            }
+            composable(Routes.SETTINGS) {
+                SettingsRoute(onBack = { tabNav.popBackStack() })
             }
             composable(Routes.ACCOUNT_BLOCKED_MUTED) {
                 BlockedMutedRoute(onBack = { tabNav.popBackStack() })

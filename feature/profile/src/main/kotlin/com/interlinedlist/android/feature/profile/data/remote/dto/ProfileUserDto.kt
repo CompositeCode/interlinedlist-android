@@ -17,6 +17,20 @@ data class ProfileUserDto(
     val avatar: String? = null,
     val bio: String? = null,
     val customerStatus: String? = null,
+    // --- Preference fields (present on `GET /api/user` for the signed-in user
+    // only; other users' public profiles omit them, hence all-nullable). ---
+    val theme: String? = null,
+    val maxMessageLength: Int? = null,
+    val defaultPubliclyVisible: Boolean? = null,
+    val messagesPerPage: Int? = null,
+    val viewingPreference: String? = null,
+    val showPreviews: Boolean? = null,
+    val showAdvancedPostSettings: Boolean? = null,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+    val isPrivateAccount: Boolean? = null,
+    val githubDefaultRepo: String? = null,
+    val notificationTrayLimit: Int? = null,
 ) {
     /** The avatar URL under whichever field the endpoint populated. */
     val avatarOrNull: String? get() = avatarUrl ?: avatar

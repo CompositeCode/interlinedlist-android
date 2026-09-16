@@ -3,7 +3,9 @@ package com.interlinedlist.android.feature.profile.di
 import android.content.Context
 import androidx.room.Room
 import com.interlinedlist.android.feature.profile.data.DefaultProfileRepository
+import com.interlinedlist.android.feature.profile.data.DefaultSettingsRepository
 import com.interlinedlist.android.feature.profile.data.ProfileRepository
+import com.interlinedlist.android.feature.profile.data.SettingsRepository
 import com.interlinedlist.android.feature.profile.data.local.ProfileDao
 import com.interlinedlist.android.feature.profile.data.local.ProfileDatabase
 import com.interlinedlist.android.feature.profile.data.remote.ProfileApi
@@ -16,7 +18,7 @@ import dagger.hilt.components.SingletonComponent
 import retrofit2.Retrofit
 import javax.inject.Singleton
 
-/** Binds the repository interface to its default implementation. */
+/** Binds the repository interfaces to their default implementations. */
 @Module
 @InstallIn(SingletonComponent::class)
 abstract class ProfileRepositoryModule {
@@ -24,6 +26,11 @@ abstract class ProfileRepositoryModule {
     @Binds
     @Singleton
     abstract fun bindProfileRepository(impl: DefaultProfileRepository): ProfileRepository
+
+    /** Singleton so the in-memory settings cache is shared app-wide (Settings + feed). */
+    @Binds
+    @Singleton
+    abstract fun bindSettingsRepository(impl: DefaultSettingsRepository): SettingsRepository
 }
 
 /** Provides this feature's API, its own Room database, and DAO. */
