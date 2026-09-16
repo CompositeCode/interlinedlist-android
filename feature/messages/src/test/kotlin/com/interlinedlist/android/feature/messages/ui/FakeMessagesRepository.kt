@@ -13,6 +13,8 @@ import com.interlinedlist.android.feature.messages.domain.MessageVisibility
 import com.interlinedlist.android.feature.messages.domain.PushedMessage
 import com.interlinedlist.android.feature.messages.domain.ReportReason
 import com.interlinedlist.android.feature.messages.domain.TagSuggestion
+import com.interlinedlist.android.feature.messages.domain.TrendingTag
+import com.interlinedlist.android.feature.messages.domain.TrendingWindow
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
@@ -66,6 +68,10 @@ class FakeMessagesRepository : MessagesRepository {
     /** Per-query canned autocomplete answers; anything else falls back below. */
     val autocompleteResponses = mutableMapOf<String, ApiResult<List<TagSuggestion>>>()
     var autocompleteResult: ApiResult<List<TagSuggestion>> = ApiResult.Success(emptyList())
+    /** What [trendingTags] answers with. */
+    var trendingTagsResult: ApiResult<List<TrendingTag>> = ApiResult.Success(emptyList())
+    /** Every window [trendingTags] was asked for, in order. */
+    val trendingWindows = mutableListOf<TrendingWindow>()
     /** The account's saved feed preference, as read from `GET /api/user`. */
     var viewingPreferenceResult: ApiResult<ViewingPreference> = ApiResult.Success(ViewingPreference.ALL)
     /** What the `PATCH /api/user/update` of the preference answers with. */
@@ -341,6 +347,14 @@ class FakeMessagesRepository : MessagesRepository {
         }
         completedAutocompleteQueries += query
         return autocompleteResponses[query] ?: autocompleteResult
+    }
+
+    override suspend fun trendingTags(
+        window: TrendingWindow,
+        limit: Int,
+    ): ApiResult<List<TrendingTag>> {
+        trendingWindows += window
+        return trendingTagsResult
     }
 
     override suspend fun search(query: String): ApiResult<List<Message>> = searchResult

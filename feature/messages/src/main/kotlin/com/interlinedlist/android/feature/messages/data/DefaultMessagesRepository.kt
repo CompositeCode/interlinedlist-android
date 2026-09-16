@@ -29,6 +29,8 @@ import com.interlinedlist.android.feature.messages.domain.Message
 import com.interlinedlist.android.feature.messages.domain.MessageVisibility
 import com.interlinedlist.android.feature.messages.domain.ReportReason
 import com.interlinedlist.android.feature.messages.domain.TagSuggestion
+import com.interlinedlist.android.feature.messages.domain.TrendingTag
+import com.interlinedlist.android.feature.messages.domain.TrendingWindow
 import com.interlinedlist.android.feature.messages.domain.asPushedOriginal
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -455,6 +457,18 @@ class DefaultMessagesRepository @Inject constructor(
         limit: Int,
     ): ApiResult<List<TagSuggestion>> = withContext(dispatchers.io) {
         when (val result = safeCall { api.autocompleteTags(query = query, limit = limit) }) {
+            is ApiResult.Success -> ApiResult.Success(result.data.toDomain())
+            is ApiResult.Failure -> result
+        }
+    }
+
+    override suspend fun trendingTags(
+        window: TrendingWindow,
+        limit: Int,
+    ): ApiResult<List<TrendingTag>> = withContext(dispatchers.io) {
+        // window.wire, never a raw string: the server accepts anything and
+        // quietly counts a week instead of telling us the value was wrong.
+        when (val result = safeCall { api.trendingTags(window = window.wire, limit = limit) }) {
             is ApiResult.Success -> ApiResult.Success(result.data.toDomain())
             is ApiResult.Failure -> result
         }
