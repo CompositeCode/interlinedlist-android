@@ -21,6 +21,15 @@ class FakeIntegrationsRepository : IntegrationsRepository {
     var accounts: List<ConnectedAccount> = emptyList()
     var accountsCalls = 0
 
+    /** Queued account lists; each getConnectedAccounts() consumes one, then falls back to [accounts]. */
+    val queuedAccounts = ArrayDeque<List<ConnectedAccount>>()
+
+    var unlinkResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    val unlinkedProviders = mutableListOf<String>()
+
+    var verifyResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    val verifiedProviders = mutableListOf<String>()
+
     var limitsResult: ApiResult<PlanLimits> = ApiResult.Failure(AppError.Unknown("not set"))
 
     // --- GitHub ---
@@ -58,7 +67,17 @@ class FakeIntegrationsRepository : IntegrationsRepository {
 
     override suspend fun getConnectedAccounts(): List<ConnectedAccount> {
         accountsCalls++
-        return accounts
+        return queuedAccounts.removeFirstOrNull() ?: accounts
+    }
+
+    override suspend fun unlinkIdentity(identityProvider: String): ApiResult<Unit> {
+        unlinkedProviders.add(identityProvider)
+        return unlinkResult
+    }
+
+    override suspend fun verifyIdentity(identityProvider: String): ApiResult<Unit> {
+        verifiedProviders.add(identityProvider)
+        return verifyResult
     }
 
     override suspend fun getLimits(): ApiResult<PlanLimits> = limitsResult

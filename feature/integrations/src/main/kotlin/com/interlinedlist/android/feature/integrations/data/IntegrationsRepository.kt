@@ -23,8 +23,27 @@ interface IntegrationsRepository {
      */
     suspend fun downloadExport(type: ExportType): ApiResult<File>
 
-    /** Fetches connection status for every supported provider. */
+    /**
+     * Fetches one row per provider, merged with the user's linked identities so each
+     * linked row carries the key unlink/verify need plus its connected/verified
+     * timestamps. A provider backing several identities (Mastodon instances) yields
+     * one row each.
+     */
     suspend fun getConnectedAccounts(): List<ConnectedAccount>
+
+    /**
+     * Unlinks the identity whose `provider` string is [identityProvider]
+     * (`ConnectedAccount.identityProvider`). This stops cross-posting to that network,
+     * so callers must confirm first. Failures carry the server's message.
+     */
+    suspend fun unlinkIdentity(identityProvider: String): ApiResult<Unit>
+
+    /**
+     * Re-verifies the identity whose `provider` string is [identityProvider], refreshing
+     * its `lastVerifiedAt` server-side. Callers should re-read [getConnectedAccounts]
+     * afterwards rather than trust the (unspecified) response body.
+     */
+    suspend fun verifyIdentity(identityProvider: String): ApiResult<Unit>
 
     /** Reads plan limits/usage, or a failure the UI can render inline. */
     suspend fun getLimits(): ApiResult<PlanLimits>
