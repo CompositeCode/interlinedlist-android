@@ -4,12 +4,16 @@ import com.interlinedlist.android.core.common.dispatcher.DispatcherProvider
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
 import com.interlinedlist.android.core.common.result.map
+import com.interlinedlist.android.core.model.CustomerStatus
+import com.interlinedlist.android.core.network.api.InterlinedListApi
+import com.interlinedlist.android.core.network.dto.toDomain as userDtoToDomain
 import com.interlinedlist.android.core.network.error.safeApiCall
 import com.interlinedlist.android.feature.lists.data.local.ListDao
 import com.interlinedlist.android.feature.lists.data.remote.ListsApi
 import com.interlinedlist.android.feature.lists.data.remote.dto.AddWatcherRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.CreateConnectionRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.CreateFolderRequest
+import com.interlinedlist.android.feature.lists.data.remote.dto.CreateInviteRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.CreateListRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.CreateShareLinkRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.CreateViewRequest
@@ -24,9 +28,12 @@ import com.interlinedlist.android.feature.lists.data.remote.dto.UpdateViewReques
 import com.interlinedlist.android.feature.lists.data.remote.dto.UpdateWatcherRoleRequest
 import com.interlinedlist.android.feature.lists.domain.Contributor
 import com.interlinedlist.android.feature.lists.domain.GITHUB_SOURCE_ISSUES
+import com.interlinedlist.android.feature.lists.domain.InviteEmail
+import com.interlinedlist.android.feature.lists.domain.InviteRole
 import com.interlinedlist.android.feature.lists.domain.ListConnection
 import com.interlinedlist.android.feature.lists.domain.ListDetail
 import com.interlinedlist.android.feature.lists.domain.ListFolder
+import com.interlinedlist.android.feature.lists.domain.ListInvite
 import com.interlinedlist.android.feature.lists.domain.ListRow
 import com.interlinedlist.android.feature.lists.domain.ListSchema
 import com.interlinedlist.android.feature.lists.domain.ListSource
@@ -60,6 +67,8 @@ import javax.inject.Inject
  */
 class DefaultListsRepository @Inject constructor(
     private val api: ListsApi,
+    /** Shared current-user endpoint, used only for the subscriber gate on sending invites. */
+    private val userApi: InterlinedListApi,
     private val listDao: ListDao,
     private val json: kotlinx.serialization.json.Json,
     private val dispatchers: DispatcherProvider,
@@ -586,6 +595,72 @@ class DefaultListsRepository @Inject constructor(
             safeApiCall(json) { api.claimSharedList(token) }.map { }
         }
 
+    // --- Email invites -----------------------------------------------------
+
+    override suspend fun getInvites(listId: String): ApiResult<List<ListInvite>> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.getInvites(listId) }
+                .map { response -> response.items.map(InviteMapper::fromDto) }
+        }
+
+    override suspend fun sendInvite(
+        listId: String,
+        email: String,
+        role: InviteRole,
+    ): ApiResult<ListInvite> = withContext(dispatchers.io) {
+        val address = InviteEmail.normalize(email)
+        if (!InviteEmail.isValid(address)) {
+            return@withContext ApiResult.Failure(AppError.Unknown(InviteEmail.INVALID_MESSAGE))
+        }
+        // Sending is subscriber-only (the server 403s a free owner). Check first so a
+        // free account never issues the write at all. Fail OPEN when the status cannot
+        // be read — a flaky /api/user must not block a paying subscriber; the server
+        // remains the authority and answers with the same SubscriptionRequired error.
+        if (currentUserIsSubscriber() == false) {
+            return@withContext ApiResult.Failure(AppError.SubscriptionRequired(NOT_SUBSCRIBED_MESSAGE))
+        }
+        when (
+            val result = safeApiCall(json) {
+                api.createInvite(listId, CreateInviteRequest(email = address, role = role.apiValue))
+            }
+        ) {
+            is ApiResult.Success -> {
+                val dto = result.data.inviteOrSelf
+                ApiResult.Success(
+                    dto?.let(InviteMapper::fromDto) ?: ListInvite(
+                        email = address,
+                        token = "",
+                        role = role,
+                        expiresAt = null,
+                        createdAt = null,
+                        accepted = false,
+                        revokedAt = null,
+                        url = null,
+                    ),
+                )
+            }
+            is ApiResult.Failure -> result
+        }
+    }
+
+    override suspend fun revokeInvite(listId: String, token: String): ApiResult<Unit> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.revokeInvite(listId, token) }.map { }
+        }
+
+    /**
+     * The signed-in account's subscription tier, or null when it cannot be read —
+     * including a `customerStatus` this build does not recognise, which is "unknown",
+     * not "free", and so must not lock a paying owner out of their own invite form.
+     */
+    private suspend fun currentUserIsSubscriber(): Boolean? =
+        when (val result = safeApiCall(json) { userApi.getCurrentUser().user }) {
+            is ApiResult.Success -> result.data.userDtoToDomain().customerStatus
+                .takeUnless { it == CustomerStatus.UNKNOWN }
+                ?.isSubscriber
+            is ApiResult.Failure -> null
+        }
+
     /** Blank form fields are dropped so we don't overwrite server values with empty strings. */
     private fun Map<String, String>.toJsonData(): Map<String, JsonElement> =
         filterValues { it.isNotBlank() }
@@ -594,6 +669,9 @@ class DefaultListsRepository @Inject constructor(
     private companion object {
         /** Safety net for a breadcrumb walk: deep nesting is not worth the requests. */
         const val MAX_PARENT_CHAIN = 10
+
+        /** Matches the server's own copy for the 403 a free owner receives. */
+        const val NOT_SUBSCRIBED_MESSAGE = "Subscribe to invite people to lists."
 
         const val MISSING_VIEW_NAME = "A view needs a name."
         const val MISSING_VIEW_SCOPE = "Choose whether the view is shared or personal."
