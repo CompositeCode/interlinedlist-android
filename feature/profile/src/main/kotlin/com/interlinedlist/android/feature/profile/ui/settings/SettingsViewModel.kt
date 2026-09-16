@@ -4,9 +4,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.feature.profile.data.SettingsRepository
+import com.interlinedlist.android.feature.profile.domain.SettingsBounds
 import com.interlinedlist.android.feature.profile.domain.UserSettings
 import com.interlinedlist.android.feature.profile.domain.UserSettingsUpdate
 import com.interlinedlist.android.feature.profile.domain.ViewingPreference
+import com.interlinedlist.android.feature.profile.domain.defaultPubliclyVisibleOrDefault
+import com.interlinedlist.android.feature.profile.domain.maxMessageLengthOrDefault
+import com.interlinedlist.android.feature.profile.domain.messagesPerPageOrDefault
+import com.interlinedlist.android.feature.profile.domain.showAdvancedPostSettingsOrDefault
 import com.interlinedlist.android.feature.profile.ui.common.toUserMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -90,7 +95,74 @@ class SettingsViewModel @Inject constructor(
         )
     }
 
+    /** Chooses whether new messages start public or private. */
+    fun setDefaultPubliclyVisible(publiclyVisible: Boolean) {
+        val current = _uiState.value.settings ?: return
+        if (current.defaultPubliclyVisibleOrDefault == publiclyVisible) return
+        save(
+            optimistic = current.copy(defaultPubliclyVisible = publiclyVisible),
+            previous = current,
+            update = UserSettingsUpdate(defaultPubliclyVisible = publiclyVisible),
+        )
+    }
+
+    /** Shows or hides the composer's advanced (gear) options. */
+    fun setShowAdvancedPostSettings(enabled: Boolean) {
+        val current = _uiState.value.settings ?: return
+        if (current.showAdvancedPostSettingsOrDefault == enabled) return
+        save(
+            optimistic = current.copy(showAdvancedPostSettings = enabled),
+            previous = current,
+            update = UserSettingsUpdate(showAdvancedPostSettings = enabled),
+        )
+    }
+
+    /**
+     * Sets the account's message character limit. Values outside
+     * [SettingsBounds.MAX_MESSAGE_LENGTH] are refused here, so a bad number never
+     * reaches the API; a value we accept may still be refused by the server, in
+     * which case [save] rolls it back.
+     */
+    fun setMaxMessageLength(characters: Int) {
+        val current = _uiState.value.settings ?: return
+        if (!withinRange(characters, SettingsBounds.MAX_MESSAGE_LENGTH, "Message character limit")) return
+        if (current.maxMessageLengthOrDefault == characters) return
+        save(
+            optimistic = current.copy(maxMessageLength = characters),
+            previous = current,
+            update = UserSettingsUpdate(maxMessageLength = characters),
+        )
+    }
+
+    /**
+     * Sets how many messages the feed loads at a time. The help centre documents the
+     * supported range as 10 to 30 ([SettingsBounds.MESSAGES_PER_PAGE]); anything else
+     * is refused without a request.
+     */
+    fun setMessagesPerPage(messages: Int) {
+        val current = _uiState.value.settings ?: return
+        if (!withinRange(messages, SettingsBounds.MESSAGES_PER_PAGE, "Messages per page")) return
+        if (current.messagesPerPageOrDefault == messages) return
+        save(
+            optimistic = current.copy(messagesPerPage = messages),
+            previous = current,
+            update = UserSettingsUpdate(messagesPerPage = messages),
+        )
+    }
+
     fun dismissError() = _uiState.update { it.copy(errorMessage = null) }
+
+    /**
+     * True when [value] is inside [range]; otherwise reports it as an error naming
+     * the bounds and returns false, leaving the stored value alone.
+     */
+    private fun withinRange(value: Int, range: IntRange, label: String): Boolean {
+        if (value in range) return true
+        _uiState.update {
+            it.copy(errorMessage = "$label must be between ${range.first} and ${range.last}.")
+        }
+        return false
+    }
 
     private fun save(
         optimistic: UserSettings,
