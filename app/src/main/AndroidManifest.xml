@@ -27,8 +27,15 @@
             <!--
                 App Links: verified https:// deep links routed to the in-app nav
                 destinations (shared list/document tokens, password reset, email
-                verification, and the confirm/undo halves of an email change).
-                autoVerify enables Android App Links verification.
+                verification, the confirm/undo halves of an email change, and the blog
+                mailing list's confirm/unsubscribe links). autoVerify enables Android
+                App Links verification.
+
+                The two /api/blog/... paths are the URLs the blog emails actually carry
+                (verified live: both answer 307 to /blog?subscription=...). They are
+                claimed because the app handles them itself — it calls the endpoint and
+                shows the result — so nothing is intercepted only to be handed back to a
+                browser.
             -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
@@ -41,6 +48,8 @@
                 <data android:path="/verify-email" />
                 <data android:path="/verify-email-change" />
                 <data android:path="/undo-email-change" />
+                <data android:path="/api/blog/subscribe/confirm" />
+                <data android:path="/api/blog/unsubscribe" />
             </intent-filter>
 
             <!-- Custom-scheme equivalents for the same in-app deep-link routes. -->
@@ -54,6 +63,8 @@
                 <data android:scheme="interlinedlist" android:host="verify-email" />
                 <data android:scheme="interlinedlist" android:host="verify-email-change" />
                 <data android:scheme="interlinedlist" android:host="undo-email-change" />
+                <data android:scheme="interlinedlist" android:host="blog-subscribe-confirm" />
+                <data android:scheme="interlinedlist" android:host="blog-unsubscribe" />
             </intent-filter>
 
             <!--

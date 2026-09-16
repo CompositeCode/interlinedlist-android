@@ -16,6 +16,7 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.interlinedlist.android.blog.BlogLauncher
 import com.interlinedlist.android.blog.BlogLink
+import com.interlinedlist.android.blog.BlogRoutes
 import com.interlinedlist.android.core.datastore.SessionStore
 import com.interlinedlist.android.core.datastore.ThemeMode
 import com.interlinedlist.android.core.datastore.ThemeSettingsStore
@@ -53,6 +54,11 @@ class MainActivity : ComponentActivity() {
         // opens in a themed Custom Tab. The app deliberately does not claim the https
         // blog URLs — see BlogLink.
         val blogUrl = BlogLink.webUrlFor(intent?.dataString)
+        // A tapped blog confirm/unsubscribe link, by contrast, IS handled in-app: the
+        // mailing list has a real JSON API, so the app calls it and shows the outcome
+        // rather than bouncing the user out to a browser. Both endpoints are
+        // unauthenticated, so the route resolves with or without a session.
+        val blogSubscriptionRoute = BlogRoutes.routeForSubscriptionLink(intent?.dataString)
         enableEdgeToEdge()
         setContent {
             val themeMode by themeSettingsStore.themeMode.collectAsStateWithLifecycle()
@@ -79,6 +85,7 @@ class MainActivity : ComponentActivity() {
                     startLoggedIn = startLoggedIn,
                     notificationRoute = notificationRoute,
                     emailChangeRoute = emailChangeRoute,
+                    blogSubscriptionRoute = blogSubscriptionRoute,
                 )
             }
         }
