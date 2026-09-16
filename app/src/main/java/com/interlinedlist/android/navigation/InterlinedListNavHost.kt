@@ -45,6 +45,7 @@ import com.interlinedlist.android.feature.documents.sync.DocumentsSyncScheduler
 import com.interlinedlist.android.feature.documents.ui.share.DocumentShareRoute
 import com.interlinedlist.android.feature.documents.ui.share.SharedDocumentRoute
 import com.interlinedlist.android.feature.documents.ui.collaborators.DocumentCollaboratorsRoute
+import com.interlinedlist.android.feature.documents.ui.powered.PoweredDocumentRoute
 import com.interlinedlist.android.feature.documents.ui.templates.DocumentTemplatesRoute
 import com.interlinedlist.android.feature.integrations.ui.accounts.ConnectedAccountsRoute
 import com.interlinedlist.android.feature.integrations.ui.export.ExportRoute
@@ -114,6 +115,7 @@ object Routes {
     const val DOCUMENT_FOLDER = "documents/folder/{folderId}"
     const val DOCUMENT_EDITOR = "documents/editor/{documentId}"
     const val DOCUMENT_TEMPLATES = "documents/templates"
+    const val DOCUMENT_POWERED = "documents/powered"
 
     // Documents sharing (Milestone F).
     const val DOCUMENT_SHARE = "documents/{documentId}/share"
@@ -443,6 +445,18 @@ private fun MainShell(
                     onOpenFolder = { id -> tabNav.navigate(Routes.documentFolder(id)) },
                     onOpenDocument = { id -> tabNav.navigate(Routes.documentEditor(id)) },
                     onOpenTemplates = { tabNav.navigate(Routes.DOCUMENT_TEMPLATES) },
+                    onOpenPoweredDocument = { tabNav.navigate(Routes.DOCUMENT_POWERED) },
+                )
+            }
+            composable(Routes.DOCUMENT_POWERED) {
+                // A saved draft replaces this screen with the new document, so the
+                // Powered Document form is not left on the back stack behind it.
+                PoweredDocumentRoute(
+                    onOpenDocument = { id ->
+                        tabNav.popBackStack()
+                        tabNav.navigate(Routes.documentEditor(id))
+                    },
+                    onBack = { tabNav.popBackStack() },
                 )
             }
             composable(Routes.DOCUMENT_TEMPLATES) {

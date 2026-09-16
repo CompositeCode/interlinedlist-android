@@ -31,6 +31,12 @@ dependencies {
     implementation(project(":core:designsystem"))
     implementation(project(":core:network"))
     implementation(project(":core:datastore"))
+    // The AI capability module: the `/api/ai/*` client, the availability gate and
+    // the preview -> confirm contract. `:feature:ai` is a leaf that depends only on
+    // `:core:*` and owns no navigation of its own -- its surfaces live in the
+    // feature modules that use them, which is what the Powered Document entry
+    // point on this surface is. No other feature module is depended on.
+    implementation(project(":feature:ai"))
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)

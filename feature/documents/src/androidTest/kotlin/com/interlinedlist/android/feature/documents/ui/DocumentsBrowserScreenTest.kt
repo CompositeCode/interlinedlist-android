@@ -1,7 +1,9 @@
 package com.interlinedlist.android.feature.documents.ui
 
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -44,6 +46,7 @@ class DocumentsBrowserScreenTest {
         onCreateFolder: (String) -> Unit = {},
         onSearchQueryChange: (String) -> Unit = {},
         onBack: (() -> Unit)? = null,
+        onOpenPoweredDocument: () -> Unit = {},
     ) {
         composeRule.setContent {
             InterlinedListTheme {
@@ -61,9 +64,33 @@ class DocumentsBrowserScreenTest {
                     onCloseSearch = {},
                     onSearchQueryChange = onSearchQueryChange,
                     onBack = onBack,
+                    onOpenPoweredDocument = onOpenPoweredDocument,
                 )
             }
         }
+    }
+
+    @Test
+    fun poweredDocumentAction_isHidden_whenAiIsNotAvailable() {
+        setContent(
+            DocumentsBrowserUiState(isLoading = false, contents = rootContents(), isAiEnabled = false),
+        )
+        composeRule.onAllNodesWithTag(DocumentsBrowserTestTags.POWERED_DOCUMENT_ACTION)
+            .assertCountEquals(0)
+    }
+
+    @Test
+    fun poweredDocumentAction_opensTheSurface_whenAiIsAvailable() {
+        var opened = false
+        setContent(
+            state = DocumentsBrowserUiState(isLoading = false, contents = rootContents(), isAiEnabled = true),
+            onOpenPoweredDocument = { opened = true },
+        )
+
+        composeRule.onNodeWithTag(DocumentsBrowserTestTags.POWERED_DOCUMENT_ACTION)
+            .assertIsDisplayed()
+            .performClick()
+        assert(opened)
     }
 
     @Test
