@@ -1,5 +1,9 @@
 package com.interlinedlist.android.feature.notifications.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,12 +38,16 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.interlinedlist.android.core.designsystem.theme.InterlinedListTheme
 import com.interlinedlist.android.feature.notifications.domain.NotificationChannel
 import com.interlinedlist.android.feature.notifications.domain.NotificationPreference
+import com.interlinedlist.android.feature.notifications.push.PushRegistrationViewModel
+import com.interlinedlist.android.feature.notifications.push.shouldRequestPostNotifications
 
 /** Stable test tags for the notification-preferences screen. */
 object NotificationPreferencesTags {
@@ -62,8 +70,15 @@ private fun NotificationChannel.displayLabel(): String = when (this) {
 }
 
 /**
- * Hilt-wired notification-preferences entry point. Reached from the Account hub as a
- * drill-down; mirrors the back pattern used by the other detail screens.
+ * Hilt-wired notification-preferences entry point. Reached from the Account hub and
+ * from the notifications tray as a drill-down; mirrors the back pattern used by the
+ * other detail screens.
+ *
+ * This is also where `POST_NOTIFICATIONS` is requested — deliberately here and NOT on
+ * cold start. Switching a "Push" channel on is the user asking to be notified, so the
+ * system dialog lands in context (see `shouldRequestPostNotifications`). A denial is a
+ * no-op for the rest of the app: the preference is still saved, the poll still runs and
+ * the in-app tray is unaffected; only the device-token registration stays on hold.
  *
  * @param onBack pops the preferences screen off the back stack.
  */
@@ -72,16 +87,37 @@ fun NotificationPreferencesRoute(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: NotificationPreferencesViewModel = hiltViewModel(),
+    pushRegistrationViewModel: PushRegistrationViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val requestPostNotifications = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        // Granted: the token can be registered now — it has not changed, so the token
+        // flow will not re-emit and the manager has to be nudged. Denied: nothing to do.
+        if (granted) pushRegistrationViewModel.onNotificationPermissionGranted()
+    }
     NotificationPreferencesScreen(
         state = state,
         onBack = onBack,
         onRetry = viewModel::refresh,
-        onToggle = viewModel::onToggle,
+        onToggle = { key, channel, enabled ->
+            viewModel.onToggle(key, channel, enabled)
+            val granted = ContextCompat.checkSelfPermission(
+                context,
+                POST_NOTIFICATIONS_PERMISSION,
+            ) == PackageManager.PERMISSION_GRANTED
+            if (shouldRequestPostNotifications(channel, enabled, alreadyGranted = granted)) {
+                requestPostNotifications.launch(POST_NOTIFICATIONS_PERMISSION)
+            }
+        },
         modifier = modifier,
     )
 }
+
+/** The Android 13+ runtime permission guarding tray notifications. */
+private const val POST_NOTIFICATIONS_PERMISSION = Manifest.permission.POST_NOTIFICATIONS
 
 /** Stateless preferences UI — drives the list/empty/error/loading states from [state]. */
 @OptIn(ExperimentalMaterial3Api::class)

@@ -1,10 +1,5 @@
 package com.interlinedlist.android.navigation
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
@@ -24,7 +19,6 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -67,6 +61,7 @@ import com.interlinedlist.android.feature.messages.ui.detail.MessageDetailRoute
 import com.interlinedlist.android.feature.messages.ui.feed.MessagesRoute
 import com.interlinedlist.android.feature.messages.ui.scheduled.ScheduledMessagesRoute
 import com.interlinedlist.android.feature.notifications.push.NotificationsSyncScheduler
+import com.interlinedlist.android.feature.notifications.push.PushRegistrationViewModel
 import com.interlinedlist.android.feature.notifications.ui.NotificationPreferencesRoute
 import com.interlinedlist.android.feature.notifications.ui.NotificationsRoute
 import com.interlinedlist.android.feature.organizations.ui.detail.OrganizationDetailRoute
@@ -250,25 +245,28 @@ private fun MainShell(
 
     // Bootstrap the notification poll for the signed-in session: register the periodic
     // near-real-time poll and kick a one-shot so the last-seen marker seeds immediately.
-    // On Android 13+ request POST_NOTIFICATIONS first (silently ignored below 13, where
-    // the permission does not exist). Scheduling must never crash the shell, so failures
-    // are swallowed. Runs once when the shell enters.
-    val requestNotificationsPermission = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { /* result ignored: the poll still runs; posting is a no-op if denied */ }
+    // Scheduling must never crash the shell, so failures are swallowed. Runs once when
+    // the shell enters.
+    //
+    // POST_NOTIFICATIONS is deliberately NOT requested here any more: a cold-start
+    // prompt arrives with no context and spends one of Android 13's two attempts for
+    // nothing. It is asked instead at the moment the user switches a "Push" channel on
+    // in Notification preferences (see NotificationPreferencesRoute). The poll runs
+    // either way, and posting is already a no-op when the permission is absent.
     LaunchedEffect(Unit) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val granted = ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.POST_NOTIFICATIONS,
-            ) == PackageManager.PERMISSION_GRANTED
-            if (!granted) requestNotificationsPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
         runCatching {
             NotificationsSyncScheduler.schedulePeriodic(context)
             NotificationsSyncScheduler.syncNow(context)
         }
     }
+
+    // Device-token lifecycle. Entering this shell is exactly "app launch while signed
+    // in" plus "just signed in", which is where the push docs want a re-registration;
+    // collection then continues for the session so a rotated token re-registers too.
+    // The matching unregister hangs off the auth module's sign-out teardown, so it
+    // cannot be skipped by whichever exit the user takes.
+    val pushRegistration: PushRegistrationViewModel = hiltViewModel()
+    LaunchedEffect(Unit) { pushRegistration.runForSession() }
 
     // Route straight to a tapped notification's destination once, when present.
     val pendingRoute by rememberUpdatedState(notificationRoute)
