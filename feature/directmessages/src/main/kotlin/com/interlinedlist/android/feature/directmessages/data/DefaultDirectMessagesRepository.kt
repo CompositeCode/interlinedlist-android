@@ -5,11 +5,9 @@ import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.map
 import com.interlinedlist.android.core.network.error.safeApiCall
 import com.interlinedlist.android.feature.directmessages.data.local.ConversationDao
-import com.interlinedlist.android.feature.directmessages.data.local.ConversationEntity
 import com.interlinedlist.android.feature.directmessages.data.local.DirectMessageDao
 import com.interlinedlist.android.feature.directmessages.data.local.DirectMessageEntity
 import com.interlinedlist.android.feature.directmessages.data.remote.DirectMessagesApi
-import com.interlinedlist.android.feature.directmessages.data.remote.dto.MessageDto
 import com.interlinedlist.android.feature.directmessages.data.remote.dto.RecipientDto
 import com.interlinedlist.android.feature.directmessages.data.remote.dto.SendMessageRequest
 import kotlinx.coroutines.flow.Flow
@@ -43,11 +41,12 @@ class DefaultDirectMessagesRepository @Inject constructor(
 
     override suspend fun refreshInbox(cursor: String?): ApiResult<String?> =
         withContext(dispatchers.io) {
-            safeApiCall(json) { api.getInbox(cursor = cursor) }.let { result ->
+            safeApiCall(json) { api.getConversations(cursor = cursor) }.let { result ->
                 when (result) {
                     is ApiResult.Success -> {
-                        val summaries = result.data.items.mapNotNull { it.toConversationSummary() }
-                        if (summaries.isNotEmpty()) conversationDao.upsertAll(summaries)
+                        val me = currentUserId
+                        val rows = result.data.rows.mapNotNull { it.toEntity(me) }
+                        if (rows.isNotEmpty()) conversationDao.upsertAll(rows)
                         ApiResult.Success(result.data.nextCursor)
                     }
                     is ApiResult.Failure -> result
@@ -119,7 +118,7 @@ class DefaultDirectMessagesRepository @Inject constructor(
         )
         when (val result = safeApiCall(json) { api.send(request) }) {
             is ApiResult.Success -> {
-                val serverMessage = result.data.message()
+                val serverMessage = result.data.createdMessage()
                 if (serverMessage != null && serverMessage.id.isNotBlank()) {
                     messageDao.deleteById(optimisticId)
                     val entity = serverMessage.toEntity(username)
@@ -180,27 +179,5 @@ class DefaultDirectMessagesRepository @Inject constructor(
 
     override suspend fun unreadCount(): ApiResult<Int> = withContext(dispatchers.io) {
         safeApiCall(json) { api.getUnreadCount() }.map { it.count }
-    }
-
-    /**
-     * Folds an inbox message into a conversation summary. The other participant
-     * is whichever end of the message is not the current user; the embedded
-     * author sub-object (present on the inbox endpoint) supplies display info.
-     */
-    private fun MessageDto.toConversationSummary(): ConversationEntity? {
-        val me = currentUserId
-        val other = embeddedAuthor
-        val otherUsername = other?.username
-            ?: return null // Without a username we cannot key the conversation.
-        val received = me != null && recipientId == me
-        return ConversationEntity(
-            username = otherUsername,
-            displayName = other.displayName,
-            avatarUrl = other.avatar,
-            lastMessageId = id,
-            lastMessageBody = body,
-            lastMessageAtMillis = parseIsoMillis(createdAt),
-            hasUnread = received && readAt == null,
-        )
     }
 }

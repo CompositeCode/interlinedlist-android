@@ -30,7 +30,4 @@ data class MessageDto(
     val sender: RecipientDto? = null,
     val author: RecipientDto? = null,
     val user: RecipientDto? = null,
-) {
-    /** The embedded author under whichever key the endpoint used, if present. */
-    val embeddedAuthor: RecipientDto? get() = sender ?: author ?: user
-}
+)

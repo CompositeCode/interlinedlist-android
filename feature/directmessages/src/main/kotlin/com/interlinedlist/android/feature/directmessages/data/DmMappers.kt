@@ -2,6 +2,7 @@ package com.interlinedlist.android.feature.directmessages.data
 
 import com.interlinedlist.android.feature.directmessages.data.local.ConversationEntity
 import com.interlinedlist.android.feature.directmessages.data.local.DirectMessageEntity
+import com.interlinedlist.android.feature.directmessages.data.remote.dto.ConversationDto
 import com.interlinedlist.android.feature.directmessages.data.remote.dto.MessageDto
 import com.interlinedlist.android.feature.directmessages.data.remote.dto.RecipientDto
 import java.time.Instant
@@ -49,13 +50,51 @@ internal fun DirectMessageEntity.toDomain(): DirectMessage = DirectMessage(
     pending = pending,
 )
 
+/**
+ * Maps a conversation row into its cache entity, or null when the row carries no
+ * participant username — without one the conversation cannot be keyed or opened.
+ *
+ * [currentUserId] is only consulted when the row omits unread bookkeeping and a
+ * nested last message has to stand in for it.
+ */
+internal fun ConversationDto.toEntity(currentUserId: String?): ConversationEntity? {
+    val other = participant ?: return null
+    val otherUsername = other.username.takeIf { it.isNotBlank() } ?: return null
+    return ConversationEntity(
+        username = otherUsername,
+        pairKey = pairKey,
+        displayName = other.displayName,
+        avatarUrl = other.avatar,
+        lastMessageId = newestMessageId,
+        lastMessageBody = previewText,
+        lastMessageAtMillis = parseIsoMillis(lastActivityAt),
+        unreadCount = resolveUnreadCount(currentUserId),
+    )
+}
+
+/**
+ * The row's unread count, preferring what the server reports and otherwise
+ * inferring it from the newest message: unread only when the current user is the
+ * one who received it.
+ */
+private fun ConversationDto.resolveUnreadCount(currentUserId: String?): Int = when {
+    unreadCount != null -> unreadCount.coerceAtLeast(0)
+    hasUnread != null -> if (hasUnread) 1 else 0
+    else -> {
+        val newest = newestMessage
+        val received = currentUserId != null && newest?.recipientId == currentUserId
+        if (received && (newest?.readAt ?: readAt) == null) 1 else 0
+    }
+}
+
 internal fun ConversationEntity.toDomain(): Conversation = Conversation(
     username = username,
     displayName = displayName,
     avatarUrl = avatarUrl,
     lastMessageBody = lastMessageBody,
     lastMessageAtMillis = lastMessageAtMillis,
-    hasUnread = hasUnread,
+    unreadCount = unreadCount,
+    pairKey = pairKey,
 )
 
 internal fun RecipientDto.toDomain(): Recipient = Recipient(

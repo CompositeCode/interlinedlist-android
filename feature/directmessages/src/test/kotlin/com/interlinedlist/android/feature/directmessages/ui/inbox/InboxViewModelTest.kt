@@ -27,7 +27,8 @@ class InboxViewModelTest {
 
     private fun conversation(username: String, unread: Boolean) = Conversation(
         username = username, displayName = username, avatarUrl = null,
-        lastMessageBody = "hey", lastMessageAtMillis = 1L, hasUnread = unread,
+        lastMessageBody = "hey", lastMessageAtMillis = 1L,
+        unreadCount = if (unread) 1 else 0,
     )
 
     @Test

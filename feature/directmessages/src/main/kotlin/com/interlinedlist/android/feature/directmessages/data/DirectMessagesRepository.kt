@@ -13,15 +13,17 @@ interface DirectMessagesRepository {
     /** The signed-in user's id, used to tell "mine" from "theirs" in a thread. */
     val currentUserId: String?
 
-    /** Newest-first stream of cached conversation summaries. */
+    /** Newest-first stream of cached conversations, one row per conversation. */
     fun observeConversations(): Flow<List<Conversation>>
 
     /** Oldest-first stream of a single conversation's cached messages. */
     fun observeThread(username: String): Flow<List<DirectMessage>>
 
     /**
-     * Refreshes one page of the inbox. Pass `null` to load the first page; pass
-     * the previous result's cursor to page. Returns the next cursor (or null).
+     * Refreshes one page of the inbox from `GET /api/dm/conversations`. Pass
+     * `null` to load the first page; pass the previous result's cursor to page.
+     * Pages are merged into the cache, so paging appends. Returns the next
+     * cursor (or null when the last page has been reached).
      */
     suspend fun refreshInbox(cursor: String? = null): ApiResult<String?>
 

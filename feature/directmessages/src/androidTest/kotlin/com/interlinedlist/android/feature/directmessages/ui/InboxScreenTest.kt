@@ -22,7 +22,8 @@ class InboxScreenTest {
 
     private fun conversation(username: String, unread: Boolean) = Conversation(
         username = username, displayName = "Adron Hall", avatarUrl = null,
-        lastMessageBody = "hey there", lastMessageAtMillis = 1L, hasUnread = unread,
+        lastMessageBody = "hey there", lastMessageAtMillis = 1L,
+        unreadCount = if (unread) 1 else 0,
     )
 
     @Test

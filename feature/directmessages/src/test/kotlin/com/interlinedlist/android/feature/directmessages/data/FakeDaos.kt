@@ -71,7 +71,7 @@ class FakeConversationDao : ConversationDao {
 
     override suspend fun clearUnread(username: String) {
         state.value = state.value.map {
-            if (it.username == username) it.copy(hasUnread = false) else it
+            if (it.username == username) it.copy(unreadCount = 0) else it
         }
     }
 
