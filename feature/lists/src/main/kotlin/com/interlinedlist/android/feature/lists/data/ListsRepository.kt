@@ -2,9 +2,12 @@ package com.interlinedlist.android.feature.lists.data
 
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.feature.lists.domain.Contributor
+import com.interlinedlist.android.feature.lists.domain.InviteRole
 import com.interlinedlist.android.feature.lists.domain.ListConnection
 import com.interlinedlist.android.feature.lists.domain.ListDetail
 import com.interlinedlist.android.feature.lists.domain.ListFolder
+import com.interlinedlist.android.feature.lists.domain.ListFreshness
+import com.interlinedlist.android.feature.lists.domain.ListInvite
 import com.interlinedlist.android.feature.lists.domain.ListRow
 import com.interlinedlist.android.feature.lists.domain.ListSchema
 import com.interlinedlist.android.feature.lists.domain.ListSource
@@ -144,6 +147,22 @@ interface ListsRepository {
 
     suspend fun deleteRow(listId: String, rowId: String): ApiResult<Unit>
 
+    /**
+     * One combined freshness poll and presence heartbeat for an open list.
+     *
+     * [rowVersions] are the versions of the rows currently held, keyed by row id;
+     * the server answers with only what moved, so the caller repaints those rows
+     * instead of refetching the table. [focusedRowId] publishes which row the user
+     * is on so other people see it. Rows whose version is unknown are not asked
+     * about — quoting a made-up version would have the server return the whole
+     * table on every beat.
+     */
+    suspend fun pollFreshness(
+        listId: String,
+        rowVersions: Map<String, Int>,
+        focusedRowId: String? = null,
+    ): ApiResult<ListFreshness>
+
     suspend fun getFolders(): ApiResult<List<ListFolder>>
 
     suspend fun createFolder(name: String, parentId: String?): ApiResult<ListFolder>
@@ -272,6 +291,29 @@ interface ListsRepository {
 
     /** Claims edit/admin access to a shared list via its token. */
     suspend fun claimSharedList(token: String): ApiResult<Unit>
+
+    // --- Email invites -----------------------------------------------------
+
+    /**
+     * Pending email invites for a list. Free for any owner — a lapsed subscription
+     * must never hide invites the owner still needs to revoke.
+     */
+    suspend fun getInvites(listId: String): ApiResult<List<ListInvite>>
+
+    /**
+     * Invites [email] at [role]. Refuses locally — issuing no request at all — when
+     * the address is not a valid one, or when the signed-in account is known not to
+     * be a subscriber (sending is a subscriber feature), in which case the failure is
+     * [com.interlinedlist.android.core.common.result.AppError.SubscriptionRequired].
+     */
+    suspend fun sendInvite(
+        listId: String,
+        email: String,
+        role: InviteRole,
+    ): ApiResult<ListInvite>
+
+    /** Revokes a pending invite, killing its link immediately. Never subscriber-gated. */
+    suspend fun revokeInvite(listId: String, token: String): ApiResult<Unit>
 
     companion object {
         const val DEFAULT_PAGE_SIZE = 20

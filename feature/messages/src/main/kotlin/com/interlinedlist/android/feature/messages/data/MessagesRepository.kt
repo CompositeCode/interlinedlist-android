@@ -9,6 +9,8 @@ import com.interlinedlist.android.feature.messages.domain.Message
 import com.interlinedlist.android.feature.messages.domain.MessageVisibility
 import com.interlinedlist.android.feature.messages.domain.ReportReason
 import com.interlinedlist.android.feature.messages.domain.TagSuggestion
+import com.interlinedlist.android.feature.messages.domain.TrendingTag
+import com.interlinedlist.android.feature.messages.domain.TrendingWindow
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -18,8 +20,16 @@ import kotlinx.coroutines.flow.Flow
  */
 interface MessagesRepository {
 
-    /** The cached top-level feed, newest-first, re-emitting on every change. */
-    fun observeFeed(): Flow<List<Message>>
+    /**
+     * The cached top-level feed, newest-first, re-emitting on every change.
+     *
+     * [tag] selects *which* feed: null is the account's main feed, a non-null tag
+     * is the feed filtered to that tag (`GET /api/messages?tag=`). Both are the
+     * same feed in every other respect — same cursor paging, same view preference,
+     * same cached message rows — they differ only in which rows belong to them, so
+     * loading a tag feed never disturbs the main one.
+     */
+    fun observeFeed(tag: String? = null): Flow<List<Message>>
 
     /** Cached replies to [messageId], re-emitting on every change. */
     fun observeReplies(messageId: String): Flow<List<Message>>
@@ -40,21 +50,28 @@ interface MessagesRepository {
      * the following/followers scopes are applied by the server from the saved
      * preference, which is why [setViewingPreference] must succeed before a
      * refresh can show a different view.
+     *
+     * [tag] scopes the request (and the cache it replaces) to one tag's feed; null
+     * refreshes the main feed. Refreshing a tag feed leaves the main feed's cached
+     * rows exactly where they were.
      */
     suspend fun refreshFeed(
         preference: ViewingPreference = ViewingPreference.DEFAULT,
+        tag: String? = null,
     ): ApiResult<String?>
 
     /**
      * Fetches the page that follows [cursor] and appends it to the cached feed.
      * [cursor] is the opaque token a previous [refreshFeed]/[loadMoreFeed]
      * returned and is handed to the API verbatim — never construct or parse one.
-     * [preference] must match the one the page chain started under. Returns the
-     * cursor for the page after this one, or null at the end.
+     * [preference] and [tag] must match the ones the page chain started under —
+     * the cursor is only meaningful within the query that produced it.
+     * Returns the cursor for the page after this one, or null at the end.
      */
     suspend fun loadMoreFeed(
         cursor: String,
         preference: ViewingPreference = ViewingPreference.DEFAULT,
+        tag: String? = null,
     ): ApiResult<String?>
 
     /**
@@ -113,6 +130,20 @@ interface MessagesRepository {
      * suggestions the server never chose. Network-only: suggestions are not cached.
      */
     suspend fun autocompleteTags(query: String, limit: Int = TAG_SUGGESTION_LIMIT): ApiResult<List<TagSuggestion>>
+
+    /**
+     * The most-used tags across public messages in the trailing [window], from
+     * `GET /api/tags/trending`, in the server's order (count descending).
+     *
+     * Network-only, like [autocompleteTags]: trending is a discovery surface for
+     * *right now*, so a cached copy would be worse than an honest empty/error
+     * state. [window] is sent explicitly because the response never reports which
+     * period it covers — the request is what makes the surface's wording true.
+     */
+    suspend fun trendingTags(
+        window: TrendingWindow = TrendingWindow.WEEK,
+        limit: Int = TRENDING_TAG_LIMIT,
+    ): ApiResult<List<TrendingTag>>
 
     /**
      * Pushes (reposts) [messageId] as-is: posts `pushedMessageId` with **no**
@@ -201,5 +232,13 @@ interface MessagesRepository {
     companion object {
         /** How many tag suggestions to ask for (server default 10, max 50). */
         const val TAG_SUGGESTION_LIMIT = 10
+
+        /**
+         * How many trending tags to ask for (server default 20, max 100). Kept
+         * short deliberately: they render as one horizontally scrolling row, and
+         * a rail nobody reaches the end of is no more discoverable than a short
+         * one.
+         */
+        const val TRENDING_TAG_LIMIT = 12
     }
 }

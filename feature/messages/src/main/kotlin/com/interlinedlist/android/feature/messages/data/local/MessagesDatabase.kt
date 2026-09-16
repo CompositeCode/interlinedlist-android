@@ -9,8 +9,8 @@ import androidx.room.TypeConverters
  * `InterlinedListDatabase`. A disposable cache during early development.
  */
 @Database(
-    entities = [MessageEntity::class],
-    version = 5,
+    entities = [MessageEntity::class, FeedEntryEntity::class],
+    version = 6,
     exportSchema = false,
 )
 @TypeConverters(MessageConverters::class)

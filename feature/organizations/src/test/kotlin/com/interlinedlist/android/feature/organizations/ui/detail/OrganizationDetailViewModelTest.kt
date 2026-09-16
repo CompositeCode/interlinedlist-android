@@ -6,6 +6,8 @@ import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
 import com.interlinedlist.android.feature.organizations.FakeOrganizationsRepository
 import com.interlinedlist.android.feature.organizations.domain.MemberCandidate
+import com.interlinedlist.android.feature.organizations.domain.OrgLinkedInPage
+import com.interlinedlist.android.feature.organizations.domain.OrgLinkedInStatus
 import com.interlinedlist.android.feature.organizations.domain.OrgMember
 import com.interlinedlist.android.feature.organizations.domain.OrgRole
 import com.interlinedlist.android.feature.organizations.domain.Organization
@@ -572,5 +574,272 @@ class OrganizationDetailViewModelTest {
 
         assertThat(repo.lastUpdate).isNull()
         assertThat(vm.uiState.value.organization?.isPublic).isTrue()
+    }
+
+    // ---- LinkedIn company pages --------------------------------------------
+
+    private val acmePage = OrgLinkedInPage(id = "p1", linkedInPageId = "12345678", name = "Acme Corp")
+    private val labsPage = OrgLinkedInPage(id = "p2", linkedInPageId = "87654321", name = "Acme Labs")
+
+    private fun connected(assignments: Map<String, String> = emptyMap()) = OrgLinkedInStatus(
+        connected = true,
+        expiresAt = "2026-12-01T00:00:00.000Z",
+        pages = listOf(acmePage, labsPage),
+        assignments = assignments,
+    )
+
+    @Test
+    fun `an owner sees the LinkedIn section and its credential status`() = runTest(dispatcher) {
+        val repo = repoWith(OrgRole.OWNER, member("u1", OrgRole.OWNER), member("u2")).apply {
+            linkedInStatusResult = ApiResult.Success(connected(mapOf("u2" to "p2")))
+        }
+        val vm = vmFor(repo)
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertThat(state.showLinkedIn).isTrue()
+        assertThat(state.linkedIn?.connected).isTrue()
+        assertThat(state.linkedIn?.pages?.map { it.name }).containsExactly("Acme Corp", "Acme Labs")
+        assertThat(state.linkedIn?.pageFor("u2")?.name).isEqualTo("Acme Labs")
+        assertThat(repo.linkedInStatusCount).isEqualTo(1)
+    }
+
+    @Test
+    fun `an admin also manages LinkedIn`() = runTest(dispatcher) {
+        val repo = repoWith(OrgRole.ADMIN, member("u1", OrgRole.OWNER)).apply {
+            linkedInStatusResult = ApiResult.Success(connected())
+        }
+        val vm = vmFor(repo)
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.showLinkedIn).isTrue()
+        assertThat(repo.linkedInStatusCount).isEqualTo(1)
+    }
+
+    @Test
+    fun `a member is offered no LinkedIn section and the status is never requested`() =
+        runTest(dispatcher) {
+            // Live: PUT/POST under .../linkedin answer a member
+            // 403 {"error":"Admin or owner required"}, so there is nothing to show.
+            val repo = repoWith(OrgRole.MEMBER, member("u1", OrgRole.OWNER)).apply {
+                linkedInStatusResult = ApiResult.Success(connected())
+            }
+            val vm = vmFor(repo)
+            advanceUntilIdle()
+
+            assertThat(vm.uiState.value.showLinkedIn).isFalse()
+            assertThat(vm.uiState.value.linkedIn).isNull()
+            assertThat(repo.linkedInStatusCount).isEqualTo(0)
+        }
+
+    @Test
+    fun `a non-member is offered no LinkedIn section`() = runTest(dispatcher) {
+        val repo = repoWith(role = null)
+        val vm = vmFor(repo)
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.showLinkedIn).isFalse()
+        assertThat(repo.linkedInStatusCount).isEqualTo(0)
+    }
+
+    @Test
+    fun `an organization with no credential reads as not connected, not as an error`() =
+        runTest(dispatcher) {
+            val repo = repoWith(OrgRole.OWNER, member("u1", OrgRole.OWNER)).apply {
+                linkedInStatusResult = ApiResult.Success(OrgLinkedInStatus.NOT_CONNECTED)
+            }
+            val vm = vmFor(repo)
+            advanceUntilIdle()
+
+            val state = vm.uiState.value
+            assertThat(state.showLinkedIn).isTrue()
+            assertThat(state.linkedIn?.connected).isFalse()
+            assertThat(state.linkedIn?.pages).isEmpty()
+            assertThat(state.linkedInError).isNull()
+            assertThat(state.errorMessage).isNull()
+        }
+
+    @Test
+    fun `a missing-credential rejection is shown as the not-connected state`() = runTest(dispatcher) {
+        // Captured live: 404 {"error":"No active LinkedIn credential for this organization"}.
+        val repo = repoWith(OrgRole.OWNER, member("u1", OrgRole.OWNER)).apply {
+            linkedInStatusResult =
+                ApiResult.Failure(AppError.NotFound("No active LinkedIn credential for this organization"))
+        }
+        val vm = vmFor(repo)
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.linkedIn).isEqualTo(OrgLinkedInStatus.NOT_CONNECTED)
+        assertThat(vm.uiState.value.linkedInError).isNull()
+    }
+
+    @Test
+    fun `assigning a page records the member's page`() = runTest(dispatcher) {
+        val repo = repoWith(OrgRole.OWNER, member("u1", OrgRole.OWNER), member("u2")).apply {
+            linkedInStatusResult = ApiResult.Success(connected())
+        }
+        val vm = vmFor(repo)
+        advanceUntilIdle()
+
+        val target = vm.uiState.value.members.first { it.userId == "u2" }
+        vm.assignLinkedInPage(target, pageId = "p1")
+        advanceUntilIdle()
+
+        assertThat(repo.assignments).containsExactly("u2" to "p1")
+        assertThat(vm.uiState.value.linkedIn?.pageFor("u2")?.name).isEqualTo("Acme Corp")
+    }
+
+    @Test
+    fun `clearing an assignment sends no page and drops it from the map`() = runTest(dispatcher) {
+        val repo = repoWith(OrgRole.OWNER, member("u1", OrgRole.OWNER), member("u2")).apply {
+            linkedInStatusResult = ApiResult.Success(connected(mapOf("u2" to "p1")))
+        }
+        val vm = vmFor(repo)
+        advanceUntilIdle()
+
+        val target = vm.uiState.value.members.first { it.userId == "u2" }
+        vm.assignLinkedInPage(target, pageId = null)
+        advanceUntilIdle()
+
+        assertThat(repo.assignments).containsExactly("u2" to null)
+        assertThat(vm.uiState.value.linkedIn?.pageFor("u2")).isNull()
+    }
+
+    @Test
+    fun `a member's assignment attempt is never sent`() = runTest(dispatcher) {
+        val repo = repoWith(OrgRole.MEMBER, member("u1", OrgRole.OWNER), member("u2")).apply {
+            linkedInStatusResult = ApiResult.Success(connected())
+        }
+        val vm = vmFor(repo)
+        advanceUntilIdle()
+
+        vm.assignLinkedInPage(member("u2"), pageId = "p1")
+        advanceUntilIdle()
+
+        assertThat(repo.assignments).isEmpty()
+    }
+
+    @Test
+    fun `an assignment rejection is explained and leaves the map alone`() = runTest(dispatcher) {
+        val repo = repoWith(OrgRole.ADMIN, member("u1", OrgRole.OWNER), member("u2")).apply {
+            linkedInStatusResult = ApiResult.Success(connected(mapOf("u2" to "p1")))
+            assignPageResult = ApiResult.Failure(AppError.NotFound("Page not found in this organization"))
+        }
+        val vm = vmFor(repo)
+        advanceUntilIdle()
+
+        vm.assignLinkedInPage(vm.uiState.value.members.first { it.userId == "u2" }, pageId = "p2")
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertThat(state.linkedInError).isEqualTo(
+            "That page is no longer in this organization. Sync pages and try again.",
+        )
+        assertThat(state.linkedIn?.pageFor("u2")?.id).isEqualTo("p1")
+    }
+
+    @Test
+    fun `syncing refreshes the page list`() = runTest(dispatcher) {
+        val repo = repoWith(OrgRole.OWNER, member("u1", OrgRole.OWNER)).apply {
+            linkedInStatusResult = ApiResult.Success(
+                OrgLinkedInStatus(connected = true, pages = listOf(acmePage)),
+            )
+            syncPagesResult = ApiResult.Success(
+                OrgLinkedInStatus(connected = true, pages = listOf(acmePage, labsPage)),
+            )
+        }
+        val vm = vmFor(repo)
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.linkedIn?.pages?.map { it.id }).containsExactly("p1")
+
+        vm.syncLinkedInPages()
+        advanceUntilIdle()
+
+        assertThat(repo.syncPagesCount).isEqualTo(1)
+        assertThat(vm.uiState.value.linkedIn?.pages?.map { it.id }).containsExactly("p1", "p2").inOrder()
+        assertThat(vm.uiState.value.isLinkedInSyncing).isFalse()
+    }
+
+    @Test
+    fun `a member's sync attempt is never sent`() = runTest(dispatcher) {
+        val repo = repoWith(OrgRole.MEMBER, member("u1", OrgRole.OWNER))
+        val vm = vmFor(repo)
+        advanceUntilIdle()
+
+        vm.syncLinkedInPages()
+        advanceUntilIdle()
+
+        assertThat(repo.syncPagesCount).isEqualTo(0)
+    }
+
+    @Test
+    fun `removing the credential leaves the organization not connected`() = runTest(dispatcher) {
+        val repo = repoWith(OrgRole.OWNER, member("u1", OrgRole.OWNER)).apply {
+            linkedInStatusResult = ApiResult.Success(connected(mapOf("u1" to "p1")))
+        }
+        val vm = vmFor(repo)
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.linkedIn?.connected).isTrue()
+
+        vm.removeLinkedInCredential()
+        advanceUntilIdle()
+
+        assertThat(repo.removeCredentialCount).isEqualTo(1)
+        val status = vm.uiState.value.linkedIn
+        assertThat(status).isEqualTo(OrgLinkedInStatus.NOT_CONNECTED)
+        // The assignments went with it, exactly as the server clears them.
+        assertThat(status?.assignments).isEmpty()
+    }
+
+    @Test
+    fun `a member's removal attempt is never sent`() = runTest(dispatcher) {
+        val repo = repoWith(OrgRole.MEMBER, member("u1", OrgRole.OWNER)).apply {
+            linkedInStatusResult = ApiResult.Success(connected())
+        }
+        val vm = vmFor(repo)
+        advanceUntilIdle()
+
+        vm.removeLinkedInCredential()
+        advanceUntilIdle()
+
+        assertThat(repo.removeCredentialCount).isEqualTo(0)
+    }
+
+    @Test
+    fun `removing a credential that has already gone is not reported as a failure`() =
+        runTest(dispatcher) {
+            val repo = repoWith(OrgRole.OWNER, member("u1", OrgRole.OWNER)).apply {
+                linkedInStatusResult = ApiResult.Success(connected())
+                removeCredentialResult = ApiResult.Failure(AppError.NotFound("No LinkedIn credential found"))
+            }
+            val vm = vmFor(repo)
+            advanceUntilIdle()
+
+            vm.removeLinkedInCredential()
+            advanceUntilIdle()
+
+            assertThat(vm.uiState.value.linkedIn).isEqualTo(OrgLinkedInStatus.NOT_CONNECTED)
+            assertThat(vm.uiState.value.linkedInError).isNull()
+        }
+
+    @Test
+    fun `a LinkedIn failure is surfaced without breaking the rest of the screen`() = runTest(dispatcher) {
+        val repo = repoWith(OrgRole.OWNER, member("u1", OrgRole.OWNER)).apply {
+            linkedInStatusResult = ApiResult.Failure(AppError.Forbidden("Admin or owner required"))
+        }
+        val vm = vmFor(repo)
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertThat(state.linkedInError).isEqualTo(
+            "Only an owner or admin can manage this organization's LinkedIn connection.",
+        )
+        // The org and its members are untouched by a LinkedIn problem.
+        assertThat(state.organization?.name).isEqualTo("Acme")
+        assertThat(state.members).hasSize(1)
+        assertThat(state.errorMessage).isNull()
+
+        vm.clearLinkedInError()
+        assertThat(vm.uiState.value.linkedInError).isNull()
     }
 }

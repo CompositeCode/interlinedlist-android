@@ -5,15 +5,28 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
 /**
- * A single data row. `data` is the dynamic key→value map keyed by schema field
- * keys; it is kept as a [JsonObject] and projected to display strings by the
- * mapper, so any schema is supported without a fixed shape.
+ * A single data row. The field map is a dynamic key→value object keyed by schema
+ * field keys; it is kept as a [JsonObject] and projected to display strings by
+ * the mapper, so any schema is supported without a fixed shape.
+ *
+ * The live API sends it as **`rowData`** (confirmed against `GET .../data`, the
+ * create/update echo and the freshness poll), while `data` is accepted as well
+ * since some payloads have been modelled that way; [fields] picks whichever is
+ * present.
+ *
+ * [version] is the row's optimistic-concurrency counter — what the grid's
+ * freshness poll compares against. It is absent on sources that do not version
+ * rows (a GitHub-backed list).
  */
 @Serializable
 data class RowDto(
     val id: String,
-    val data: JsonObject = JsonObject(emptyMap()),
-)
+    val rowData: JsonObject? = null,
+    val data: JsonObject? = null,
+    val version: Int? = null,
+) {
+    val fields: JsonObject get() = rowData ?: data ?: JsonObject(emptyMap())
+}
 
 /** Envelope for `GET /api/lists/{id}/data`. */
 @Serializable

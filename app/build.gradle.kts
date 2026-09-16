@@ -4,6 +4,8 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
+    // The blog mailing list's request/response bodies are @Serializable.
+    alias(libs.plugins.kotlin.serialization)
 }
 
 android {
@@ -80,8 +82,19 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.core.splashscreen)
     implementation(libs.kotlinx.coroutines.android)
+    // Custom Tabs: the blog is server-rendered with no public JSON endpoint, so it is
+    // read in a themed Custom Tab rather than in-app.
+    implementation(libs.androidx.browser)
+
+    // Networking for the blog mailing list. It is a two-endpoint public API with no
+    // cache and one screen, so it lives here beside the rest of the blog routing
+    // rather than in a feature module of its own.
+    implementation(libs.retrofit.core)
+    implementation(libs.okhttp.core)
+    implementation(libs.kotlinx.serialization.json)
 
     // DI
     implementation(libs.hilt.android)
@@ -95,6 +108,12 @@ dependencies {
 
     // Test
     testImplementation(libs.junit)
+    testImplementation(libs.truth)
+    testImplementation(libs.kotlinx.coroutines.test)
+    // The blog subscription repository tests drive a real Retrofit/OkHttp stack
+    // against MockWebServer, so the asserted request bodies are the app's own.
+    testImplementation(libs.okhttp.mockwebserver)
+    testImplementation(libs.retrofit.kotlinx.serialization)
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))

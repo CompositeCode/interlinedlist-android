@@ -5,9 +5,13 @@ import com.interlinedlist.android.core.common.result.AppError
 import com.interlinedlist.android.feature.lists.data.ListsRepository
 import com.interlinedlist.android.feature.lists.domain.Contributor
 import com.interlinedlist.android.feature.lists.domain.GITHUB_SOURCE_ISSUES
+import com.interlinedlist.android.feature.lists.domain.InviteEmail
+import com.interlinedlist.android.feature.lists.domain.InviteRole
 import com.interlinedlist.android.feature.lists.domain.ListConnection
 import com.interlinedlist.android.feature.lists.domain.ListDetail
 import com.interlinedlist.android.feature.lists.domain.ListFolder
+import com.interlinedlist.android.feature.lists.domain.ListFreshness
+import com.interlinedlist.android.feature.lists.domain.ListInvite
 import com.interlinedlist.android.feature.lists.domain.ListRow
 import com.interlinedlist.android.feature.lists.domain.ListSchema
 import com.interlinedlist.android.feature.lists.domain.ListSource
@@ -52,6 +56,14 @@ class FakeListsRepository : ListsRepository {
     var updateRowResult: ApiResult<ListRow>? = null
     var deleteRowResult: ApiResult<Unit> = ApiResult.Success(Unit)
 
+    // Collaborative freshness poll / presence heartbeat.
+    var freshnessResults: MutableList<ApiResult<ListFreshness>> = mutableListOf()
+    var freshnessResult: ApiResult<ListFreshness> = ApiResult.Success(ListFreshness())
+    var pollCount = 0
+    var detailCount = 0
+    var lastPolledFocusedRowId: String? = null
+    var lastPolledRowVersions: Map<String, Int>? = null
+
     // Folder management + contributors.
     var foldersResult: ApiResult<List<ListFolder>> = ApiResult.Success(emptyList())
     var updateFolderResult: ApiResult<ListFolder>? = null
@@ -86,6 +98,18 @@ class FakeListsRepository : ListsRepository {
     var sharedWithMeResult: ApiResult<List<SharedList>> = ApiResult.Success(emptyList())
     var resolveSharedResult: ApiResult<SharedListResolution>? = null
     var claimSharedResult: ApiResult<Unit> = ApiResult.Success(Unit)
+
+    // Email invites.
+    var invitesResult: ApiResult<List<ListInvite>> = ApiResult.Success(emptyList())
+    var sendInviteResult: ApiResult<ListInvite>? = null
+    var revokeInviteResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var sendInviteCount = 0
+    var revokeInviteCount = 0
+    var lastSentInvite: EmailInvite? = null
+    var lastRevokedInviteToken: String? = null
+
+    /** What [sendInvite] was last asked to do, so tests can assert it verbatim. */
+    data class EmailInvite(val listId: String, val email: String, val role: InviteRole)
 
     var refreshCount = 0
     var loadMoreCount = 0
@@ -259,14 +283,32 @@ class FakeListsRepository : ListsRepository {
         return deleteResult
     }
 
-    override suspend fun getListDetail(id: String, rowLimit: Int): ApiResult<ListDetail> =
-        detailResult ?: ApiResult.Success(
+    override suspend fun getListDetail(id: String, rowLimit: Int): ApiResult<ListDetail> {
+        detailCount++
+        return detailResult ?: ApiResult.Success(
             ListDetail(
                 summary = ListSummary(id, "Untitled", null, 0, null, false, null),
                 schema = ListSchema.EMPTY,
                 rows = emptyList(),
             ),
         )
+    }
+
+    /**
+     * Answers with the next scripted result from [freshnessResults] (so a test can
+     * script a sequence of beats), falling back to [freshnessResult] once they run
+     * out — which is also how "the same answer forever" is expressed.
+     */
+    override suspend fun pollFreshness(
+        listId: String,
+        rowVersions: Map<String, Int>,
+        focusedRowId: String?,
+    ): ApiResult<ListFreshness> {
+        pollCount++
+        lastPolledRowVersions = rowVersions
+        lastPolledFocusedRowId = focusedRowId
+        return if (freshnessResults.isNotEmpty()) freshnessResults.removeAt(0) else freshnessResult
+    }
 
     override suspend fun getRow(listId: String, rowId: String): ApiResult<ListRow> =
         getRowResult ?: ApiResult.Success(ListRow(rowId, emptyMap()))
@@ -432,6 +474,27 @@ class FakeListsRepository : ListsRepository {
         claimSharedCount++
         lastClaimedToken = token
         return claimSharedResult
+    }
+
+    override suspend fun getInvites(listId: String): ApiResult<List<ListInvite>> = invitesResult
+
+    override suspend fun sendInvite(
+        listId: String,
+        email: String,
+        role: InviteRole,
+    ): ApiResult<ListInvite> {
+        sendInviteCount++
+        val address = InviteEmail.normalize(email)
+        lastSentInvite = EmailInvite(listId, address, role)
+        return sendInviteResult ?: ApiResult.Success(
+            ListInvite(address, "token-$address", role, null, null, false, null, null),
+        )
+    }
+
+    override suspend fun revokeInvite(listId: String, token: String): ApiResult<Unit> {
+        revokeInviteCount++
+        lastRevokedInviteToken = token
+        return revokeInviteResult
     }
 
     companion object {

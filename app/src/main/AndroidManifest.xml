@@ -35,8 +35,22 @@
             <!--
                 App Links: verified https:// deep links routed to the in-app nav
                 destinations (shared list/document tokens, password reset, email
-                verification, and the confirm/undo halves of an email change).
-                autoVerify enables Android App Links verification.
+                verification, the confirm/undo halves of an email change, and the blog
+                mailing list's confirm/unsubscribe links). autoVerify enables Android
+                App Links verification.
+
+                The site root is registered for the tag feed: the web links every
+                tag on a message card to "/?tag=<tag>" (there is no /tag/<tag>
+                path — it 404s), and an intent filter cannot match on a query
+                string. So "/" is the narrowest filter that can catch a tag link.
+                A root link with no tag simply opens the app's normal start
+                destination, which shows the same feed the homepage does.
+
+                The two /api/blog/... paths are the URLs the blog emails actually carry
+                (verified live: both answer 307 to /blog?subscription=...). They are
+                claimed because the app handles them itself — it calls the endpoint and
+                shows the result — so nothing is intercepted only to be handed back to a
+                browser.
             -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
@@ -45,10 +59,13 @@
                 <data android:scheme="https" android:host="interlinedlist.com" />
                 <data android:pathPrefix="/lists/shared/" />
                 <data android:pathPrefix="/documents/shared/" />
+                <data android:path="/" />
                 <data android:path="/reset-password" />
                 <data android:path="/verify-email" />
                 <data android:path="/verify-email-change" />
                 <data android:path="/undo-email-change" />
+                <data android:path="/api/blog/subscribe/confirm" />
+                <data android:path="/api/blog/unsubscribe" />
             </intent-filter>
 
             <!-- Custom-scheme equivalents for the same in-app deep-link routes. -->
@@ -58,10 +75,32 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="interlinedlist" android:host="lists" />
                 <data android:scheme="interlinedlist" android:host="documents" />
+                <data android:scheme="interlinedlist" android:host="tag" />
                 <data android:scheme="interlinedlist" android:host="reset-password" />
                 <data android:scheme="interlinedlist" android:host="verify-email" />
                 <data android:scheme="interlinedlist" android:host="verify-email-change" />
                 <data android:scheme="interlinedlist" android:host="undo-email-change" />
+                <data android:scheme="interlinedlist" android:host="blog-subscribe-confirm" />
+                <data android:scheme="interlinedlist" android:host="blog-unsubscribe" />
+            </intent-filter>
+
+            <!--
+                Blog links.
+
+                Only the app's OWN scheme is registered here. The public
+                https://interlinedlist.com/blog URLs are deliberately NOT claimed: the
+                blog is server-rendered and exposes no listing/post API, so the app has
+                nothing to render in-app and can only hand the URL to a browser. Claiming
+                a browser-bound link just to bounce it back out is a worse experience than
+                letting the browser have it — and the no-Custom-Tabs fallback (a plain
+                ACTION_VIEW) would resolve straight back into this activity. Revisit if a
+                real in-app renderer ever lands (see issue #87).
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="interlinedlist" android:host="blog" />
             </intent-filter>
         </activity>
 

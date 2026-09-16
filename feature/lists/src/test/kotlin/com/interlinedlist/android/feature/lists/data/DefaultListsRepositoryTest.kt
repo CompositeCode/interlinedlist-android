@@ -4,6 +4,7 @@ import com.google.common.truth.Truth.assertThat
 import com.interlinedlist.android.core.common.dispatcher.DispatcherProvider
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
+import com.interlinedlist.android.core.network.api.InterlinedListApi
 import com.interlinedlist.android.feature.lists.data.local.CachedListEntity
 import com.interlinedlist.android.feature.lists.data.local.ListDao
 import com.interlinedlist.android.feature.lists.data.remote.ListsApi
@@ -34,7 +35,9 @@ import retrofit2.Retrofit
 class DefaultListsRepositoryTest {
 
     private lateinit var server: MockWebServer
+    private lateinit var retrofit: Retrofit
     private lateinit var api: ListsApi
+    private lateinit var userApi: InterlinedListApi
     private lateinit var dao: FakeListDao
     private lateinit var repository: DefaultListsRepository
 
@@ -50,13 +53,14 @@ class DefaultListsRepositoryTest {
     @Before
     fun setUp() {
         server = MockWebServer().also { it.start() }
-        api = Retrofit.Builder()
+        retrofit = Retrofit.Builder()
             .baseUrl(server.url("/"))
             .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()
-            .create(ListsApi::class.java)
+        api = retrofit.create(ListsApi::class.java)
+        userApi = retrofit.create(InterlinedListApi::class.java)
         dao = FakeListDao()
-        repository = DefaultListsRepository(api, dao, json, testDispatchers)
+        repository = DefaultListsRepository(api, userApi, dao, json, testDispatchers)
     }
 
     @After
@@ -134,6 +138,29 @@ class DefaultListsRepositoryTest {
         assertThat(detail.schema.fields.map { it.key }).containsExactly("title", "pages").inOrder()
         assertThat(detail.rows.single().valueFor("title")).isEqualTo("Dune")
         assertThat(detail.rows.single().valueFor("pages")).isEqualTo("412")
+    }
+
+    @Test
+    fun `getListDetail reads the live rows payload with rowData and version`() = runTest(dispatcher) {
+        server.enqueue(MockResponse().setBody("""{ "list": { "id": "L1", "title": "Reading" } }"""))
+        server.enqueue(MockResponse().setBody("""[ { "key": "status", "type": "text" } ]"""))
+        // Exactly what the API returns: rows under `rows`, values under `rowData`.
+        server.enqueue(
+            MockResponse().setBody(
+                """
+                { "rows": [ { "id": "r1", "rowData": { "status": "in review" }, "version": 1,
+                              "lastEditedByUser": { "id": "u1", "username": "casey" } } ],
+                  "pagination": { "total": 1, "limit": 20, "offset": 0, "hasMore": false } }
+                """.trimIndent(),
+            ),
+        )
+
+        val detail = (repository.getListDetail("L1") as ApiResult.Success).data
+
+        val row = detail.rows.single()
+        assertThat(row.valueFor("status")).isEqualTo("in review")
+        // The version is what the freshness poll later quotes back.
+        assertThat(row.version).isEqualTo(1)
     }
 
     @Test

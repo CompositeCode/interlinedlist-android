@@ -4,6 +4,8 @@ import androidx.lifecycle.SavedStateHandle
 import com.google.common.truth.Truth.assertThat
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
+import com.interlinedlist.android.core.materialize.domain.MaterializeSource
+import com.interlinedlist.android.core.materialize.domain.MaterializeTarget
 import com.interlinedlist.android.feature.documents.data.SaveOutcome
 import com.interlinedlist.android.feature.documents.ui.editor.DOCUMENT_ID_ARG
 import com.interlinedlist.android.feature.documents.ui.editor.DocumentEditorViewModel
@@ -203,6 +205,69 @@ class DocumentEditorViewModelTest {
         assertThat(vm.uiState.value.errorMessage)
             .isEqualTo("InterlinedList is having trouble right now. Try again shortly.")
         assertThat(vm.uiState.value.isUploadingImage).isFalse()
+    }
+
+    // --- "Create from…" in the editor ---------------------------------------
+
+    @Test
+    fun `create from the editor opens the window on an id-only document source`() =
+        runTest(dispatcher) {
+            repo.refreshDocumentResult = ApiResult.Success(
+                testDocument("d1", title = "Launch plan", content = "# Launch plan\n- Ship it"),
+            )
+            val vm = viewModel()
+            advanceUntilIdle()
+
+            vm.createFrom(MaterializeTarget.DOC)
+
+            val launch = requireNotNull(vm.uiState.value.createFrom)
+            assertThat(launch.source).isEqualTo(MaterializeSource.Document("d1"))
+            assertThat(launch.initialTarget).isEqualTo(MaterializeTarget.DOC)
+            assertThat(launch.preview.suggestedTitle).isEqualTo("Copy of Launch plan")
+            assertThat(launch.preview.rows.map { it.values["text"] })
+                .containsExactly("Launch plan", "Ship it").inOrder()
+        }
+
+    @Test
+    fun `a highlighted selection opens the window on a docElements source`() = runTest(dispatcher) {
+        repo.refreshDocumentResult = ApiResult.Success(
+            testDocument("d1", title = "Launch plan", content = "# Launch plan\n\n## Week one\n- Ship it"),
+        )
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.createFromSelection("## Week one\n- Ship it", MaterializeTarget.LIST)
+
+        val launch = requireNotNull(vm.uiState.value.createFrom)
+        assertThat(launch.source)
+            .isEqualTo(MaterializeSource.DocumentSelection("d1", "## Week one\n- Ship it"))
+        assertThat(launch.source.kind).isEqualTo("docElements")
+        assertThat(launch.preview.suggestedTitle).isEqualTo("Launch plan (selection)")
+        // Only what was highlighted is previewed.
+        assertThat(launch.preview.rows.map { it.values["text"] })
+            .containsExactly("Week one", "Ship it").inOrder()
+    }
+
+    @Test
+    fun `a blank selection has nothing to convert`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.createFromSelection("   \n  ", MaterializeTarget.LIST)
+
+        assertThat(vm.uiState.value.createFrom).isNull()
+    }
+
+    @Test
+    fun `dismissing the create-from window clears it`() = runTest(dispatcher) {
+        repo.refreshDocumentResult = ApiResult.Success(testDocument("d1", content = "- Ship it"))
+        val vm = viewModel()
+        advanceUntilIdle()
+        vm.createFrom(MaterializeTarget.LIST)
+
+        vm.dismissCreateFrom()
+
+        assertThat(vm.uiState.value.createFrom).isNull()
     }
 
     @Test

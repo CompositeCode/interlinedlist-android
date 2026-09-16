@@ -6,6 +6,7 @@ import com.interlinedlist.android.feature.lists.data.remote.dto.ConnectionsRespo
 import com.interlinedlist.android.feature.lists.data.remote.dto.ContributorsResponse
 import com.interlinedlist.android.feature.lists.data.remote.dto.CreateConnectionRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.CreateFolderRequest
+import com.interlinedlist.android.feature.lists.data.remote.dto.CreateInviteRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.CreateListRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.CreateViewRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.DeleteViewResponse
@@ -13,11 +14,15 @@ import com.interlinedlist.android.feature.lists.data.remote.dto.FolderDto
 import com.interlinedlist.android.feature.lists.data.remote.dto.FolderEnvelope
 import com.interlinedlist.android.feature.lists.data.remote.dto.FoldersResponse
 import com.interlinedlist.android.feature.lists.data.remote.dto.ListEnvelope
+import com.interlinedlist.android.feature.lists.data.remote.dto.ListInviteEnvelope
+import com.interlinedlist.android.feature.lists.data.remote.dto.ListInvitesResponse
 import com.interlinedlist.android.feature.lists.data.remote.dto.ListViewEnvelope
 import com.interlinedlist.android.feature.lists.data.remote.dto.ListViewsResponse
 import com.interlinedlist.android.feature.lists.data.remote.dto.ListsResponse
 import com.interlinedlist.android.feature.lists.data.remote.dto.RefreshResultDto
 import com.interlinedlist.android.feature.lists.data.remote.dto.RowEnvelope
+import com.interlinedlist.android.feature.lists.data.remote.dto.RowVersionsRequest
+import com.interlinedlist.android.feature.lists.data.remote.dto.RowVersionsResponse
 import com.interlinedlist.android.feature.lists.data.remote.dto.RowWriteRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.CreateShareLinkRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.RowsResponse
@@ -172,6 +177,17 @@ interface ListsApi {
         @Body body: RowWriteRequest,
     ): RowEnvelope
 
+    /**
+     * Combined freshness poll and presence heartbeat for the grid. A `POST`
+     * because it writes the caller's heartbeat and because the row versions
+     * belong in a body. At most 500 rows per request.
+     */
+    @POST("api/lists/{id}/data/versions")
+    suspend fun pollRowVersions(
+        @Path("id") id: String,
+        @Body body: RowVersionsRequest,
+    ): RowVersionsResponse
+
     @DELETE("api/lists/{id}/data/{rowId}")
     suspend fun deleteRow(
         @Path("id") id: String,
@@ -263,4 +279,27 @@ interface ListsApi {
     /** Claims edit/admin access to a shared list as the logged-in user. */
     @POST("api/lists/shared/{token}")
     suspend fun claimSharedList(@Path("token") token: String)
+
+    // --- Email invites -----------------------------------------------------
+
+    /** Pending email invites for a list (owner only; free — not subscriber-gated). */
+    @GET("api/lists/{id}/invites")
+    suspend fun getInvites(@Path("id") id: String): ListInvitesResponse
+
+    /**
+     * Invites an email address (which need not belong to an account yet) at a role.
+     * Owner **and subscriber** only: a free owner is rejected with 403.
+     */
+    @POST("api/lists/{id}/invites")
+    suspend fun createInvite(
+        @Path("id") id: String,
+        @Body body: CreateInviteRequest,
+    ): ListInviteEnvelope
+
+    /** Revokes a pending invite by its token, killing the link immediately. Always free. */
+    @DELETE("api/lists/{id}/invites/{token}")
+    suspend fun revokeInvite(
+        @Path("id") id: String,
+        @Path("token") token: String,
+    )
 }

@@ -4,12 +4,16 @@ import com.interlinedlist.android.core.common.dispatcher.DispatcherProvider
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.datastore.SessionStore
 import com.interlinedlist.android.core.model.ViewingPreference
+import com.interlinedlist.android.feature.messages.data.local.FeedEntryEntity
+import com.interlinedlist.android.feature.messages.data.local.MAIN_FEED_KEY
 import com.interlinedlist.android.feature.messages.data.local.MessageDao
+import com.interlinedlist.android.feature.messages.data.local.feedKeyFor
 import com.interlinedlist.android.feature.messages.data.local.toDomain
 import com.interlinedlist.android.feature.messages.data.local.toEntity
 import com.interlinedlist.android.feature.messages.data.remote.MessagesApi
 import com.interlinedlist.android.feature.messages.data.remote.dto.CreateMessageRequest
 import com.interlinedlist.android.feature.messages.data.remote.dto.EditMessageRequest
+import com.interlinedlist.android.feature.messages.data.remote.dto.MessageDto
 import com.interlinedlist.android.feature.messages.data.remote.dto.PaginationDto
 import com.interlinedlist.android.feature.messages.data.remote.dto.ReportRequest
 import com.interlinedlist.android.feature.messages.data.remote.dto.UserReportRequest
@@ -25,6 +29,8 @@ import com.interlinedlist.android.feature.messages.domain.Message
 import com.interlinedlist.android.feature.messages.domain.MessageVisibility
 import com.interlinedlist.android.feature.messages.domain.ReportReason
 import com.interlinedlist.android.feature.messages.domain.TagSuggestion
+import com.interlinedlist.android.feature.messages.domain.TrendingTag
+import com.interlinedlist.android.feature.messages.domain.TrendingWindow
 import com.interlinedlist.android.feature.messages.domain.asPushedOriginal
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -48,8 +54,8 @@ class DefaultMessagesRepository @Inject constructor(
     private val dispatchers: DispatcherProvider,
 ) : MessagesRepository {
 
-    override fun observeFeed(): Flow<List<Message>> =
-        messageDao.observeFeed().map { rows -> rows.map { it.toDomain() } }
+    override fun observeFeed(tag: String?): Flow<List<Message>> =
+        messageDao.observeFeed(feedKeyFor(tag)).map { rows -> rows.map { it.toDomain() } }
 
     override fun observeReplies(messageId: String): Flow<List<Message>> =
         messageDao.observeReplies(messageId).map { rows -> rows.map { it.toDomain() } }
@@ -61,51 +67,58 @@ class DefaultMessagesRepository @Inject constructor(
         messageDao.observeScheduled().map { rows -> rows.map { it.toDomain() } }
 
     /**
-     * Loads the head of the feed (no cursor) and replaces the cached feed with it,
+     * Loads the head of the feed (no cursor) and replaces that feed's cached rows,
      * restarting keyset pagination. Returns the next page's opaque cursor.
+     *
+     * A non-null [tag] runs exactly the same request with `tag=` added and
+     * replaces only *that* tag feed's membership — the message rows themselves are
+     * shared, so the main feed keeps its own ordering and loses nothing.
      */
-    override suspend fun refreshFeed(preference: ViewingPreference): ApiResult<String?> =
-        withContext(dispatchers.io) {
-            when (val result = safeCall {
-                api.getMessages(limit = PaginationDto.DEFAULT_LIMIT, onlyMine = preference.onlyMine)
-            }) {
-                is ApiResult.Success -> {
-                    val page = result.data
-                    val entities = page.rows.mapIndexed { index, dto ->
-                        dto.toDomain(currentUserId()).toEntity(feedOrder = index.toLong())
-                    }
-                    messageDao.clearFeed()
-                    messageDao.insertAll(entities)
-                    ApiResult.Success(page.nextCursor)
-                }
-                is ApiResult.Failure -> result
+    override suspend fun refreshFeed(
+        preference: ViewingPreference,
+        tag: String?,
+    ): ApiResult<String?> = withContext(dispatchers.io) {
+        when (val result = safeCall {
+            api.getMessages(
+                limit = PaginationDto.DEFAULT_LIMIT,
+                onlyMine = preference.onlyMine,
+                // Raw: Retrofit percent-encodes the tag exactly once.
+                tag = tag,
+            )
+        }) {
+            is ApiResult.Success -> {
+                val page = result.data
+                messageDao.clearFeed(feedKeyFor(tag))
+                cacheFeedPage(page.rows, tag = tag, firstPosition = 0L)
+                ApiResult.Success(page.nextCursor)
             }
+            is ApiResult.Failure -> result
         }
+    }
 
     /**
      * Appends the page following [cursor] to the tail of the cached feed. The
-     * cursor is opaque: it goes back to the API exactly as it arrived. Rows are
-     * keyed by id, so a row the server happens to repeat updates in place rather
-     * than duplicating.
+     * cursor is opaque: it goes back to the API exactly as it arrived, alongside
+     * the same [tag] the chain started under. Rows are keyed by id, so a row the
+     * server happens to repeat updates in place rather than duplicating.
      */
     override suspend fun loadMoreFeed(
         cursor: String,
         preference: ViewingPreference,
+        tag: String?,
     ): ApiResult<String?> = withContext(dispatchers.io) {
         when (val result = safeCall {
             api.getMessages(
                 limit = PaginationDto.DEFAULT_LIMIT,
                 cursor = cursor,
                 onlyMine = preference.onlyMine,
+                tag = tag,
             )
         }) {
             is ApiResult.Success -> {
                 val page = result.data
-                val base = (messageDao.maxFeedOrder() ?: -1L) + 1L
-                val entities = page.rows.mapIndexed { index, dto ->
-                    dto.toDomain(currentUserId()).toEntity(feedOrder = base + index)
-                }
-                messageDao.insertAll(entities)
+                val base = (messageDao.maxFeedPosition(feedKeyFor(tag)) ?: -1L) + 1L
+                cacheFeedPage(page.rows, tag = tag, firstPosition = base)
                 ApiResult.Success(page.nextCursor)
             }
             is ApiResult.Failure -> result
@@ -158,9 +171,20 @@ class DefaultMessagesRepository @Inject constructor(
                     // Scheduled messages are cached in the scheduled view, not the feed.
                     messageDao.upsert(message.toEntity(feedOrder = 0L))
                 } else {
-                    // Insert at the very top of the feed.
-                    val topOrder = (messageDao.maxFeedOrder() ?: 0L)
-                    messageDao.upsert(message.toEntity(feedOrder = topOrder - 1L))
+                    // Insert at the very top of the main feed. A tag feed is a
+                    // filtered view of the server's own answer, so a just-posted
+                    // message only joins one once that feed is reloaded.
+                    val head = (messageDao.minFeedPosition(MAIN_FEED_KEY) ?: 0L) - 1L
+                    messageDao.upsert(message.toEntity(feedOrder = head))
+                    messageDao.upsertFeedEntries(
+                        listOf(
+                            FeedEntryEntity(
+                                feedKey = MAIN_FEED_KEY,
+                                messageId = message.id,
+                                position = head,
+                            ),
+                        ),
+                    )
                 }
                 val crossPosts = result.data.crossPosts.mapNotNull { it.toDomainOrNull() }
                 ApiResult.Success(CreatedMessage(message = message, crossPosts = crossPosts))
@@ -245,7 +269,7 @@ class DefaultMessagesRepository @Inject constructor(
             }) {
                 is ApiResult.Success -> {
                     val reply = result.data.data.toDomain(currentUserId()).copy(parentId = parentId)
-                    val base = (messageDao.maxFeedOrder() ?: 0L) + 1L
+                    val base = (messageDao.maxMessageOrder() ?: 0L) + 1L
                     messageDao.upsert(reply.toEntity(feedOrder = base))
                     // Reflect the new reply count on the parent if it is cached.
                     bumpReplyCount(parentId, delta = 1)
@@ -438,6 +462,18 @@ class DefaultMessagesRepository @Inject constructor(
         }
     }
 
+    override suspend fun trendingTags(
+        window: TrendingWindow,
+        limit: Int,
+    ): ApiResult<List<TrendingTag>> = withContext(dispatchers.io) {
+        // window.wire, never a raw string: the server accepts anything and
+        // quietly counts a week instead of telling us the value was wrong.
+        when (val result = safeCall { api.trendingTags(window = window.wire, limit = limit) }) {
+            is ApiResult.Success -> ApiResult.Success(result.data.toDomain())
+            is ApiResult.Failure -> result
+        }
+    }
+
     override suspend fun search(query: String): ApiResult<List<Message>> = withContext(dispatchers.io) {
         when (val result = safeCall {
             api.search(query = query, limit = PaginationDto.DEFAULT_LIMIT, offset = 0)
@@ -457,6 +493,35 @@ class DefaultMessagesRepository @Inject constructor(
      */
     private val ViewingPreference.onlyMine: Boolean?
         get() = true.takeIf { this == ViewingPreference.MINE }
+
+    /**
+     * Writes one page of a feed: the message rows (shared by every feed, so a dig
+     * or an edit made anywhere shows up everywhere), then this feed's membership
+     * starting at [firstPosition]. The two halves are what keep feeds independent
+     * — appending to a tag feed adds entries under its own key and never rewrites
+     * another feed's positions.
+     */
+    private suspend fun cacheFeedPage(
+        rows: List<MessageDto>,
+        tag: String?,
+        firstPosition: Long,
+    ) {
+        val messages = rows.map { it.toDomain(currentUserId()) }
+        messageDao.insertAll(
+            messages.mapIndexed { index, message ->
+                message.toEntity(feedOrder = firstPosition + index)
+            },
+        )
+        messageDao.upsertFeedEntries(
+            messages.mapIndexed { index, message ->
+                FeedEntryEntity(
+                    feedKey = feedKeyFor(tag),
+                    messageId = message.id,
+                    position = firstPosition + index,
+                )
+            },
+        )
+    }
 
     private suspend fun <T> safeCall(block: suspend () -> T): ApiResult<T> =
         safeApiCall(json, block)
@@ -513,7 +578,7 @@ class DefaultMessagesRepository @Inject constructor(
     private suspend fun currentEntity(id: String) = messageDao.observeMessage(id).first()
 
     private suspend fun existingOrderOrTop(id: String): Long =
-        currentEntity(id)?.feedOrder ?: ((messageDao.maxFeedOrder() ?: 0L) + 1L)
+        currentEntity(id)?.feedOrder ?: ((messageDao.maxMessageOrder() ?: 0L) + 1L)
 
     private suspend fun bumpReplyCount(parentId: String, delta: Int) {
         val parent = currentEntity(parentId) ?: return

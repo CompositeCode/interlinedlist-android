@@ -6,9 +6,14 @@ import androidx.lifecycle.viewModelScope
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.feature.lists.data.ListsRepository
 import com.interlinedlist.android.feature.lists.domain.Contributor
+import com.interlinedlist.android.feature.lists.domain.InviteEmail
+import com.interlinedlist.android.feature.lists.domain.InviteRole
+import com.interlinedlist.android.feature.lists.domain.ListInvite
 import com.interlinedlist.android.feature.lists.domain.Watcher
 import com.interlinedlist.android.feature.lists.domain.WatcherCandidate
 import com.interlinedlist.android.feature.lists.domain.WatcherRole
+import com.interlinedlist.android.feature.lists.ui.isSubscriptionGate
+import com.interlinedlist.android.feature.lists.ui.toInviteMessage
 import com.interlinedlist.android.feature.lists.ui.toUserMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,8 +36,32 @@ data class WatchersUiState(
     val searchQuery: String = "",
     val candidates: List<WatcherCandidate> = emptyList(),
     val isSearching: Boolean = false,
+    /** The "Invite by email" section, which sits alongside the per-person roles. */
+    val invites: ListInvitesUiState = ListInvitesUiState(),
 ) {
     val isEmpty: Boolean get() = watchers.isEmpty() && !isLoading && errorMessage == null
+}
+
+/**
+ * State of the email-invite section: the entry form plus the pending-invite list.
+ * Kept as its own type so the section stays self-contained.
+ */
+data class ListInvitesUiState(
+    val invites: List<ListInvite> = emptyList(),
+    val email: String = "",
+    val role: InviteRole = InviteRole.VIEWER,
+    val isLoading: Boolean = true,
+    val isSending: Boolean = false,
+    /** Inline validation message for the address field. */
+    val emailError: String? = null,
+    val errorMessage: String? = null,
+    /** True when sending was refused because the account is not a subscriber. */
+    val subscriptionRequired: Boolean = false,
+) {
+    /** True when the entered address is worth sending — drives the Send control. */
+    val canSend: Boolean get() = !isSending && InviteEmail.isValid(email)
+
+    val isEmpty: Boolean get() = invites.isEmpty() && !isLoading
 }
 
 @HiltViewModel
@@ -50,6 +79,7 @@ class WatchersViewModel @Inject constructor(
 
     init {
         load()
+        loadInvites()
     }
 
     fun load() {
@@ -132,4 +162,83 @@ class WatchersViewModel @Inject constructor(
     }
 
     fun clearError() = _uiState.update { it.copy(errorMessage = null) }
+
+    // --- Email invites -----------------------------------------------------
+
+    /** Loads the pending invites. Free for any owner, so it is never gated. */
+    fun loadInvites() {
+        updateInvites { it.copy(isLoading = true, errorMessage = null) }
+        viewModelScope.launch {
+            when (val result = repository.getInvites(listId)) {
+                is ApiResult.Success -> updateInvites {
+                    it.copy(invites = result.data, isLoading = false)
+                }
+                is ApiResult.Failure -> updateInvites {
+                    it.copy(isLoading = false, errorMessage = result.error.toInviteMessage())
+                }
+            }
+        }
+    }
+
+    fun onInviteEmailChange(email: String) =
+        updateInvites { it.copy(email = email, emailError = null, errorMessage = null) }
+
+    fun selectInviteRole(role: InviteRole) = updateInvites { it.copy(role = role) }
+
+    /**
+     * Sends the invite. An address that is not syntactically valid is rejected here,
+     * so no request is made; everything else (ownership, the subscriber gate, an
+     * address that cannot be invited) is reported by the server and surfaced as-is.
+     */
+    fun sendInvite() {
+        val form = _uiState.value.invites
+        if (form.isSending) return
+        if (!InviteEmail.isValid(form.email)) {
+            updateInvites { it.copy(emailError = InviteEmail.INVALID_MESSAGE) }
+            return
+        }
+        updateInvites {
+            it.copy(isSending = true, emailError = null, errorMessage = null, subscriptionRequired = false)
+        }
+        viewModelScope.launch {
+            when (val result = repository.sendInvite(listId, form.email, form.role)) {
+                is ApiResult.Success -> updateInvites { state ->
+                    // Re-inviting an address is idempotent server-side (a fresh token
+                    // replaces the old one), so replace any row for the same address.
+                    val sent = result.data
+                    state.copy(
+                        invites = state.invites.filterNot { it.email.equals(sent.email, ignoreCase = true) } + sent,
+                        email = "",
+                        isSending = false,
+                    )
+                }
+                is ApiResult.Failure -> updateInvites {
+                    it.copy(
+                        isSending = false,
+                        errorMessage = result.error.toInviteMessage(),
+                        subscriptionRequired = result.error.isSubscriptionGate,
+                    )
+                }
+            }
+        }
+    }
+
+    /** Optimistically drops the invite row; restores it if the revoke fails. */
+    fun revokeInvite(token: String) {
+        val previous = _uiState.value.invites.invites
+        updateInvites { state ->
+            state.copy(invites = state.invites.filterNot { it.token == token }, errorMessage = null)
+        }
+        viewModelScope.launch {
+            when (val result = repository.revokeInvite(listId, token)) {
+                is ApiResult.Success -> Unit
+                is ApiResult.Failure -> updateInvites {
+                    it.copy(invites = previous, errorMessage = result.error.toInviteMessage())
+                }
+            }
+        }
+    }
+
+    private fun updateInvites(transform: (ListInvitesUiState) -> ListInvitesUiState) =
+        _uiState.update { it.copy(invites = transform(it.invites)) }
 }

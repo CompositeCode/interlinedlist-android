@@ -3,7 +3,10 @@ package com.interlinedlist.android.feature.organizations.data.remote
 import com.interlinedlist.android.feature.organizations.data.remote.dto.AddMemberRequest
 import com.interlinedlist.android.feature.organizations.data.remote.dto.CreateOrganizationRequest
 import com.interlinedlist.android.feature.organizations.data.remote.dto.JoinOrganizationRequest
+import com.interlinedlist.android.feature.organizations.data.remote.dto.LinkedInAssignmentRequest
+import com.interlinedlist.android.feature.organizations.data.remote.dto.LinkedInAssignmentResponse
 import com.interlinedlist.android.feature.organizations.data.remote.dto.MembersResponse
+import com.interlinedlist.android.feature.organizations.data.remote.dto.OrgLinkedInStatusResponse
 import com.interlinedlist.android.feature.organizations.data.remote.dto.OrgUsersResponse
 import com.interlinedlist.android.feature.organizations.data.remote.dto.OrganizationEnvelope
 import com.interlinedlist.android.feature.organizations.data.remote.dto.OrganizationsResponse
@@ -96,4 +99,39 @@ interface OrganizationsApi {
         @Query("limit") limit: Int,
         @Query("offset") offset: Int,
     ): OrgUsersResponse
+
+    /**
+     * The organization's shared LinkedIn credential and the pages discovered for
+     * it. Members-only: an outsider gets
+     * `403 {"error":"Not a member of this organization"}` (verified live), and an
+     * organization with no credential answers `200 {"credential":null,"role":…}`.
+     */
+    @GET("api/organizations/{id}/linkedin/status")
+    suspend fun getLinkedInStatus(@Path("id") id: String): OrgLinkedInStatusResponse
+
+    /**
+     * Assigns one member to one company page — or clears their assignment when the
+     * body carries no `pageId`. Owner/admin only (`403 "Admin or owner required"`).
+     */
+    @PUT("api/organizations/{id}/linkedin/assignments")
+    suspend fun putLinkedInAssignment(
+        @Path("id") id: String,
+        @Body body: LinkedInAssignmentRequest,
+    ): LinkedInAssignmentResponse
+
+    /**
+     * Disconnects the shared credential; the server clears the assignments with
+     * it. Answers `404 {"error":"No LinkedIn credential found"}` when there is
+     * none (verified live).
+     */
+    @DELETE("api/organizations/{id}/linkedin/credential")
+    suspend fun deleteLinkedInCredential(@Path("id") id: String)
+
+    /**
+     * Re-discovers the organization's company pages. Answers
+     * `404 {"error":"No active LinkedIn credential for this organization"}` when
+     * the organization has not connected LinkedIn (verified live).
+     */
+    @POST("api/organizations/{id}/linkedin/sync-pages")
+    suspend fun syncLinkedInPages(@Path("id") id: String)
 }

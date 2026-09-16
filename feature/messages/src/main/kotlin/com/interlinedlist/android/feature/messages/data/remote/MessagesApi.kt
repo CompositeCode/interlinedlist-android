@@ -11,6 +11,7 @@ import com.interlinedlist.android.feature.messages.data.remote.dto.MetadataRespo
 import com.interlinedlist.android.feature.messages.data.remote.dto.ReportRequest
 import com.interlinedlist.android.feature.messages.data.remote.dto.ScheduledMessagesResponse
 import com.interlinedlist.android.feature.messages.data.remote.dto.TagAutocompleteResponse
+import com.interlinedlist.android.feature.messages.data.remote.dto.TrendingTagsResponse
 import com.interlinedlist.android.feature.messages.data.remote.dto.UserReportRequest
 import okhttp3.MultipartBody
 import retrofit2.http.Body
@@ -43,12 +44,19 @@ interface MessagesApi {
      * `offset`, `onlyMine` and `tag`): there is no following/followers parameter,
      * because the server scopes the feed by the account's saved
      * `viewingPreference`. Null omits the parameter.
+     *
+     * [tag] filters the feed to messages carrying that tag. Tags are free-form and
+     * routinely contain spaces and punctuation (`life is short, o brave girl` is a
+     * real one), so the value is passed **raw** and Retrofit percent-encodes it
+     * exactly once — pre-encoding here would double-encode it and match nothing.
+     * Null omits the parameter, which is the unfiltered feed.
      */
     @GET("api/messages")
     suspend fun getMessages(
         @Query("limit") limit: Int,
         @Query("cursor") cursor: String? = null,
         @Query("onlyMine") onlyMine: Boolean? = null,
+        @Query("tag") tag: String? = null,
     ): MessagesResponse
 
     /** Creates a new message (or a reply when `parentId` is set). The created
@@ -129,6 +137,22 @@ interface MessagesApi {
         @Query("q") query: String,
         @Query("limit") limit: Int? = null,
     ): TagAutocompleteResponse
+
+    /**
+     * The most-used tags across **public** messages inside a trailing [window].
+     *
+     * [window] must be one of `day`, `week` or `month`: the server falls back to
+     * `week` for anything else **without reporting it**, so a typo would silently
+     * mislabel the surface. [limit] defaults to 20 server-side and is clamped to
+     * 100. The response is a bare `{ "tags": [ { tag, count, lastUsedAt } ] }` —
+     * it does **not** echo the window back, so the caller is the only thing that
+     * knows which period the counts cover.
+     */
+    @GET("api/tags/trending")
+    suspend fun trendingTags(
+        @Query("window") window: String,
+        @Query("limit") limit: Int,
+    ): TrendingTagsResponse
 
     /** Reports a message with a reason (and optional free-text detail). */
     @POST("api/messages/{id}/report")

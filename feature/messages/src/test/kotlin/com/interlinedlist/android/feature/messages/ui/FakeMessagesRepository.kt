@@ -13,6 +13,8 @@ import com.interlinedlist.android.feature.messages.domain.MessageVisibility
 import com.interlinedlist.android.feature.messages.domain.PushedMessage
 import com.interlinedlist.android.feature.messages.domain.ReportReason
 import com.interlinedlist.android.feature.messages.domain.TagSuggestion
+import com.interlinedlist.android.feature.messages.domain.TrendingTag
+import com.interlinedlist.android.feature.messages.domain.TrendingWindow
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
@@ -29,6 +31,8 @@ import kotlin.coroutines.cancellation.CancellationException
 class FakeMessagesRepository : MessagesRepository {
 
     private val feed = MutableStateFlow<List<Message>>(emptyList())
+    /** Per-tag feeds, so a tag feed can be observed independently of the main one. */
+    private val tagFeeds = MutableStateFlow<Map<String, List<Message>>>(emptyMap())
     private val replies = MutableStateFlow<Map<String, List<Message>>>(emptyMap())
     private val single = MutableStateFlow<Map<String, Message>>(emptyMap())
     private val scheduled = MutableStateFlow<List<Message>>(emptyList())
@@ -64,6 +68,10 @@ class FakeMessagesRepository : MessagesRepository {
     /** Per-query canned autocomplete answers; anything else falls back below. */
     val autocompleteResponses = mutableMapOf<String, ApiResult<List<TagSuggestion>>>()
     var autocompleteResult: ApiResult<List<TagSuggestion>> = ApiResult.Success(emptyList())
+    /** What [trendingTags] answers with. */
+    var trendingTagsResult: ApiResult<List<TrendingTag>> = ApiResult.Success(emptyList())
+    /** Every window [trendingTags] was asked for, in order. */
+    val trendingWindows = mutableListOf<TrendingWindow>()
     /** The account's saved feed preference, as read from `GET /api/user`. */
     var viewingPreferenceResult: ApiResult<ViewingPreference> = ApiResult.Success(ViewingPreference.ALL)
     /** What the `PATCH /api/user/update` of the preference answers with. */
@@ -77,6 +85,15 @@ class FakeMessagesRepository : MessagesRepository {
     val refreshPreferences = mutableListOf<ViewingPreference>()
     /** The preference each [loadMoreFeed] ran under, in order. */
     val loadMorePreferences = mutableListOf<ViewingPreference>()
+    /** The tag each [refreshFeed] ran under (null = main feed), in order. */
+    val refreshTags = mutableListOf<String?>()
+    /** The tag each [loadMoreFeed] ran under (null = main feed), in order. */
+    val loadMoreTags = mutableListOf<String?>()
+    /** Every tag [observeFeed] was subscribed to, in order. */
+    val observedTags = mutableListOf<String?>()
+    /** How many times the composer-only lookups were made. */
+    var linkedNetworksCalls = 0
+    var defaultVisibilityCalls = 0
     /** Every preference [setViewingPreference] was asked to PATCH, in order. */
     val savedViewingPreferences = mutableListOf<ViewingPreference>()
     var lastSetDug: Pair<String, Boolean>? = null
@@ -140,13 +157,19 @@ class FakeMessagesRepository : MessagesRepository {
     data class ReportUserArgs(val username: String, val reason: ReportReason, val detail: String?)
 
     fun emitFeed(messages: List<Message>) { feed.value = messages }
+    fun emitTagFeed(tag: String, messages: List<Message>) {
+        tagFeeds.value = tagFeeds.value + (tag to messages)
+    }
     fun emitReplies(parentId: String, messages: List<Message>) {
         replies.value = replies.value + (parentId to messages)
     }
     fun emitMessage(message: Message) { single.value = single.value + (message.id to message) }
     fun emitScheduled(messages: List<Message>) { scheduled.value = messages }
 
-    override fun observeFeed(): Flow<List<Message>> = feed
+    override fun observeFeed(tag: String?): Flow<List<Message>> {
+        observedTags += tag
+        return if (tag == null) feed else tagFeeds.map { it[tag].orEmpty() }
+    }
 
     override fun observeReplies(messageId: String): Flow<List<Message>> =
         replies.map { it[messageId].orEmpty() }
@@ -156,16 +179,22 @@ class FakeMessagesRepository : MessagesRepository {
 
     override fun observeScheduled(): Flow<List<Message>> = scheduled
 
-    override suspend fun refreshFeed(preference: ViewingPreference): ApiResult<String?> {
+    override suspend fun refreshFeed(preference: ViewingPreference, tag: String?): ApiResult<String?> {
         refreshCount++
         refreshPreferences += preference
+        refreshTags += tag
         return refreshResult
     }
 
-    override suspend fun loadMoreFeed(cursor: String, preference: ViewingPreference): ApiResult<String?> {
+    override suspend fun loadMoreFeed(
+        cursor: String,
+        preference: ViewingPreference,
+        tag: String?,
+    ): ApiResult<String?> {
         loadMoreCount++
         loadMoreCursors += cursor
         loadMorePreferences += preference
+        loadMoreTags += tag
         return loadMoreResult
     }
 
@@ -207,9 +236,15 @@ class FakeMessagesRepository : MessagesRepository {
         }
     }
 
-    override suspend fun getLinkedNetworks(): ApiResult<List<LinkedNetwork>> = linkedNetworksResult
+    override suspend fun getLinkedNetworks(): ApiResult<List<LinkedNetwork>> {
+        linkedNetworksCalls++
+        return linkedNetworksResult
+    }
 
-    override suspend fun getDefaultVisibility(): ApiResult<MessageVisibility> = defaultVisibilityResult
+    override suspend fun getDefaultVisibility(): ApiResult<MessageVisibility> {
+        defaultVisibilityCalls++
+        return defaultVisibilityResult
+    }
 
     override suspend fun uploadImage(bytes: ByteArray, fileName: String, mimeType: String): ApiResult<String> {
         uploadedImages++
@@ -312,6 +347,14 @@ class FakeMessagesRepository : MessagesRepository {
         }
         completedAutocompleteQueries += query
         return autocompleteResponses[query] ?: autocompleteResult
+    }
+
+    override suspend fun trendingTags(
+        window: TrendingWindow,
+        limit: Int,
+    ): ApiResult<List<TrendingTag>> {
+        trendingWindows += window
+        return trendingTagsResult
     }
 
     override suspend fun search(query: String): ApiResult<List<Message>> = searchResult

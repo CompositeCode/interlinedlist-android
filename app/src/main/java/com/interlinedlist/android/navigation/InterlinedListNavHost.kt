@@ -10,6 +10,7 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.MailOutline
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
@@ -32,6 +33,10 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.navigation.navDeepLink
 import androidx.navigation.navigation
+import com.interlinedlist.android.blog.BlogLauncher
+import com.interlinedlist.android.blog.BlogLink
+import com.interlinedlist.android.blog.BlogRoutes
+import com.interlinedlist.android.blog.ui.BlogSubscriptionRoute
 import com.interlinedlist.android.feature.auth.nav.AuthRoutes
 import com.interlinedlist.android.feature.auth.nav.authGraph
 import com.interlinedlist.android.feature.directmessages.navigation.DirectMessagesDestinations
@@ -60,6 +65,7 @@ import com.interlinedlist.android.feature.lists.ui.share.ShareRoute
 import com.interlinedlist.android.feature.lists.ui.share.SharedListRoute
 import com.interlinedlist.android.feature.lists.ui.share.SharedWithMeRoute
 import com.interlinedlist.android.feature.lists.ui.watchers.WatchersRoute
+import com.interlinedlist.android.feature.messages.navigation.MessagesDestinations
 import com.interlinedlist.android.feature.messages.ui.detail.MessageDetailRoute
 import com.interlinedlist.android.feature.messages.ui.feed.MessagesRoute
 import com.interlinedlist.android.feature.messages.ui.scheduled.ScheduledMessagesRoute
@@ -196,6 +202,8 @@ fun InterlinedListNavHost(
     startLoggedIn: Boolean,
     notificationRoute: String? = null,
     emailChangeRoute: String? = null,
+    tagFeedRoute: String? = null,
+    blogSubscriptionRoute: String? = null,
 ) {
     val navController = rememberNavController()
     NavHost(
@@ -222,7 +230,9 @@ fun InterlinedListNavHost(
             // offline is pushed) without waiting for the user to open Settings.
             AccountThemeSyncEffect()
             MainShell(
-                notificationRoute = notificationRoute,
+                // A launch is either a notification tap or a link tap, never both.
+                pendingRoute = notificationRoute ?: tagFeedRoute,
+                onOpenBlogEmails = { navController.navigate(BlogRoutes.subscription()) },
                 onLoggedOut = {
                     // Stop background sync/poll for the signed-out session. Cancellation
                     // must never crash the sign-out flow, so any failure is swallowed.
@@ -230,6 +240,36 @@ fun InterlinedListNavHost(
                     runCatching { NotificationsSyncScheduler.cancelAll(context) }
                     navController.navigate(AuthRoutes.GRAPH) {
                         popUpTo(Routes.MAIN) { inclusive = true }
+                    }
+                },
+            )
+        }
+
+        // Blog email list. Registered at the TOP level, outside the signed-in shell,
+        // because the confirm and unsubscribe links are unauthenticated and arrive by
+        // email — whoever taps one may not have a session, and the web unsubscribe link
+        // has to keep working for them too.
+        composable(
+            route = BlogRoutes.SUBSCRIPTION,
+            arguments = listOf(
+                navArgument(BlogRoutes.ACTION_ARG) {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
+                navArgument(BlogRoutes.TOKEN_ARG) {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
+            ),
+        ) {
+            BlogSubscriptionRoute(
+                onBack = {
+                    // A link tapped on a cold start has nothing behind it; fall back to
+                    // the app's own start destination rather than closing the app.
+                    if (!navController.popBackStack()) {
+                        navController.navigate(if (startLoggedIn) Routes.MAIN else AuthRoutes.GRAPH)
                     }
                 },
             )
@@ -242,6 +282,11 @@ fun InterlinedListNavHost(
     LaunchedEffect(Unit) {
         emailChangeRoute?.let { route -> runCatching { navController.navigate(route) } }
     }
+
+    // Likewise for a tapped blog confirm/unsubscribe link.
+    LaunchedEffect(Unit) {
+        blogSubscriptionRoute?.let { route -> runCatching { navController.navigate(route) } }
+    }
 }
 
 /**
@@ -251,7 +296,8 @@ fun InterlinedListNavHost(
  */
 @Composable
 private fun MainShell(
-    notificationRoute: String? = null,
+    pendingRoute: String? = null,
+    onOpenBlogEmails: () -> Unit = {},
     onLoggedOut: () -> Unit,
 ) {
     val tabNav = rememberNavController()
@@ -285,10 +331,11 @@ private fun MainShell(
     val pushRegistration: PushRegistrationViewModel = hiltViewModel()
     LaunchedEffect(Unit) { pushRegistration.runForSession() }
 
-    // Route straight to a tapped notification's destination once, when present.
-    val pendingRoute by rememberUpdatedState(notificationRoute)
+    // Route straight to the launch's destination once, when present: a tapped
+    // notification, or a tapped link (a tag feed) resolved in MainActivity.
+    val launchRoute by rememberUpdatedState(pendingRoute)
     LaunchedEffect(Unit) {
-        pendingRoute?.let { route ->
+        launchRoute?.let { route ->
             runCatching { tabNav.navigate(route) }
         }
     }
@@ -328,6 +375,22 @@ private fun MainShell(
                 MessagesRoute(
                     onOpenMessage = { id -> tabNav.navigate(Routes.messageDetail(id)) },
                     onOpenScheduled = { tabNav.navigate(Routes.MESSAGES_SCHEDULED) },
+                    onOpenTag = { tag -> tabNav.navigate(MessagesDestinations.tagFeedRoute(tag)) },
+                )
+            }
+            // The same feed screen, filtered to one tag. The tag arrives as a nav
+            // argument, so paging and the view switcher are shared, not forked.
+            composable(
+                MessagesDestinations.TAG_FEED,
+                arguments = listOf(
+                    navArgument(MessagesDestinations.ARG_TAG) { type = NavType.StringType },
+                ),
+            ) {
+                MessagesRoute(
+                    onOpenMessage = { id -> tabNav.navigate(Routes.messageDetail(id)) },
+                    onOpenScheduled = {},
+                    onOpenTag = { tag -> tabNav.navigate(MessagesDestinations.tagFeedRoute(tag)) },
+                    onBack = { tabNav.popBackStack() },
                 )
             }
             composable(
@@ -337,6 +400,7 @@ private fun MainShell(
                 MessageDetailRoute(
                     onBack = { tabNav.popBackStack() },
                     onOpenMessage = { id -> tabNav.navigate(Routes.messageDetail(id)) },
+                    onOpenTag = { tag -> tabNav.navigate(MessagesDestinations.tagFeedRoute(tag)) },
                 )
             }
             composable(Routes.MESSAGES_SCHEDULED) {
@@ -520,6 +584,8 @@ private fun MainShell(
                 // Sign-out reuses the existing auth-backed logout; the profile
                 // module intentionally owns no session state.
                 val logoutViewModel: HomeViewModel = hiltViewModel()
+                val accountContext = LocalContext.current
+                val colorScheme = MaterialTheme.colorScheme
                 ProfileRoute(
                     onEditProfile = { tabNav.navigate(Routes.PROFILE_EDIT) },
                     onSearchUsers = { tabNav.navigate(Routes.USER_SEARCH) },
@@ -534,6 +600,15 @@ private fun MainShell(
                     onOpenBlockedMuted = { tabNav.navigate(Routes.ACCOUNT_BLOCKED_MUTED) },
                     onOpenAccountSettings = { tabNav.navigate(Routes.ACCOUNT_SETTINGS) },
                     onOpenSettings = { tabNav.navigate(Routes.SETTINGS) },
+                    // Leaves the app rather than navigating: the blog is server-rendered
+                    // with no listing API, so it opens in a themed Custom Tab.
+                    onOpenBlog = {
+                        BlogLauncher.open(accountContext, BlogLink.INDEX_URL, colorScheme)
+                    },
+                    // Stays in the app — the mailing list has a real API. Navigated on
+                    // the OUTER controller so the same destination serves the emailed
+                    // confirm/unsubscribe links, which must work signed out too.
+                    onOpenBlogEmails = onOpenBlogEmails,
                     onSignOut = { logoutViewModel.logout(onLoggedOut) },
                 )
             }

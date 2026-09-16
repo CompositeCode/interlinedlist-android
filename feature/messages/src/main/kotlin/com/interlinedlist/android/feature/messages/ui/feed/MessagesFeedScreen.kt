@@ -27,6 +27,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Image
@@ -84,6 +85,9 @@ import com.interlinedlist.android.feature.messages.ui.components.MessageCard
 import com.interlinedlist.android.feature.messages.ui.components.ModerationDialog
 import com.interlinedlist.android.feature.messages.ui.components.ReportDialog
 import com.interlinedlist.android.feature.messages.ui.readMediaBytes
+import com.interlinedlist.android.feature.messages.ui.trending.TrendingTagsRail
+import com.interlinedlist.android.feature.messages.ui.trending.TrendingTagsUiState
+import com.interlinedlist.android.feature.messages.ui.trending.TrendingTagsViewModel
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 
@@ -131,6 +135,11 @@ object MessagesFeedTags {
     const val TAG_SUGGESTIONS = "messagesComposeTagSuggestions"
     const val TAG_SUGGESTION_PREFIX = "messagesComposeTagSuggestion_"
 
+    /** Back arrow shown instead of the tab bar when the feed is filtered to a tag. */
+    const val BACK = "messagesFeedBack"
+    /** Title shown while the feed is filtered to a tag. */
+    const val TAG_TITLE = "messagesFeedTagTitle"
+
     /** The quoted message attached to the composer, and its always-public banner. */
     const val QUOTE_ATTACHED = "messagesComposeQuoteAttached"
     const val QUOTE_PUBLIC_BANNER = "messagesComposeQuoteBanner"
@@ -146,27 +155,42 @@ object MessagesFeedTags {
 }
 
 /**
- * Hilt-wired feed entry point. The app's NavHost hosts this as the Messages tab.
+ * Hilt-wired feed entry point, hosted twice: as the Messages tab, and as the
+ * tag-filtered feed (`MessagesDestinations.TAG_FEED`). Which one it is comes from
+ * the ViewModel's nav arguments, so both get identical paging, view-preference and
+ * moderation behaviour from the same code.
  *
  * @param onOpenMessage navigates to the detail screen for the given message id.
  * @param onOpenScheduled navigates to the Scheduled messages screen.
+ * @param onOpenTag opens the feed filtered to a tapped tag.
+ * @param onBack pops the tag feed; ignored on the tab root, which has no back arrow.
  */
 @Composable
 fun MessagesRoute(
     onOpenMessage: (String) -> Unit,
     onOpenScheduled: () -> Unit,
     modifier: Modifier = Modifier,
+    onOpenTag: ((String) -> Unit)? = null,
+    onBack: () -> Unit = {},
     viewModel: MessagesFeedViewModel = hiltViewModel(),
+    trendingViewModel: TrendingTagsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    // Trending has its own ViewModel: it outlives a feed refresh, and a trending
+    // lookup that fails must not read as a feed that failed.
+    val trending by trendingViewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     MessagesFeedScreen(
         state = state,
+        trending = trending,
+        onRetryTrending = trendingViewModel::refresh,
         onRefresh = viewModel::refresh,
         onLoadMore = viewModel::loadMore,
         onViewingPreferenceChange = viewModel::onViewingPreferenceChange,
         onOpenMessage = onOpenMessage,
         onOpenScheduled = onOpenScheduled,
+        onOpenTag = onOpenTag,
+        onBack = onBack,
         onDig = viewModel::onDig,
         onDelete = viewModel::onDelete,
         onPush = viewModel::onPush,
@@ -223,8 +247,12 @@ fun MessagesFeedScreen(
     onComposeTextChange: (String) -> Unit,
     onPost: () -> Unit,
     modifier: Modifier = Modifier,
+    trending: TrendingTagsUiState = TrendingTagsUiState(),
+    onRetryTrending: () -> Unit = {},
     onViewingPreferenceChange: (ViewingPreference) -> Unit = {},
     onOpenScheduled: () -> Unit = {},
+    onOpenTag: ((String) -> Unit)? = null,
+    onBack: () -> Unit = {},
     onPush: (Message) -> Unit = {},
     onQuote: (Message) -> Unit = {},
     onReport: (Message) -> Unit = {},
@@ -255,19 +283,49 @@ fun MessagesFeedScreen(
         modifier = modifier.fillMaxSize(),
         topBar = {
             TopAppBar(
-                title = { Text("Messages") },
+                title = {
+                    if (state.tag != null) {
+                        Text(
+                            text = state.tag,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.testTag(MessagesFeedTags.TAG_TITLE),
+                        )
+                    } else {
+                        Text("Messages")
+                    }
+                },
+                navigationIcon = {
+                    // The tag feed is pushed on top of a tab, so it carries its own
+                    // back affordance; the tab root does not.
+                    if (state.isTagFeed) {
+                        IconButton(
+                            onClick = onBack,
+                            modifier = Modifier.testTag(MessagesFeedTags.BACK),
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                            )
+                        }
+                    }
+                },
                 actions = {
-                    IconButton(
-                        onClick = onOpenScheduled,
-                        modifier = Modifier.testTag(MessagesFeedTags.SCHEDULED_ACTION),
-                    ) {
-                        Icon(Icons.Filled.Schedule, contentDescription = "Scheduled messages")
+                    if (!state.isTagFeed) {
+                        IconButton(
+                            onClick = onOpenScheduled,
+                            modifier = Modifier.testTag(MessagesFeedTags.SCHEDULED_ACTION),
+                        ) {
+                            Icon(Icons.Filled.Schedule, contentDescription = "Scheduled messages")
+                        }
                     }
                 },
             )
         },
         floatingActionButton = {
-            if (!state.subscriptionRequired) {
+            // Composing from a tag feed would post an untagged message into a feed
+            // it cannot appear in, so the composer stays on the main feed.
+            if (!state.subscriptionRequired && !state.isTagFeed) {
                 FloatingActionButton(
                     onClick = onOpenCompose,
                     modifier = Modifier.testTag(MessagesFeedTags.FAB),
@@ -283,13 +341,26 @@ fun MessagesFeedScreen(
                 enabled = !state.isChangingViewingPreference,
                 onSelect = onViewingPreferenceChange,
             )
+            // A rail of doors that open nothing is not worth its space, so it
+            // only exists where the host wired somewhere to go.
+            val trendingRail: (@Composable () -> Unit)? = onOpenTag?.let { openTag ->
+                {
+                    TrendingTagsRail(
+                        state = trending,
+                        onOpenTag = openTag,
+                        onRetry = onRetryTrending,
+                    )
+                }
+            }
             when {
                 state.subscriptionRequired -> LockedState(message = state.errorMessage)
                 else -> FeedContent(
                     state = state,
+                    trendingRail = trendingRail,
                     onRefresh = onRefresh,
                     onLoadMore = onLoadMore,
                     onOpenMessage = onOpenMessage,
+                    onOpenTag = onOpenTag,
                     onDig = onDig,
                     onDelete = onDelete,
                     onPush = onPush,
@@ -404,9 +475,11 @@ private val ViewingPreference.label: String
 @Composable
 private fun FeedContent(
     state: MessagesFeedUiState,
+    trendingRail: (@Composable () -> Unit)?,
     onRefresh: () -> Unit,
     onLoadMore: () -> Unit,
     onOpenMessage: (String) -> Unit,
+    onOpenTag: ((String) -> Unit)?,
     onDig: (Message) -> Unit,
     onDelete: (Message) -> Unit,
     onPush: (Message) -> Unit,
@@ -426,11 +499,13 @@ private fun FeedContent(
         when {
             state.isEmpty && state.isRefreshing -> LoadingState()
             state.isEmpty && state.errorMessage != null -> ErrorState(state.errorMessage, onRefresh)
-            state.isEmpty -> EmptyState()
+            state.isEmpty -> EmptyState(tag = state.tag, trendingRail = trendingRail)
             else -> FeedList(
                 state = state,
+                trendingRail = trendingRail,
                 onLoadMore = onLoadMore,
                 onOpenMessage = onOpenMessage,
+                onOpenTag = onOpenTag,
                 onDig = onDig,
                 onDelete = onDelete,
                 onPush = onPush,
@@ -449,8 +524,10 @@ private fun FeedContent(
 @Composable
 private fun FeedList(
     state: MessagesFeedUiState,
+    trendingRail: (@Composable () -> Unit)?,
     onLoadMore: () -> Unit,
     onOpenMessage: (String) -> Unit,
+    onOpenTag: ((String) -> Unit)?,
     onDig: (Message) -> Unit,
     onDelete: (Message) -> Unit,
     onPush: (Message) -> Unit,
@@ -478,6 +555,10 @@ private fun FeedList(
             .fillMaxSize()
             .testTag(MessagesFeedTags.LIST),
     ) {
+        // First row of the feed rather than a fixed band above it: the switcher
+        // and the composer already own the top of this screen, so the rail earns
+        // its place by scrolling away once the reader is past it.
+        trendingRail?.let { rail -> item(key = "trendingTags") { rail() } }
         items(state.messages, key = { it.id }) { message ->
             MessageCard(
                 message = message,
@@ -494,6 +575,7 @@ private fun FeedList(
                 onQuote = { onQuote(message) },
                 // The embedded original opens on its own page.
                 onOpenPushedMessage = onOpenMessage,
+                onTagClick = onOpenTag,
             )
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         }
@@ -515,15 +597,32 @@ private fun LoadingState() {
 }
 
 @Composable
-private fun EmptyState() {
-    Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
-        Text(
-            text = "No messages yet. Be the first to post.",
-            style = MaterialTheme.typography.bodyLarge,
-            textAlign = TextAlign.Center,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.testTag(MessagesFeedTags.EMPTY),
-        )
+private fun EmptyState(
+    tag: String? = null,
+    trendingRail: (@Composable () -> Unit)? = null,
+) {
+    Column(Modifier.fillMaxSize()) {
+        // An empty feed is exactly where somewhere-to-go matters most, so the
+        // rail stays on screen instead of scrolling with a list that has no rows.
+        trendingRail?.invoke()
+        Box(
+            modifier = Modifier.fillMaxSize().padding(32.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                // The tag feed hides the composer, so "be the first to post"
+                // would be an invitation the screen cannot honour.
+                text = if (tag != null) {
+                    "Nothing tagged \u201C$tag\u201D yet."
+                } else {
+                    "No messages yet. Be the first to post."
+                },
+                style = MaterialTheme.typography.bodyLarge,
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.testTag(MessagesFeedTags.EMPTY),
+            )
+        }
     }
 }
 
