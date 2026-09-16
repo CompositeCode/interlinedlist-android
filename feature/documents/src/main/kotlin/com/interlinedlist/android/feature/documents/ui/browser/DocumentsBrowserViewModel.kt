@@ -4,6 +4,8 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.interlinedlist.android.core.common.result.ApiResult
+import com.interlinedlist.android.core.materialize.domain.MaterializeTarget
+import com.interlinedlist.android.core.materialize.ui.MaterializeLaunch
 import com.interlinedlist.android.feature.ai.domain.AiGate
 import com.interlinedlist.android.feature.documents.data.DocumentsRepository
 import com.interlinedlist.android.feature.documents.domain.Document
@@ -12,6 +14,7 @@ import com.interlinedlist.android.feature.documents.domain.FolderNode
 import com.interlinedlist.android.feature.documents.domain.FolderSummary
 import com.interlinedlist.android.feature.documents.ui.common.isSubscriptionGate
 import com.interlinedlist.android.feature.documents.ui.common.toUserMessage
+import com.interlinedlist.android.feature.documents.ui.materialize.documentMaterializeLaunch
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -46,6 +49,11 @@ data class DocumentsBrowserUiState(
      * deployment with no provider configured — never sees the entry point at all.
      */
     val isAiEnabled: Boolean = false,
+    /**
+     * The "Create from…" window to show, once a row's ＋ Create menu has picked a
+     * destination. Null while nothing is being converted.
+     */
+    val createFrom: MaterializeLaunch? = null,
 ) {
     val isEmpty: Boolean get() = contents.isEmpty && !isLoading
 
@@ -171,6 +179,45 @@ class DocumentsBrowserViewModel @Inject constructor(
                 is ApiResult.Failure -> showError(result.error.toUserMessage())
             }
         }
+    }
+
+    /**
+     * Opens "Create from…" on a whole document from its browser row.
+     *
+     * The index endpoint omits document bodies, so a row usually knows only its
+     * snippet; the body is fetched first so the window can preview the rows the
+     * headings and bullets will become. A fetch that fails still opens the
+     * window: the request carries the document **id**, and the server derives
+     * everything from its own copy — a missing preview is a worse preview, not a
+     * wrong creation.
+     */
+    fun createFrom(document: Document, target: MaterializeTarget) {
+        val cached = document.content
+        if (!cached.isNullOrBlank()) {
+            showCreateFrom(document.id, document.title, cached, target)
+            return
+        }
+        viewModelScope.launch {
+            val loaded = (repository.refreshDocument(document.id) as? ApiResult.Success)?.data
+            showCreateFrom(
+                documentId = document.id,
+                title = loaded?.title ?: document.title,
+                markdown = loaded?.content,
+                target = target,
+            )
+        }
+    }
+
+    /** Closes the "Create from…" window. */
+    fun dismissCreateFrom() = _uiState.update { it.copy(createFrom = null) }
+
+    private fun showCreateFrom(
+        documentId: String,
+        title: String,
+        markdown: String?,
+        target: MaterializeTarget,
+    ) = _uiState.update {
+        it.copy(createFrom = documentMaterializeLaunch(documentId, title, markdown, target))
     }
 
     /** Moves [documentId] into [targetFolderId] (null == root/unfiled). */

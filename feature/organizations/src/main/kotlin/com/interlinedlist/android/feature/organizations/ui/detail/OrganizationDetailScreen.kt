@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -20,7 +21,9 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -33,6 +36,8 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
@@ -55,10 +60,14 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.interlinedlist.android.core.designsystem.theme.InterlinedListTheme
 import com.interlinedlist.android.feature.organizations.domain.MemberCandidate
+import com.interlinedlist.android.feature.organizations.domain.OrgLinkedInPage
+import com.interlinedlist.android.feature.organizations.domain.OrgLinkedInStatus
 import com.interlinedlist.android.feature.organizations.domain.OrgMember
 import com.interlinedlist.android.feature.organizations.domain.OrgRole
 import com.interlinedlist.android.feature.organizations.domain.Organization
 import com.interlinedlist.android.feature.organizations.ui.LAST_OWNER_EXPLANATION
+import com.interlinedlist.android.feature.organizations.ui.LINKEDIN_DISCONNECT_CONSEQUENCE
+import com.interlinedlist.android.feature.organizations.ui.LINKEDIN_NOT_CONNECTED_EXPLANATION
 
 /** Stable test tags for the organization detail screen. */
 object OrganizationDetailTestTags {
@@ -85,6 +94,26 @@ object OrganizationDetailTestTags {
     const val VIEWER_ROLE = "orgDetailViewerRole"
     const val SYSTEM = "orgDetailSystem"
     const val EDIT_VISIBILITY = "orgDetailEditVisibility"
+    const val LINKEDIN = "orgDetailLinkedIn"
+    const val LINKEDIN_CONNECTED = "orgDetailLinkedInConnected"
+    const val LINKEDIN_NOT_CONNECTED = "orgDetailLinkedInNotConnected"
+    const val LINKEDIN_ERROR = "orgDetailLinkedInError"
+    const val LINKEDIN_SYNC = "orgDetailLinkedInSync"
+    const val LINKEDIN_NO_PAGES = "orgDetailLinkedInNoPages"
+    const val LINKEDIN_DISCONNECT = "orgDetailLinkedInDisconnect"
+    const val LINKEDIN_DISCONNECT_DIALOG = "orgDetailLinkedInDisconnectDialog"
+    const val LINKEDIN_DISCONNECT_CONFIRM = "orgDetailLinkedInDisconnectConfirm"
+    fun linkedInPage(pageId: String) = "orgLinkedInPage_$pageId"
+
+    /** The assignment control on a member's LinkedIn row. */
+    fun linkedInAssignment(userId: String) = "orgLinkedInAssignment_$userId"
+
+    /** A page option inside a member's assignment menu. */
+    fun linkedInPageOption(userId: String, pageId: String) = "orgLinkedInOption_${userId}_$pageId"
+
+    /** The "Not assigned" option inside a member's assignment menu. */
+    fun linkedInClearOption(userId: String) = "orgLinkedInOptionNone_$userId"
+
     fun member(userId: String) = "orgMember_$userId"
     fun remove(userId: String) = "orgMemberRemove_$userId"
     fun candidate(userId: String) = "orgCandidate_$userId"
@@ -121,6 +150,9 @@ fun OrganizationDetailRoute(
         onDelete = { viewModel.deleteOrganization(onDeleted) },
         onJoin = viewModel::join,
         onLeave = { viewModel.leave(onLeft) },
+        onAssignLinkedInPage = viewModel::assignLinkedInPage,
+        onSyncLinkedInPages = viewModel::syncLinkedInPages,
+        onRemoveLinkedInCredential = viewModel::removeLinkedInCredential,
         modifier = modifier,
     )
 }
@@ -139,6 +171,9 @@ fun OrganizationDetailScreen(
     onDelete: () -> Unit,
     onJoin: () -> Unit,
     onLeave: () -> Unit,
+    onAssignLinkedInPage: (OrgMember, String?) -> Unit,
+    onSyncLinkedInPages: () -> Unit,
+    onRemoveLinkedInCredential: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
@@ -254,6 +289,20 @@ fun OrganizationDetailScreen(
                         onAddCandidate = onAddCandidate,
                         onChangeRole = onChangeRole,
                         onRemoveMember = onRemoveMember,
+                        // Only an owner or admin manages the shared credential, so
+                        // the section exists only for them.
+                        header = if (state.showLinkedIn) {
+                            {
+                                LinkedInSection(
+                                    state = state,
+                                    onAssignPage = onAssignLinkedInPage,
+                                    onSync = onSyncLinkedInPages,
+                                    onDisconnect = onRemoveLinkedInCredential,
+                                )
+                            }
+                        } else {
+                            null
+                        },
                     )
                 } else {
                     JoinPrompt(canJoin = state.canJoin, isJoining = state.isJoining, onJoin = onJoin)
@@ -441,6 +490,8 @@ private fun MemberList(
     onAddCandidate: (MemberCandidate) -> Unit,
     onChangeRole: (OrgMember, OrgRole) -> Unit,
     onRemoveMember: (OrgMember) -> Unit,
+    /** Optional content above the roster; the screen uses it for LinkedIn. */
+    header: (@Composable () -> Unit)? = null,
 ) {
     LazyColumn(
         modifier = Modifier
@@ -449,6 +500,7 @@ private fun MemberList(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        header?.let { item { it() } }
         if (state.candidates.isNotEmpty()) {
             item { Text("Suggestions", style = MaterialTheme.typography.labelLarge) }
             items(state.candidates, key = { "candidate-${it.userId}" }) { candidate ->
@@ -553,6 +605,218 @@ private fun MemberRow(
         }
     }
 }
+
+/**
+ * The organization's shared LinkedIn credential: whether one is connected, the
+ * company pages discovered for it, which member posts to which page, and the two
+ * management actions (sync, disconnect).
+ *
+ * Shown only to a role that may manage it — the server answers anyone else
+ * `403 {"error":"Admin or owner required"}` — and an organization with **no**
+ * credential is rendered as its own ordinary state, not as a failure: that is
+ * what almost every organization looks like.
+ */
+@Composable
+private fun LinkedInSection(
+    state: OrganizationDetailUiState,
+    onAssignPage: (OrgMember, String?) -> Unit,
+    onSync: () -> Unit,
+    onDisconnect: () -> Unit,
+) {
+    var showDisconnectConfirm by remember { mutableStateOf(false) }
+    val status = state.linkedIn
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(OrganizationDetailTestTags.LINKEDIN),
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("LinkedIn company pages", style = MaterialTheme.typography.titleMedium)
+
+            when {
+                status == null && state.isLinkedInLoading ->
+                    Text(
+                        text = "Checking the LinkedIn connection…",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                status?.connected == true -> ConnectedLinkedIn(
+                    state = state,
+                    status = status,
+                    onAssignPage = onAssignPage,
+                    onSync = onSync,
+                    onDisconnect = { showDisconnectConfirm = true },
+                )
+
+                // No credential — the ordinary case, stated plainly.
+                else -> Text(
+                    text = LINKEDIN_NOT_CONNECTED_EXPLANATION,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.testTag(OrganizationDetailTestTags.LINKEDIN_NOT_CONNECTED),
+                )
+            }
+
+            state.linkedInError?.let { message ->
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.testTag(OrganizationDetailTestTags.LINKEDIN_ERROR),
+                )
+            }
+        }
+    }
+
+    if (showDisconnectConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDisconnectConfirm = false },
+            modifier = Modifier.testTag(OrganizationDetailTestTags.LINKEDIN_DISCONNECT_DIALOG),
+            title = { Text("Disconnect LinkedIn?") },
+            // The consequence is spelled out before anything is destroyed.
+            text = { Text(LINKEDIN_DISCONNECT_CONSEQUENCE) },
+            confirmButton = {
+                TextButton(
+                    onClick = { showDisconnectConfirm = false; onDisconnect() },
+                    modifier = Modifier.testTag(OrganizationDetailTestTags.LINKEDIN_DISCONNECT_CONFIRM),
+                ) { Text("Disconnect") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDisconnectConfirm = false }) { Text("Cancel") }
+            },
+        )
+    }
+}
+
+/** The connected half of [LinkedInSection]: pages, assignments and the actions. */
+@Composable
+private fun ConnectedLinkedIn(
+    state: OrganizationDetailUiState,
+    status: OrgLinkedInStatus,
+    onAssignPage: (OrgMember, String?) -> Unit,
+    onSync: () -> Unit,
+    onDisconnect: () -> Unit,
+) {
+    Text(
+        text = status.expiresAt?.let { "Connected · access expires ${it.asDate()}" } ?: "Connected",
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.testTag(OrganizationDetailTestTags.LINKEDIN_CONNECTED),
+    )
+
+    if (status.pages.isEmpty()) {
+        Text(
+            text = "No company pages yet. Sync to fetch the pages this credential administers.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.testTag(OrganizationDetailTestTags.LINKEDIN_NO_PAGES),
+        )
+    } else {
+        status.pages.forEach { page ->
+            Column(Modifier.testTag(OrganizationDetailTestTags.linkedInPage(page.id))) {
+                Text(page.displayName, style = MaterialTheme.typography.bodyLarge)
+                page.linkedInPageId?.let {
+                    Text(
+                        text = "LinkedIn page $it",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+
+        if (state.members.isNotEmpty()) {
+            HorizontalDivider()
+            Text("Who posts to which page", style = MaterialTheme.typography.labelLarge)
+            state.members.forEach { member ->
+                LinkedInAssignmentRow(
+                    member = member,
+                    pages = status.pages,
+                    assignedPage = status.pageFor(member.userId),
+                    onAssign = { pageId -> onAssignPage(member, pageId) },
+                )
+            }
+        }
+    }
+
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedButton(
+            onClick = onSync,
+            enabled = !state.isLinkedInSyncing,
+            modifier = Modifier.testTag(OrganizationDetailTestTags.LINKEDIN_SYNC),
+        ) {
+            Icon(Icons.Default.Sync, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text(if (state.isLinkedInSyncing) "Syncing…" else "Sync pages")
+        }
+        TextButton(
+            onClick = onDisconnect,
+            modifier = Modifier.testTag(OrganizationDetailTestTags.LINKEDIN_DISCONNECT),
+        ) {
+            Icon(Icons.Default.LinkOff, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text("Disconnect")
+        }
+    }
+}
+
+/**
+ * One member's page assignment. The API keeps at most one page per member
+ * (`PUT …/linkedin/assignments` takes a single `{userId, pageId}` and clears the
+ * assignment when `pageId` is absent), so this is a single-choice menu with an
+ * explicit "Not assigned" entry rather than a multi-select.
+ */
+@Composable
+private fun LinkedInAssignmentRow(
+    member: OrgMember,
+    pages: List<OrgLinkedInPage>,
+    assignedPage: OrgLinkedInPage?,
+    onAssign: (String?) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = member.label,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Box {
+            TextButton(
+                onClick = { expanded = true },
+                modifier = Modifier.testTag(OrganizationDetailTestTags.linkedInAssignment(member.userId)),
+            ) { Text(assignedPage?.displayName ?: "Not assigned") }
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                DropdownMenuItem(
+                    text = { Text("Not assigned") },
+                    onClick = { expanded = false; onAssign(null) },
+                    modifier = Modifier.testTag(
+                        OrganizationDetailTestTags.linkedInClearOption(member.userId),
+                    ),
+                )
+                pages.forEach { page ->
+                    DropdownMenuItem(
+                        text = { Text(page.displayName) },
+                        onClick = { expanded = false; onAssign(page.id) },
+                        modifier = Modifier.testTag(
+                            OrganizationDetailTestTags.linkedInPageOption(member.userId, page.id),
+                        ),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** ISO-8601 instants are shown as their date part; the time adds nothing here. */
+private fun String.asDate(): String = substringBefore('T')
 
 @Composable
 private fun CandidateRow(candidate: MemberCandidate, onAdd: () -> Unit) {
@@ -710,6 +974,9 @@ private fun OrganizationDetailScreenPreview() {
             onDelete = {},
             onJoin = {},
             onLeave = {},
+            onAssignLinkedInPage = { _, _ -> },
+            onSyncLinkedInPages = {},
+            onRemoveLinkedInCredential = {},
         )
     }
 }

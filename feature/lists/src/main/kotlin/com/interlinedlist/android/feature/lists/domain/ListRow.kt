@@ -9,6 +9,12 @@ package com.interlinedlist.android.feature.lists.domain
 data class ListRow(
     val id: String,
     val values: Map<String, String>,
+    /**
+     * The row's server-side version counter, when the source versions rows. It is
+     * what the freshness poll quotes to ask "has this row moved?", so a row with a
+     * null version is simply left out of that question rather than guessed at.
+     */
+    val version: Int? = null,
 ) {
     /** Value for [key], or empty string when the row omits that field. */
     fun valueFor(key: String): String = values[key].orEmpty()

@@ -51,6 +51,20 @@ data class OrgPermissions(
     /** "Owner: … can delete the org" — and a system organization is never deletable. */
     val canDeleteOrganization: Boolean get() = viewerRole == OrgRole.OWNER && !isSystem
 
+    /**
+     * The organization's shared LinkedIn credential: its status, page sync, the
+     * per-member page assignments and disconnecting it.
+     *
+     * The help centre says "When an organization's **owners or admins** connect a
+     * shared LinkedIn credential…", and the server enforces exactly that — unlike
+     * the member endpoints, these answer a plain member
+     * `403 {"error":"Admin or owner required","code":"forbidden"}` (verified live
+     * against both `PUT …/linkedin/assignments` and `POST …/linkedin/sync-pages`).
+     * `GET …/linkedin/status` is merely members-only, but nothing outside
+     * management reads it, so the whole section follows the stricter rule.
+     */
+    val canManageLinkedIn: Boolean get() = administers
+
     /** Any member may leave, except from a system organization. */
     val canLeave: Boolean get() = isMember && !isSystem
 

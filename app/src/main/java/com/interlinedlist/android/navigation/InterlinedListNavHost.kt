@@ -35,6 +35,8 @@ import androidx.navigation.navDeepLink
 import androidx.navigation.navigation
 import com.interlinedlist.android.blog.BlogLauncher
 import com.interlinedlist.android.blog.BlogLink
+import com.interlinedlist.android.blog.BlogRoutes
+import com.interlinedlist.android.blog.ui.BlogSubscriptionRoute
 import com.interlinedlist.android.feature.auth.nav.AuthRoutes
 import com.interlinedlist.android.feature.auth.nav.authGraph
 import com.interlinedlist.android.feature.directmessages.navigation.DirectMessagesDestinations
@@ -201,6 +203,7 @@ fun InterlinedListNavHost(
     notificationRoute: String? = null,
     emailChangeRoute: String? = null,
     tagFeedRoute: String? = null,
+    blogSubscriptionRoute: String? = null,
 ) {
     val navController = rememberNavController()
     NavHost(
@@ -229,6 +232,7 @@ fun InterlinedListNavHost(
             MainShell(
                 // A launch is either a notification tap or a link tap, never both.
                 pendingRoute = notificationRoute ?: tagFeedRoute,
+                onOpenBlogEmails = { navController.navigate(BlogRoutes.subscription()) },
                 onLoggedOut = {
                     // Stop background sync/poll for the signed-out session. Cancellation
                     // must never crash the sign-out flow, so any failure is swallowed.
@@ -236,6 +240,36 @@ fun InterlinedListNavHost(
                     runCatching { NotificationsSyncScheduler.cancelAll(context) }
                     navController.navigate(AuthRoutes.GRAPH) {
                         popUpTo(Routes.MAIN) { inclusive = true }
+                    }
+                },
+            )
+        }
+
+        // Blog email list. Registered at the TOP level, outside the signed-in shell,
+        // because the confirm and unsubscribe links are unauthenticated and arrive by
+        // email — whoever taps one may not have a session, and the web unsubscribe link
+        // has to keep working for them too.
+        composable(
+            route = BlogRoutes.SUBSCRIPTION,
+            arguments = listOf(
+                navArgument(BlogRoutes.ACTION_ARG) {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
+                navArgument(BlogRoutes.TOKEN_ARG) {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
+            ),
+        ) {
+            BlogSubscriptionRoute(
+                onBack = {
+                    // A link tapped on a cold start has nothing behind it; fall back to
+                    // the app's own start destination rather than closing the app.
+                    if (!navController.popBackStack()) {
+                        navController.navigate(if (startLoggedIn) Routes.MAIN else AuthRoutes.GRAPH)
                     }
                 },
             )
@@ -248,6 +282,11 @@ fun InterlinedListNavHost(
     LaunchedEffect(Unit) {
         emailChangeRoute?.let { route -> runCatching { navController.navigate(route) } }
     }
+
+    // Likewise for a tapped blog confirm/unsubscribe link.
+    LaunchedEffect(Unit) {
+        blogSubscriptionRoute?.let { route -> runCatching { navController.navigate(route) } }
+    }
 }
 
 /**
@@ -258,6 +297,7 @@ fun InterlinedListNavHost(
 @Composable
 private fun MainShell(
     pendingRoute: String? = null,
+    onOpenBlogEmails: () -> Unit = {},
     onLoggedOut: () -> Unit,
 ) {
     val tabNav = rememberNavController()
@@ -565,6 +605,10 @@ private fun MainShell(
                     onOpenBlog = {
                         BlogLauncher.open(accountContext, BlogLink.INDEX_URL, colorScheme)
                     },
+                    // Stays in the app — the mailing list has a real API. Navigated on
+                    // the OUTER controller so the same destination serves the emailed
+                    // confirm/unsubscribe links, which must work signed out too.
+                    onOpenBlogEmails = onOpenBlogEmails,
                     onSignOut = { logoutViewModel.logout(onLoggedOut) },
                 )
             }

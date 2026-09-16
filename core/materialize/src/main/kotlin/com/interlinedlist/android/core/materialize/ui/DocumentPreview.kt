@@ -12,10 +12,24 @@ import com.interlinedlist.android.core.materialize.domain.RowDataStyle
  * field list, so showing renamed list columns here would promise something the
  * request does not ask for.
  *
+ * A source that already **is** a document short-circuits all of that: when the
+ * entry point supplies [MaterializePreview.documentMarkdown] the destination
+ * copies it through, so it is shown verbatim rather than re-rendered from rows.
+ *
  * The result is a preview, not the document: the server re-derives the real one
  * from its own copy of the source.
  */
 internal fun renderDocumentPreview(
+    title: String,
+    preview: MaterializePreview,
+    listStyle: DocumentListStyle,
+    rowDataStyle: RowDataStyle,
+): String {
+    preview.documentMarkdown?.takeIf { it.isNotBlank() }?.let { return it.trimEnd() }
+    return renderRowsAsDocument(title, preview, listStyle, rowDataStyle)
+}
+
+private fun renderRowsAsDocument(
     title: String,
     preview: MaterializePreview,
     listStyle: DocumentListStyle,

@@ -146,6 +146,27 @@ class OrgPermissionsTest {
         assertThat(permissionsFor(null).canDeleteOrganization).isFalse()
     }
 
+    // ---- LinkedIn company pages ---------------------------------------------
+    // "When an organization's owners or admins connect a shared LinkedIn
+    // credential…" — and the server agrees: a member PUTting an assignment or
+    // POSTing a page sync gets 403 {"error":"Admin or owner required"} (live).
+
+    @Test
+    fun `only an owner or admin may manage the LinkedIn connection`() {
+        assertThat(permissionsFor(OrgRole.OWNER).canManageLinkedIn).isTrue()
+        assertThat(permissionsFor(OrgRole.ADMIN).canManageLinkedIn).isTrue()
+        assertThat(permissionsFor(OrgRole.MEMBER).canManageLinkedIn).isFalse()
+        assertThat(permissionsFor(null).canManageLinkedIn).isFalse()
+    }
+
+    @Test
+    fun `a system organization's LinkedIn connection follows the same role rule`() {
+        // Unlike leaving or deleting, nothing about the credential is special-cased
+        // for a built-in organization.
+        assertThat(permissionsFor(OrgRole.OWNER, isSystem = true).canManageLinkedIn).isTrue()
+        assertThat(permissionsFor(OrgRole.MEMBER, isSystem = true).canManageLinkedIn).isFalse()
+    }
+
     // ---- Join / leave -------------------------------------------------------
 
     @Test
@@ -182,5 +203,6 @@ class OrgPermissionsTest {
         assertThat(none.canDeleteOrganization).isFalse()
         assertThat(none.canLeave).isFalse()
         assertThat(none.canJoin).isFalse()
+        assertThat(none.canManageLinkedIn).isFalse()
     }
 }

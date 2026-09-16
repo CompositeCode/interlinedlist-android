@@ -52,6 +52,24 @@ data class MaterializePreview(
     val totalRowCount: Int = rows.size,
     /** The account's `defaultPubliclyVisible`, so the toggle opens where the user expects. */
     val defaultIsPublic: Boolean = false,
+    /**
+     * The markdown a `doc` destination copies through, when the entry point
+     * already has it verbatim. A document source is copied, not rendered from
+     * rows, so laying [rows] out as bullets would misdescribe what gets created.
+     *
+     * Display only, like the rest of this class: the server re-derives the real
+     * document from its own copy of the source.
+     */
+    val documentMarkdown: String? = null,
+    /**
+     * The plain-text body a `message` destination would produce, when the entry
+     * point can derive it — so the draft is visible before it is asked for.
+     *
+     * Display only, and deliberately **not** sent: `MaterializeRequest.ToMessageDraft`
+     * carries no `content`, leaving the server to build the body and size it
+     * against the account's own limit.
+     */
+    val draftBody: String? = null,
 ) {
     /** How many rows exist beyond the ones being shown. */
     val hiddenRowCount: Int get() = (totalRowCount - rows.size).coerceAtLeast(0)

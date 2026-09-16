@@ -10,10 +10,12 @@ import com.interlinedlist.android.feature.organizations.data.remote.Organization
 import com.interlinedlist.android.feature.organizations.data.remote.dto.AddMemberRequest
 import com.interlinedlist.android.feature.organizations.data.remote.dto.CreateOrganizationRequest
 import com.interlinedlist.android.feature.organizations.data.remote.dto.JoinOrganizationRequest
+import com.interlinedlist.android.feature.organizations.data.remote.dto.LinkedInAssignmentRequest
 import com.interlinedlist.android.feature.organizations.data.remote.dto.OrganizationsResponse
 import com.interlinedlist.android.feature.organizations.data.remote.dto.UpdateMemberRequest
 import com.interlinedlist.android.feature.organizations.data.remote.dto.UpdateOrganizationRequest
 import com.interlinedlist.android.feature.organizations.domain.MemberCandidate
+import com.interlinedlist.android.feature.organizations.domain.OrgLinkedInStatus
 import com.interlinedlist.android.feature.organizations.domain.OrgMember
 import com.interlinedlist.android.feature.organizations.domain.OrgRole
 import com.interlinedlist.android.feature.organizations.domain.Organization
@@ -218,6 +220,42 @@ class DefaultOrganizationsRepository @Inject constructor(
     override suspend fun removeMember(orgId: String, userId: String): ApiResult<Unit> =
         withContext(dispatchers.io) {
             safeApiCall(json) { api.removeMember(orgId, userId) }.map { }
+        }
+
+    override suspend fun getLinkedInStatus(orgId: String): ApiResult<OrgLinkedInStatus> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.getLinkedInStatus(orgId) }.map(OrgLinkedInMapper::fromDto)
+        }
+
+    override suspend fun assignLinkedInPage(
+        orgId: String,
+        userId: String,
+        pageId: String?,
+    ): ApiResult<Boolean> = withContext(dispatchers.io) {
+        safeApiCall(json) {
+            api.putLinkedInAssignment(orgId, LinkedInAssignmentRequest(userId = userId, pageId = pageId))
+        }.map { response ->
+            // The server answers {"assigned": …}; fall back to what we asked for.
+            response.assigned ?: (pageId != null)
+        }
+    }
+
+    override suspend fun removeLinkedInCredential(orgId: String): ApiResult<Unit> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.deleteLinkedInCredential(orgId) }.map { }
+        }
+
+    /**
+     * Syncs and then re-reads the status, because the sync response shape could
+     * not be observed (no reachable organization has a credential) while the
+     * status shape is confirmed. One extra GET buys a page list we can trust.
+     */
+    override suspend fun syncLinkedInPages(orgId: String): ApiResult<OrgLinkedInStatus> =
+        withContext(dispatchers.io) {
+            when (val result = safeApiCall(json) { api.syncLinkedInPages(orgId) }) {
+                is ApiResult.Success -> getLinkedInStatus(orgId)
+                is ApiResult.Failure -> result
+            }
         }
 }
 

@@ -4,10 +4,14 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.interlinedlist.android.core.common.result.ApiResult
+import com.interlinedlist.android.core.materialize.domain.MaterializeTarget
+import com.interlinedlist.android.core.materialize.ui.MaterializeLaunch
 import com.interlinedlist.android.feature.documents.data.DocumentsRepository
 import com.interlinedlist.android.feature.documents.data.SaveOutcome
 import com.interlinedlist.android.feature.documents.ui.common.isSubscriptionGate
 import com.interlinedlist.android.feature.documents.ui.common.toUserMessage
+import com.interlinedlist.android.feature.documents.ui.materialize.documentMaterializeLaunch
+import com.interlinedlist.android.feature.documents.ui.materialize.documentSelectionMaterializeLaunch
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -36,6 +40,11 @@ data class DocumentEditorUiState(
     val isQueuedOffline: Boolean = false,
     val errorMessage: String? = null,
     val subscriptionRequired: Boolean = false,
+    /**
+     * The "Create from…" window to show, once ＋ Create — on the whole document
+     * or on the highlighted passage — has picked a destination.
+     */
+    val createFrom: MaterializeLaunch? = null,
 ) {
     val canSave: Boolean get() = hasUnsavedChanges && !isSaving && !isLoading
 }
@@ -207,6 +216,41 @@ class DocumentEditorViewModel @Inject constructor(
             }
         }
     }
+
+    /**
+     * Opens "Create from…" on this whole document.
+     *
+     * Only the document id is sent, so the conversion is always of the **saved**
+     * document; the preview is seeded from the editor's current text because
+     * that is what the user is looking at. Unsaved edits can therefore show in
+     * the preview without being created — save first to convert them.
+     */
+    fun createFrom(target: MaterializeTarget) = _uiState.update {
+        it.copy(createFrom = documentMaterializeLaunch(documentId, it.title, it.content, target))
+    }
+
+    /**
+     * Opens "Create from…" on the highlighted passage, as a `docElements`
+     * source: the document id the server re-authorizes, plus the selected
+     * markdown, which is the only identity a selection has. A blank selection is
+     * ignored — there is nothing to convert.
+     */
+    fun createFromSelection(selectedMarkdown: String, target: MaterializeTarget) {
+        if (selectedMarkdown.isBlank()) return
+        _uiState.update {
+            it.copy(
+                createFrom = documentSelectionMaterializeLaunch(
+                    documentId = documentId,
+                    documentTitle = it.title,
+                    selectedMarkdown = selectedMarkdown,
+                    target = target,
+                ),
+            )
+        }
+    }
+
+    /** Closes the "Create from…" window. */
+    fun dismissCreateFrom() = _uiState.update { it.copy(createFrom = null) }
 
     /** Deletes the document; invokes [onDeleted] on success. */
     fun delete(onDeleted: () -> Unit) {

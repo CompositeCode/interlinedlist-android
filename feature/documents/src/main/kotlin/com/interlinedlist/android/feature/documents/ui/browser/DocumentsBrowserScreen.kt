@@ -54,10 +54,15 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.interlinedlist.android.core.designsystem.theme.InterlinedListTheme
+import com.interlinedlist.android.core.materialize.domain.MaterializeTarget
+import com.interlinedlist.android.core.materialize.ui.MaterializeWindow
+import com.interlinedlist.android.core.materialize.ui.MaterializeWindowViewModel
 import com.interlinedlist.android.feature.documents.domain.Document
 import com.interlinedlist.android.feature.documents.domain.FolderContents
 import com.interlinedlist.android.feature.documents.domain.FolderNode
 import com.interlinedlist.android.feature.documents.domain.FolderSummary
+import com.interlinedlist.android.feature.documents.ui.materialize.CreateFromMenu
+import com.interlinedlist.android.feature.documents.ui.materialize.CreateFromTestTags
 
 /** Stable test tags for the documents browser. */
 object DocumentsBrowserTestTags {
@@ -94,6 +99,7 @@ fun DocumentsRoute(
     modifier: Modifier = Modifier,
     onOpenTemplates: () -> Unit = {},
     onOpenPoweredDocument: () -> Unit = {},
+    onOpenList: (String) -> Unit = {},
     viewModel: DocumentsBrowserViewModel = hiltViewModel(),
 ) {
     DocumentsFolderRoute(
@@ -103,6 +109,7 @@ fun DocumentsRoute(
         modifier = modifier,
         onOpenTemplates = onOpenTemplates,
         onOpenPoweredDocument = onOpenPoweredDocument,
+        onOpenList = onOpenList,
         viewModel = viewModel,
     )
 }
@@ -119,9 +126,37 @@ fun DocumentsFolderRoute(
     modifier: Modifier = Modifier,
     onOpenTemplates: () -> Unit = {},
     onOpenPoweredDocument: () -> Unit = {},
+    onOpenList: (String) -> Unit = {},
     viewModel: DocumentsBrowserViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+
+    // The shared "Create from…" window, opened on whichever destination the row's
+    // ＋ Create menu picked. It is hosted here rather than in the stateless screen
+    // so the screen stays free of Hilt and testable on its own. Its ViewModel is
+    // hoisted so closing the window can end the flow: it survives recomposition
+    // (and rotation) with the edits intact, and only a close throws them away.
+    val materializeViewModel: MaterializeWindowViewModel = hiltViewModel()
+    val closeCreateFrom = {
+        materializeViewModel.reset()
+        viewModel.dismissCreateFrom()
+    }
+    state.createFrom?.let { launch ->
+        MaterializeWindow(
+            launch = launch,
+            onDismiss = closeCreateFrom,
+            onOpenList = { list ->
+                closeCreateFrom()
+                onOpenList(list.id)
+            },
+            onOpenDocument = { document ->
+                closeCreateFrom()
+                onOpenDocument(document.id)
+            },
+            viewModel = materializeViewModel,
+        )
+    }
+
     DocumentsBrowserScreen(
         state = state,
         onOpenFolder = onOpenFolder,
@@ -138,6 +173,7 @@ fun DocumentsFolderRoute(
         onBack = onBack,
         onOpenTemplates = onOpenTemplates,
         onOpenPoweredDocument = onOpenPoweredDocument,
+        onCreateFrom = viewModel::createFrom,
         modifier = modifier,
     )
 }
@@ -161,6 +197,7 @@ fun DocumentsBrowserScreen(
     modifier: Modifier = Modifier,
     onOpenTemplates: () -> Unit = {},
     onOpenPoweredDocument: () -> Unit = {},
+    onCreateFrom: (Document, MaterializeTarget) -> Unit = { _, _ -> },
 ) {
     var dialog by remember { mutableStateOf<BrowserDialog>(BrowserDialog.None) }
 
@@ -241,6 +278,7 @@ fun DocumentsBrowserScreen(
                 state = state,
                 onOpenFolder = onOpenFolder,
                 onOpenDocument = onOpenDocument,
+                onCreateFrom = onCreateFrom,
                 onRequestRename = { dialog = BrowserDialog.RenameFolder(it) },
                 onRequestDeleteFolder = { dialog = BrowserDialog.ConfirmDeleteFolder(it) },
                 onRequestMoveDoc = { dialog = BrowserDialog.MoveDocument(it) },
@@ -279,6 +317,7 @@ private fun BrowserContent(
     state: DocumentsBrowserUiState,
     onOpenFolder: (String) -> Unit,
     onOpenDocument: (String) -> Unit,
+    onCreateFrom: (Document, MaterializeTarget) -> Unit,
     onRequestRename: (FolderSummary) -> Unit,
     onRequestDeleteFolder: (FolderSummary) -> Unit,
     onRequestMoveDoc: (Document) -> Unit,
@@ -328,6 +367,7 @@ private fun BrowserContent(
                     DocumentRow(
                         document = document,
                         onClick = { onOpenDocument(document.id) },
+                        onCreateFrom = { target -> onCreateFrom(document, target) },
                         onMove = { onRequestMoveDoc(document) },
                         onDelete = { onRequestDeleteDoc(document) },
                     )
@@ -411,6 +451,7 @@ private fun FolderRow(
 private fun DocumentRow(
     document: Document,
     onClick: () -> Unit,
+    onCreateFrom: (MaterializeTarget) -> Unit,
     onMove: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -436,6 +477,11 @@ private fun DocumentRow(
                 )
             }
         }
+        CreateFromMenu(
+            onSelectTarget = onCreateFrom,
+            contentDescription = "Create from this document",
+            modifier = Modifier.testTag(CreateFromTestTags.row(document.id)),
+        )
         RowOverflowMenu(
             actions = listOf(
                 OverflowAction("Move", Icons.AutoMirrored.Filled.DriveFileMove, onMove),
