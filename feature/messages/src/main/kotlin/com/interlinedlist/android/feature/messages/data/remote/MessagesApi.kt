@@ -11,6 +11,7 @@ import com.interlinedlist.android.feature.messages.data.remote.dto.MetadataRespo
 import com.interlinedlist.android.feature.messages.data.remote.dto.ReportRequest
 import com.interlinedlist.android.feature.messages.data.remote.dto.ScheduledMessagesResponse
 import com.interlinedlist.android.feature.messages.data.remote.dto.TagAutocompleteResponse
+import com.interlinedlist.android.feature.messages.data.remote.dto.TrendingTagsResponse
 import com.interlinedlist.android.feature.messages.data.remote.dto.UserReportRequest
 import okhttp3.MultipartBody
 import retrofit2.http.Body
@@ -136,6 +137,22 @@ interface MessagesApi {
         @Query("q") query: String,
         @Query("limit") limit: Int? = null,
     ): TagAutocompleteResponse
+
+    /**
+     * The most-used tags across **public** messages inside a trailing [window].
+     *
+     * [window] must be one of `day`, `week` or `month`: the server falls back to
+     * `week` for anything else **without reporting it**, so a typo would silently
+     * mislabel the surface. [limit] defaults to 20 server-side and is clamped to
+     * 100. The response is a bare `{ "tags": [ { tag, count, lastUsedAt } ] }` —
+     * it does **not** echo the window back, so the caller is the only thing that
+     * knows which period the counts cover.
+     */
+    @GET("api/tags/trending")
+    suspend fun trendingTags(
+        @Query("window") window: String,
+        @Query("limit") limit: Int,
+    ): TrendingTagsResponse
 
     /** Reports a message with a reason (and optional free-text detail). */
     @POST("api/messages/{id}/report")
