@@ -79,3 +79,49 @@ const val LAST_OWNER_DEMOTE_EXPLANATION: String =
 const val LAST_OWNER_REMOVE_EXPLANATION: String =
     "This is the organization's only owner. Make someone else an owner first, " +
         "then you can remove them."
+
+// ---- LinkedIn company pages -------------------------------------------------
+
+/**
+ * True when the API says the organization simply has no LinkedIn credential.
+ * Both spellings are live captures:
+ *
+ * - `DELETE …/linkedin/credential` → 404 `{"error":"No LinkedIn credential found"}`
+ * - `POST …/linkedin/sync-pages` → 404
+ *   `{"error":"No active LinkedIn credential for this organization"}`
+ *
+ * That is a state, not a fault: it is reported as the not-connected section
+ * rather than as an error.
+ */
+val AppError.isMissingLinkedInCredential: Boolean
+    get() = this is AppError.NotFound &&
+        message?.contains("LinkedIn credential", ignoreCase = true) == true
+
+/**
+ * Explains why a LinkedIn action was refused, using the server's own vocabulary.
+ * The owner/admin rejection is a real 403 here — unlike the member endpoints, the
+ * server does enforce it (`{"error":"Admin or owner required"}`, verified live).
+ */
+fun AppError.toLinkedInMessage(): String = when {
+    isMissingLinkedInCredential -> LINKEDIN_NOT_CONNECTED_EXPLANATION
+    this is AppError.Forbidden ->
+        "Only an owner or admin can manage this organization's LinkedIn connection."
+    this is AppError.NotFound && message?.contains("Page not found", ignoreCase = true) == true ->
+        "That page is no longer in this organization. Sync pages and try again."
+    else -> toUserMessage()
+}
+
+/**
+ * The not-connected state in one sentence. An organization without a LinkedIn
+ * credential is the ordinary case, so this reads as information rather than a
+ * failure. Linking itself is a browser OAuth redirect
+ * (`GET /api/auth/linkedin/org-authorize`), which this screen does not perform.
+ */
+const val LINKEDIN_NOT_CONNECTED_EXPLANATION: String =
+    "This organization has no LinkedIn connection, so it can't post to company pages. " +
+        "An owner or admin can connect one on interlinedlist.com."
+
+/** What disconnecting actually costs, stated before the user confirms it. */
+const val LINKEDIN_DISCONNECT_CONSEQUENCE: String =
+    "This organization will no longer be able to post to its LinkedIn company pages, " +
+        "and every member's page assignment is cleared. Reconnecting on the web restores it."

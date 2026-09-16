@@ -397,6 +397,202 @@ class DefaultOrganizationsRepositoryTest {
         assertThat(org.isMember).isFalse()
     }
 
+    // ---- LinkedIn company pages ---------------------------------------------
+
+    @Test
+    fun `getLinkedInStatus reads the not-connected payload as a normal state`() = runTest(dispatcher) {
+        // Captured live: an organization that never connected LinkedIn answers 200.
+        server.enqueue(MockResponse().setBody("""{ "credential": null, "role": "owner" }"""))
+
+        val result = repository.getLinkedInStatus("o1")
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        val status = (result as ApiResult.Success).data
+        assertThat(status.connected).isFalse()
+        assertThat(status.pages).isEmpty()
+        assertThat(status.assignments).isEmpty()
+        assertThat(server.takeRequest().path).isEqualTo("/api/organizations/o1/linkedin/status")
+    }
+
+    @Test
+    fun `getLinkedInStatus reads a connected credential with its pages and assignments`() =
+        runTest(dispatcher) {
+            server.enqueue(
+                MockResponse().setBody(
+                    """
+                    {
+                      "credential": {
+                        "expiresAt": "2026-12-01T00:00:00.000Z",
+                        "pages": [
+                          { "id": "p1", "linkedInPageId": "12345678", "pageName": "Acme Corp",
+                            "pageLogoUrl": "https://img/acme.png", "lastSyncedAt": "2026-06-12T00:00:00.000Z" },
+                          { "id": "p2", "linkedInPageId": "87654321", "pageName": "Acme Labs" }
+                        ],
+                        "assignments": [ { "userId": "u1", "pageId": "p2" } ]
+                      },
+                      "role": "admin"
+                    }
+                    """.trimIndent(),
+                ),
+            )
+
+            val status = (repository.getLinkedInStatus("o1") as ApiResult.Success).data
+
+            assertThat(status.connected).isTrue()
+            assertThat(status.expiresAt).isEqualTo("2026-12-01T00:00:00.000Z")
+            assertThat(status.pages.map { it.id }).containsExactly("p1", "p2").inOrder()
+            assertThat(status.pages[0].name).isEqualTo("Acme Corp")
+            assertThat(status.pages[0].linkedInPageId).isEqualTo("12345678")
+            assertThat(status.pages[0].logoUrl).isEqualTo("https://img/acme.png")
+            // Assignments are per member: u1 posts as Acme Labs.
+            assertThat(status.assignments).containsExactly("u1", "p2")
+            assertThat(status.pageFor("u1")?.name).isEqualTo("Acme Labs")
+        }
+
+    @Test
+    fun `getLinkedInStatus tolerates the documented top-level shape`() = runTest(dispatcher) {
+        // `/help/api/organizations` documents `{ "connected": true, "expiresAt": … }`
+        // "plus the discovered pages"; the live server answers the `credential`
+        // shape instead, so both are accepted.
+        server.enqueue(
+            MockResponse().setBody(
+                """
+                {
+                  "connected": true,
+                  "expiresAt": "2026-12-01T00:00:00.000Z",
+                  "pages": [ { "pageId": "p9", "label": "Acme Corp", "logoUrl": null, "assignedUserId": "u7" } ]
+                }
+                """.trimIndent(),
+            ),
+        )
+
+        val status = (repository.getLinkedInStatus("o1") as ApiResult.Success).data
+
+        assertThat(status.connected).isTrue()
+        assertThat(status.pages.single().id).isEqualTo("p9")
+        assertThat(status.pages.single().name).isEqualTo("Acme Corp")
+        // An assignment carried on the page itself is read the same way.
+        assertThat(status.assignments).containsExactly("u7", "p9")
+    }
+
+    @Test
+    fun `assignLinkedInPage puts the member and page the server expects`() = runTest(dispatcher) {
+        server.enqueue(MockResponse().setBody("""{ "assigned": true }"""))
+
+        val result = repository.assignLinkedInPage("o1", userId = "u1", pageId = "p2")
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        assertThat((result as ApiResult.Success).data).isTrue()
+        val request = server.takeRequest()
+        assertThat(request.method).isEqualTo("PUT")
+        assertThat(request.path).isEqualTo("/api/organizations/o1/linkedin/assignments")
+        // The live contract is one { userId, pageId } pair per call, not a map.
+        assertThat(request.body.readUtf8()).isEqualTo("""{"userId":"u1","pageId":"p2"}""")
+    }
+
+    @Test
+    fun `assignLinkedInPage clears an assignment by omitting the page`() = runTest(dispatcher) {
+        // Verified live: { "userId": … } with no pageId answers { "assigned": false }.
+        server.enqueue(MockResponse().setBody("""{ "assigned": false }"""))
+
+        val result = repository.assignLinkedInPage("o1", userId = "u1", pageId = null)
+
+        assertThat((result as ApiResult.Success).data).isFalse()
+        assertThat(server.takeRequest().body.readUtf8()).isEqualTo("""{"userId":"u1"}""")
+    }
+
+    @Test
+    fun `assignLinkedInPage surfaces a page the organization no longer has`() = runTest(dispatcher) {
+        server.enqueue(
+            MockResponse().setResponseCode(404)
+                .setBody("""{ "error": "Page not found in this organization", "code": "not_found" }"""),
+        )
+
+        val result = repository.assignLinkedInPage("o1", userId = "u1", pageId = "gone")
+
+        assertThat(result).isInstanceOf(ApiResult.Failure::class.java)
+        assertThat((result as ApiResult.Failure).error).isInstanceOf(AppError.NotFound::class.java)
+    }
+
+    @Test
+    fun `assignLinkedInPage surfaces the owner-or-admin rejection`() = runTest(dispatcher) {
+        // Live: a plain member really is refused here, unlike the member endpoints.
+        server.enqueue(
+            MockResponse().setResponseCode(403)
+                .setBody("""{ "error": "Admin or owner required", "code": "forbidden" }"""),
+        )
+
+        val result = repository.assignLinkedInPage("o1", userId = "u1", pageId = "p2")
+
+        assertThat(result).isInstanceOf(ApiResult.Failure::class.java)
+        assertThat((result as ApiResult.Failure).error).isInstanceOf(AppError.Forbidden::class.java)
+    }
+
+    @Test
+    fun `removeLinkedInCredential deletes the credential`() = runTest(dispatcher) {
+        server.enqueue(MockResponse().setBody("""{ "message": "LinkedIn credential removed" }"""))
+
+        val result = repository.removeLinkedInCredential("o1")
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        val request = server.takeRequest()
+        assertThat(request.method).isEqualTo("DELETE")
+        assertThat(request.path).isEqualTo("/api/organizations/o1/linkedin/credential")
+    }
+
+    @Test
+    fun `removeLinkedInCredential reports an organization that has none`() = runTest(dispatcher) {
+        // Captured live against an org with no credential.
+        server.enqueue(
+            MockResponse().setResponseCode(404)
+                .setBody("""{ "error": "No LinkedIn credential found", "code": "not_found" }"""),
+        )
+
+        val result = repository.removeLinkedInCredential("o1")
+
+        assertThat(result).isInstanceOf(ApiResult.Failure::class.java)
+        assertThat((result as ApiResult.Failure).error.message).isEqualTo("No LinkedIn credential found")
+    }
+
+    @Test
+    fun `syncLinkedInPages posts the sync and returns the refreshed page list`() = runTest(dispatcher) {
+        server.enqueue(MockResponse().setResponseCode(201).setBody("""{ "pages": [] }"""))
+        server.enqueue(
+            MockResponse().setBody(
+                """
+                { "credential": { "pages": [ { "id": "p3", "pageName": "Acme Studio" } ] }, "role": "owner" }
+                """.trimIndent(),
+            ),
+        )
+
+        val result = repository.syncLinkedInPages("o1")
+
+        val status = (result as ApiResult.Success).data
+        assertThat(status.connected).isTrue()
+        assertThat(status.pages.map { it.name }).containsExactly("Acme Studio")
+        val sync = server.takeRequest()
+        assertThat(sync.method).isEqualTo("POST")
+        assertThat(sync.path).isEqualTo("/api/organizations/o1/linkedin/sync-pages")
+        // The refreshed list comes from the status endpoint, whose shape is known.
+        assertThat(server.takeRequest().path).isEqualTo("/api/organizations/o1/linkedin/status")
+    }
+
+    @Test
+    fun `syncLinkedInPages reports an organization with no credential`() = runTest(dispatcher) {
+        server.enqueue(
+            MockResponse().setResponseCode(404).setBody(
+                """{ "error": "No active LinkedIn credential for this organization", "code": "not_found" }""",
+            ),
+        )
+
+        val result = repository.syncLinkedInPages("o1")
+
+        assertThat(result).isInstanceOf(ApiResult.Failure::class.java)
+        assertThat((result as ApiResult.Failure).error).isInstanceOf(AppError.NotFound::class.java)
+        // No pointless status re-read after a failed sync.
+        assertThat(server.requestCount).isEqualTo(1)
+    }
+
     @Test
     fun `removeMember deletes the membership`() = runTest(dispatcher) {
         server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))

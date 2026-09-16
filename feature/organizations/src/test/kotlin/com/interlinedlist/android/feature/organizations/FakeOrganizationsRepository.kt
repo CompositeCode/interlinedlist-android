@@ -4,6 +4,7 @@ import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
 import com.interlinedlist.android.feature.organizations.data.OrganizationsRepository
 import com.interlinedlist.android.feature.organizations.domain.MemberCandidate
+import com.interlinedlist.android.feature.organizations.domain.OrgLinkedInStatus
 import com.interlinedlist.android.feature.organizations.domain.OrgMember
 import com.interlinedlist.android.feature.organizations.domain.OrgRole
 import com.interlinedlist.android.feature.organizations.domain.Organization
@@ -34,6 +35,10 @@ class FakeOrganizationsRepository : OrganizationsRepository {
     var removeMemberResult: ApiResult<Unit> = ApiResult.Success(Unit)
     var updateRoleCount = 0
     var joinResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var linkedInStatusResult: ApiResult<OrgLinkedInStatus> = ApiResult.Success(OrgLinkedInStatus.NOT_CONNECTED)
+    var assignPageResult: ApiResult<Boolean>? = null
+    var removeCredentialResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var syncPagesResult: ApiResult<OrgLinkedInStatus>? = null
     var leaveResult: ApiResult<Unit> = ApiResult.Success(Unit)
 
     var refreshCount = 0
@@ -44,6 +49,11 @@ class FakeOrganizationsRepository : OrganizationsRepository {
     var leftOrgIds = mutableListOf<String>()
     var lastMemberSearch: String? = null
     var lastUpdate: Triple<String?, String?, Boolean?>? = null
+    var linkedInStatusCount = 0
+    var syncPagesCount = 0
+    var removeCredentialCount = 0
+    /** Every assignment the UI asked for, as (userId, pageId) — pageId null clears it. */
+    val assignments = mutableListOf<Pair<String, String?>>()
 
     override fun observeOrganizations(): Flow<List<Organization>> = cache
 
@@ -139,6 +149,33 @@ class FakeOrganizationsRepository : OrganizationsRepository {
     override suspend fun removeMember(orgId: String, userId: String): ApiResult<Unit> {
         removeMemberCount++
         return removeMemberResult
+    }
+
+    override suspend fun getLinkedInStatus(orgId: String): ApiResult<OrgLinkedInStatus> {
+        linkedInStatusCount++
+        return linkedInStatusResult
+    }
+
+    override suspend fun assignLinkedInPage(
+        orgId: String,
+        userId: String,
+        pageId: String?,
+    ): ApiResult<Boolean> {
+        assignments += userId to pageId
+        return assignPageResult ?: ApiResult.Success(pageId != null)
+    }
+
+    override suspend fun removeLinkedInCredential(orgId: String): ApiResult<Unit> {
+        removeCredentialCount++
+        if (removeCredentialResult is ApiResult.Success) {
+            linkedInStatusResult = ApiResult.Success(OrgLinkedInStatus.NOT_CONNECTED)
+        }
+        return removeCredentialResult
+    }
+
+    override suspend fun syncLinkedInPages(orgId: String): ApiResult<OrgLinkedInStatus> {
+        syncPagesCount++
+        return syncPagesResult ?: linkedInStatusResult
     }
 
     companion object {

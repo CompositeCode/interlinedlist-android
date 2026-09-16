@@ -2,6 +2,7 @@ package com.interlinedlist.android.feature.organizations.data
 
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.feature.organizations.domain.MemberCandidate
+import com.interlinedlist.android.feature.organizations.domain.OrgLinkedInStatus
 import com.interlinedlist.android.feature.organizations.domain.OrgMember
 import com.interlinedlist.android.feature.organizations.domain.OrgRole
 import com.interlinedlist.android.feature.organizations.domain.Organization
@@ -77,6 +78,29 @@ interface OrganizationsRepository {
 
     /** Removes a user's membership from the organization. */
     suspend fun removeMember(orgId: String, userId: String): ApiResult<Unit>
+
+    /**
+     * The organization's shared LinkedIn credential, its company pages and the
+     * per-member page assignments. An organization with no credential is a
+     * success carrying [OrgLinkedInStatus.NOT_CONNECTED], not a failure.
+     */
+    suspend fun getLinkedInStatus(orgId: String): ApiResult<OrgLinkedInStatus>
+
+    /**
+     * Assigns [userId] to the company page [pageId], or clears their assignment
+     * when [pageId] is null. Returns whether the member ends up assigned, as the
+     * server reports it.
+     */
+    suspend fun assignLinkedInPage(orgId: String, userId: String, pageId: String?): ApiResult<Boolean>
+
+    /**
+     * Disconnects the shared credential. The server clears the page assignments
+     * with it, so the organization can no longer post to its company pages.
+     */
+    suspend fun removeLinkedInCredential(orgId: String): ApiResult<Unit>
+
+    /** Re-discovers the company pages and returns the refreshed status. */
+    suspend fun syncLinkedInPages(orgId: String): ApiResult<OrgLinkedInStatus>
 
     companion object {
         const val DEFAULT_PAGE_SIZE = 20
