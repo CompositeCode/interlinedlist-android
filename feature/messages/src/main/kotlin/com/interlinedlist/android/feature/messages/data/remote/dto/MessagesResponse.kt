@@ -4,22 +4,43 @@ import com.interlinedlist.android.feature.messages.domain.CrossPostStatus
 import kotlinx.serialization.Serializable
 
 /**
- * Paginated list envelope shared by the feed, replies, and search endpoints:
- * `{ data: [...], pagination: { total, limit, offset, hasMore } }`.
+ * Paginated list envelope shared by the feed, replies, and search endpoints.
+ *
+ * The feed is documented as `{ messages: [...], pagination: {...} }` while the
+ * sibling list endpoints wrap their rows in `data`; both keys are accepted and
+ * read through [rows].
  */
 @Serializable
 data class MessagesResponse(
     val data: List<MessageDto> = emptyList(),
+    val messages: List<MessageDto> = emptyList(),
     val pagination: PaginationDto = PaginationDto(),
-)
+) {
+    /** The message rows under whichever key the endpoint used. */
+    val rows: List<MessageDto> get() = data.ifEmpty { messages }
 
-/** Pagination cursor returned alongside a list of messages. */
+    /**
+     * The opaque cursor to request the next page with, or null at the end of the
+     * list. Hand it straight back as `cursor`: never parse or modify it.
+     */
+    val nextCursor: String? get() = pagination.nextCursor?.takeIf { it.isNotBlank() }
+}
+
+/**
+ * Pagination envelope returned alongside a list of messages.
+ *
+ * The feed uses keyset pagination: [nextCursor] is an **opaque** token that is
+ * passed back verbatim as the next request's `cursor`, and `null` means the end
+ * of the list. [total] and [offset] only appear on the legacy offset path and are
+ * omitted once a cursor is in play.
+ */
 @Serializable
 data class PaginationDto(
     val total: Int = 0,
     val limit: Int = DEFAULT_LIMIT,
     val offset: Int = 0,
     val hasMore: Boolean = false,
+    val nextCursor: String? = null,
 ) {
     companion object {
         const val DEFAULT_LIMIT = 20

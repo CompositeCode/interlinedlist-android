@@ -48,7 +48,7 @@ class MessagesFeedViewModelTest {
 
     @Test
     fun `refresh runs on init and toggles the refreshing flag`() = runTest(dispatcher) {
-        val repo = FakeMessagesRepository().apply { refreshResult = ApiResult.Success(true) }
+        val repo = FakeMessagesRepository().apply { refreshResult = ApiResult.Success("page-2") }
         val vm = MessagesFeedViewModel(repo)
 
         vm.uiState.test {
@@ -92,7 +92,7 @@ class MessagesFeedViewModelTest {
 
     @Test
     fun `loadMore is a no-op when there are no more pages`() = runTest(dispatcher) {
-        val repo = FakeMessagesRepository().apply { refreshResult = ApiResult.Success(false) }
+        val repo = FakeMessagesRepository().apply { refreshResult = ApiResult.Success(null) }
         val vm = MessagesFeedViewModel(repo)
         backgroundScope.launch { vm.uiState.collect {} }
         advanceUntilIdle()
@@ -106,8 +106,8 @@ class MessagesFeedViewModelTest {
     @Test
     fun `loadMore fetches the next page when more are available`() = runTest(dispatcher) {
         val repo = FakeMessagesRepository().apply {
-            refreshResult = ApiResult.Success(true)
-            loadMoreResult = ApiResult.Success(false)
+            refreshResult = ApiResult.Success("page-2")
+            loadMoreResult = ApiResult.Success(null)
         }
         val vm = MessagesFeedViewModel(repo)
         backgroundScope.launch { vm.uiState.collect {} }
@@ -118,6 +118,62 @@ class MessagesFeedViewModelTest {
 
         assertThat(repo.loadMoreCount).isEqualTo(1)
         assertThat(vm.uiState.value.canLoadMore).isFalse()
+    }
+
+    @Test
+    fun `loadMore hands back the cursor from the previous page`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            refreshResult = ApiResult.Success("page-2")
+            loadMoreResult = ApiResult.Success("page-3")
+        }
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.loadMore()
+        advanceUntilIdle()
+        vm.loadMore()
+        advanceUntilIdle()
+
+        // Each page is requested with the cursor the page before it returned.
+        assertThat(repo.loadMoreCursors).containsExactly("page-2", "page-3").inOrder()
+    }
+
+    @Test
+    fun `refresh resets the stored cursor`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            refreshResult = ApiResult.Success("page-2")
+            loadMoreResult = ApiResult.Success("page-3")
+        }
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+        vm.loadMore()
+        advanceUntilIdle()
+
+        // Refreshing from the top restarts paging: the stale "page-3" is dropped.
+        repo.refreshResult = ApiResult.Success("fresh-page-2")
+        vm.refresh()
+        advanceUntilIdle()
+        vm.loadMore()
+        advanceUntilIdle()
+
+        assertThat(repo.loadMoreCursors).containsExactly("page-2", "fresh-page-2").inOrder()
+    }
+
+    @Test
+    fun `a failed refresh leaves the feed at the end so loadMore stays idle`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            refreshResult = ApiResult.Failure(AppError.Network("offline"))
+        }
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.loadMore()
+        advanceUntilIdle()
+
+        assertThat(repo.loadMoreCount).isEqualTo(0)
     }
 
     @Test

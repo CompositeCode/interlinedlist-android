@@ -30,15 +30,18 @@ interface MessagesRepository {
 
     /**
      * Refreshes the first page of the feed from the API and replaces the cached
-     * feed. Returns whether more pages are available.
+     * feed, restarting keyset pagination from the top. Returns the opaque cursor
+     * for the next page, or null when the feed ends here.
      */
-    suspend fun refreshFeed(): ApiResult<Boolean>
+    suspend fun refreshFeed(): ApiResult<String?>
 
     /**
-     * Fetches and appends the next feed page after [currentCount] items.
-     * Returns whether still more pages remain.
+     * Fetches the page that follows [cursor] and appends it to the cached feed.
+     * [cursor] is the opaque token a previous [refreshFeed]/[loadMoreFeed]
+     * returned and is handed to the API verbatim — never construct or parse one.
+     * Returns the cursor for the page after this one, or null at the end.
      */
-    suspend fun loadMoreFeed(currentCount: Int): ApiResult<Boolean>
+    suspend fun loadMoreFeed(cursor: String): ApiResult<String?>
 
     /**
      * Creates a new top-level message and caches it. Optionally attaches already

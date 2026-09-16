@@ -29,11 +29,18 @@ import retrofit2.http.Query
  */
 interface MessagesApi {
 
-    /** Feed of top-level messages, newest first, offset/limit paginated. */
+    /**
+     * Feed of top-level messages, newest first, **keyset (cursor) paginated**.
+     *
+     * [cursor] is the previous response's `nextCursor`, passed back verbatim; it
+     * is opaque and must never be constructed, parsed or modified. A null
+     * [cursor] loads the first page (Retrofit omits the query parameter). The
+     * endpoint has no `offset` parameter.
+     */
     @GET("api/messages")
     suspend fun getMessages(
         @Query("limit") limit: Int,
-        @Query("offset") offset: Int,
+        @Query("cursor") cursor: String? = null,
     ): MessagesResponse
 
     /** Creates a new message (or a reply when `parentId` is set). The created
