@@ -63,6 +63,7 @@ import com.interlinedlist.android.feature.lists.ui.share.ShareRoute
 import com.interlinedlist.android.feature.lists.ui.share.SharedListRoute
 import com.interlinedlist.android.feature.lists.ui.share.SharedWithMeRoute
 import com.interlinedlist.android.feature.lists.ui.watchers.WatchersRoute
+import com.interlinedlist.android.feature.messages.navigation.MessagesDestinations
 import com.interlinedlist.android.feature.messages.ui.detail.MessageDetailRoute
 import com.interlinedlist.android.feature.messages.ui.feed.MessagesRoute
 import com.interlinedlist.android.feature.messages.ui.scheduled.ScheduledMessagesRoute
@@ -199,6 +200,7 @@ fun InterlinedListNavHost(
     startLoggedIn: Boolean,
     notificationRoute: String? = null,
     emailChangeRoute: String? = null,
+    tagFeedRoute: String? = null,
 ) {
     val navController = rememberNavController()
     NavHost(
@@ -225,7 +227,8 @@ fun InterlinedListNavHost(
             // offline is pushed) without waiting for the user to open Settings.
             AccountThemeSyncEffect()
             MainShell(
-                notificationRoute = notificationRoute,
+                // A launch is either a notification tap or a link tap, never both.
+                pendingRoute = notificationRoute ?: tagFeedRoute,
                 onLoggedOut = {
                     // Stop background sync/poll for the signed-out session. Cancellation
                     // must never crash the sign-out flow, so any failure is swallowed.
@@ -254,7 +257,7 @@ fun InterlinedListNavHost(
  */
 @Composable
 private fun MainShell(
-    notificationRoute: String? = null,
+    pendingRoute: String? = null,
     onLoggedOut: () -> Unit,
 ) {
     val tabNav = rememberNavController()
@@ -288,10 +291,11 @@ private fun MainShell(
     val pushRegistration: PushRegistrationViewModel = hiltViewModel()
     LaunchedEffect(Unit) { pushRegistration.runForSession() }
 
-    // Route straight to a tapped notification's destination once, when present.
-    val pendingRoute by rememberUpdatedState(notificationRoute)
+    // Route straight to the launch's destination once, when present: a tapped
+    // notification, or a tapped link (a tag feed) resolved in MainActivity.
+    val launchRoute by rememberUpdatedState(pendingRoute)
     LaunchedEffect(Unit) {
-        pendingRoute?.let { route ->
+        launchRoute?.let { route ->
             runCatching { tabNav.navigate(route) }
         }
     }
@@ -331,6 +335,22 @@ private fun MainShell(
                 MessagesRoute(
                     onOpenMessage = { id -> tabNav.navigate(Routes.messageDetail(id)) },
                     onOpenScheduled = { tabNav.navigate(Routes.MESSAGES_SCHEDULED) },
+                    onOpenTag = { tag -> tabNav.navigate(MessagesDestinations.tagFeedRoute(tag)) },
+                )
+            }
+            // The same feed screen, filtered to one tag. The tag arrives as a nav
+            // argument, so paging and the view switcher are shared, not forked.
+            composable(
+                MessagesDestinations.TAG_FEED,
+                arguments = listOf(
+                    navArgument(MessagesDestinations.ARG_TAG) { type = NavType.StringType },
+                ),
+            ) {
+                MessagesRoute(
+                    onOpenMessage = { id -> tabNav.navigate(Routes.messageDetail(id)) },
+                    onOpenScheduled = {},
+                    onOpenTag = { tag -> tabNav.navigate(MessagesDestinations.tagFeedRoute(tag)) },
+                    onBack = { tabNav.popBackStack() },
                 )
             }
             composable(
@@ -340,6 +360,7 @@ private fun MainShell(
                 MessageDetailRoute(
                     onBack = { tabNav.popBackStack() },
                     onOpenMessage = { id -> tabNav.navigate(Routes.messageDetail(id)) },
+                    onOpenTag = { tag -> tabNav.navigate(MessagesDestinations.tagFeedRoute(tag)) },
                 )
             }
             composable(Routes.MESSAGES_SCHEDULED) {

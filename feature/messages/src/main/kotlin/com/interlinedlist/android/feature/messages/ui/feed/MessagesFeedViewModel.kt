@@ -1,5 +1,6 @@
 package com.interlinedlist.android.feature.messages.ui.feed
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.interlinedlist.android.core.common.result.ApiResult
@@ -13,6 +14,7 @@ import com.interlinedlist.android.feature.messages.domain.Message
 import com.interlinedlist.android.feature.messages.domain.MessageVisibility
 import com.interlinedlist.android.feature.messages.domain.ReportReason
 import com.interlinedlist.android.feature.messages.domain.TagSuggestion
+import com.interlinedlist.android.feature.messages.navigation.MessagesDestinations
 import com.interlinedlist.android.feature.messages.ui.isSubscriptionGate
 import com.interlinedlist.android.feature.messages.ui.toUserMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -39,6 +41,11 @@ data class PendingAttachment(
 /** Feed screen state: the cached messages plus transient network/compose flags. */
 data class MessagesFeedUiState(
     val messages: List<Message> = emptyList(),
+    /**
+     * The tag this feed is filtered to (`GET /api/messages?tag=`), or null for the
+     * account's main feed. Everything else on this screen behaves identically.
+     */
+    val tag: String? = null,
     val isRefreshing: Boolean = false,
     val isLoadingMore: Boolean = false,
     val canLoadMore: Boolean = false,
@@ -94,6 +101,9 @@ data class MessagesFeedUiState(
     val isModerating: Boolean = false,
 ) {
     val isEmpty: Boolean get() = messages.isEmpty()
+
+    /** True when the feed is filtered to a single tag. */
+    val isTagFeed: Boolean get() = tag != null
 
     /** True while the composer is writing a quote of [quoteTarget]. */
     val isQuoting: Boolean get() = quoteTarget != null
@@ -212,10 +222,24 @@ private data class FeedTransientState(
         }
 }
 
+/**
+ * The one feed ViewModel, used for both the account's main feed and a tag-filtered
+ * feed. The tag arrives as the [MessagesDestinations.ARG_TAG] nav argument and is
+ * the *only* difference between the two: the opaque cursor paging, the
+ * view-preference switcher, digs, edits and moderation are all the same code
+ * running under a different query. Forking this class for tags would have to
+ * re-implement every one of them, and would drift. The composer is the one part a
+ * tag feed leaves out, since a new post cannot be filed into someone else's tag.
+ */
 @HiltViewModel
 class MessagesFeedViewModel @Inject constructor(
     private val repository: MessagesRepository,
+    savedStateHandle: SavedStateHandle = SavedStateHandle(),
 ) : ViewModel() {
+
+    /** Tag this feed is filtered to, or null when it is the main feed. */
+    private val tag: String? =
+        savedStateHandle.get<String>(MessagesDestinations.ARG_TAG)?.takeIf { it.isNotBlank() }
 
     private val transient = MutableStateFlow(FeedTransientState())
 
@@ -231,9 +255,10 @@ class MessagesFeedViewModel @Inject constructor(
      * combined with transient flags into a single [MessagesFeedUiState].
      */
     val uiState: StateFlow<MessagesFeedUiState> =
-        combine(repository.observeFeed(), transient) { messages, t ->
+        combine(repository.observeFeed(tag), transient) { messages, t ->
             MessagesFeedUiState(
                 messages = messages,
+                tag = tag,
                 isRefreshing = t.isRefreshing,
                 isLoadingMore = t.isLoadingMore,
                 canLoadMore = t.canLoadMore,
@@ -271,8 +296,11 @@ class MessagesFeedViewModel @Inject constructor(
 
     init {
         loadViewingPreferenceThenRefresh()
-        loadLinkedNetworks()
-        loadDefaultVisibility()
+        // A tag feed has no composer, so it does not pay for the composer's setup.
+        if (tag == null) {
+            loadLinkedNetworks()
+            loadDefaultVisibility()
+        }
     }
 
     /**
@@ -381,7 +409,7 @@ class MessagesFeedViewModel @Inject constructor(
             )
         }
         viewModelScope.launch {
-            when (val result = repository.refreshFeed(transient.value.viewingPreference)) {
+            when (val result = repository.refreshFeed(transient.value.viewingPreference, tag)) {
                 is ApiResult.Success -> transient.update {
                     it.copy(isRefreshing = false, nextCursor = result.data)
                 }
@@ -399,7 +427,7 @@ class MessagesFeedViewModel @Inject constructor(
         if (current.isLoadingMore || current.isRefreshing) return
         transient.update { it.copy(isLoadingMore = true) }
         viewModelScope.launch {
-            when (val result = repository.loadMoreFeed(cursor, current.viewingPreference)) {
+            when (val result = repository.loadMoreFeed(cursor, current.viewingPreference, tag)) {
                 is ApiResult.Success -> transient.update {
                     it.copy(isLoadingMore = false, nextCursor = result.data)
                 }

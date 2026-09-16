@@ -92,6 +92,9 @@ object MessageCardTags {
  *
  * [onPush] / [onQuote] are null where the host screen does not wire the actions;
  * they are also withheld for a message [Message.canBePushed] rules out.
+ *
+ * [onTagClick] opens the tag-filtered feed for a tapped tag; it is null on screens
+ * that have nowhere to send the user, and the tags then render as plain labels.
  */
 @Composable
 fun MessageCard(
@@ -109,6 +112,7 @@ fun MessageCard(
     onPush: (() -> Unit)? = null,
     onQuote: (() -> Unit)? = null,
     onOpenPushedMessage: (String) -> Unit = {},
+    onTagClick: ((String) -> Unit)? = null,
 ) {
     Column(
         modifier = modifier
@@ -184,7 +188,7 @@ fun MessageCard(
                 }
                 if (message.hasTags) {
                     Spacer(Modifier.size(8.dp))
-                    TagRow(tags = message.tags)
+                    TagRow(tags = message.tags, onTagClick = onTagClick)
                 }
                 Spacer(Modifier.size(8.dp))
                 EngagementRow(
@@ -204,10 +208,14 @@ fun MessageCard(
  * extra fetch. Rendered as plain labels: a tag is a free-form string that may
  * contain spaces and punctuation, so it is shown exactly as stored rather than
  * being prettified into a hashtag.
+ *
+ * Each label opens that tag's feed when [onTagClick] is wired. The click sits
+ * outside the chip's padding so the whole chip is the target, and adds no layout
+ * of its own.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun TagRow(tags: List<String>) {
+private fun TagRow(tags: List<String>, onTagClick: ((String) -> Unit)? = null) {
     FlowRow(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -223,6 +231,13 @@ private fun TagRow(tags: List<String>) {
                 modifier = Modifier
                     .clip(MaterialTheme.shapes.small)
                     .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .then(
+                        if (onTagClick != null) {
+                            Modifier.clickable { onTagClick(tag) }
+                        } else {
+                            Modifier
+                        },
+                    )
                     .padding(horizontal = 8.dp, vertical = 2.dp)
                     .testTag(MessageCardTags.tagTag(tag)),
             )

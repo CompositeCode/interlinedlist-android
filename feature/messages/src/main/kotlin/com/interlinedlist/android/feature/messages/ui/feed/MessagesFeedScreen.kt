@@ -27,6 +27,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Image
@@ -131,6 +132,11 @@ object MessagesFeedTags {
     const val TAG_SUGGESTIONS = "messagesComposeTagSuggestions"
     const val TAG_SUGGESTION_PREFIX = "messagesComposeTagSuggestion_"
 
+    /** Back arrow shown instead of the tab bar when the feed is filtered to a tag. */
+    const val BACK = "messagesFeedBack"
+    /** Title shown while the feed is filtered to a tag. */
+    const val TAG_TITLE = "messagesFeedTagTitle"
+
     /** The quoted message attached to the composer, and its always-public banner. */
     const val QUOTE_ATTACHED = "messagesComposeQuoteAttached"
     const val QUOTE_PUBLIC_BANNER = "messagesComposeQuoteBanner"
@@ -146,16 +152,23 @@ object MessagesFeedTags {
 }
 
 /**
- * Hilt-wired feed entry point. The app's NavHost hosts this as the Messages tab.
+ * Hilt-wired feed entry point, hosted twice: as the Messages tab, and as the
+ * tag-filtered feed (`MessagesDestinations.TAG_FEED`). Which one it is comes from
+ * the ViewModel's nav arguments, so both get identical paging, view-preference and
+ * moderation behaviour from the same code.
  *
  * @param onOpenMessage navigates to the detail screen for the given message id.
  * @param onOpenScheduled navigates to the Scheduled messages screen.
+ * @param onOpenTag opens the feed filtered to a tapped tag.
+ * @param onBack pops the tag feed; ignored on the tab root, which has no back arrow.
  */
 @Composable
 fun MessagesRoute(
     onOpenMessage: (String) -> Unit,
     onOpenScheduled: () -> Unit,
     modifier: Modifier = Modifier,
+    onOpenTag: ((String) -> Unit)? = null,
+    onBack: () -> Unit = {},
     viewModel: MessagesFeedViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -167,6 +180,8 @@ fun MessagesRoute(
         onViewingPreferenceChange = viewModel::onViewingPreferenceChange,
         onOpenMessage = onOpenMessage,
         onOpenScheduled = onOpenScheduled,
+        onOpenTag = onOpenTag,
+        onBack = onBack,
         onDig = viewModel::onDig,
         onDelete = viewModel::onDelete,
         onPush = viewModel::onPush,
@@ -225,6 +240,8 @@ fun MessagesFeedScreen(
     modifier: Modifier = Modifier,
     onViewingPreferenceChange: (ViewingPreference) -> Unit = {},
     onOpenScheduled: () -> Unit = {},
+    onOpenTag: ((String) -> Unit)? = null,
+    onBack: () -> Unit = {},
     onPush: (Message) -> Unit = {},
     onQuote: (Message) -> Unit = {},
     onReport: (Message) -> Unit = {},
@@ -255,19 +272,49 @@ fun MessagesFeedScreen(
         modifier = modifier.fillMaxSize(),
         topBar = {
             TopAppBar(
-                title = { Text("Messages") },
+                title = {
+                    if (state.tag != null) {
+                        Text(
+                            text = state.tag,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.testTag(MessagesFeedTags.TAG_TITLE),
+                        )
+                    } else {
+                        Text("Messages")
+                    }
+                },
+                navigationIcon = {
+                    // The tag feed is pushed on top of a tab, so it carries its own
+                    // back affordance; the tab root does not.
+                    if (state.isTagFeed) {
+                        IconButton(
+                            onClick = onBack,
+                            modifier = Modifier.testTag(MessagesFeedTags.BACK),
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                            )
+                        }
+                    }
+                },
                 actions = {
-                    IconButton(
-                        onClick = onOpenScheduled,
-                        modifier = Modifier.testTag(MessagesFeedTags.SCHEDULED_ACTION),
-                    ) {
-                        Icon(Icons.Filled.Schedule, contentDescription = "Scheduled messages")
+                    if (!state.isTagFeed) {
+                        IconButton(
+                            onClick = onOpenScheduled,
+                            modifier = Modifier.testTag(MessagesFeedTags.SCHEDULED_ACTION),
+                        ) {
+                            Icon(Icons.Filled.Schedule, contentDescription = "Scheduled messages")
+                        }
                     }
                 },
             )
         },
         floatingActionButton = {
-            if (!state.subscriptionRequired) {
+            // Composing from a tag feed would post an untagged message into a feed
+            // it cannot appear in, so the composer stays on the main feed.
+            if (!state.subscriptionRequired && !state.isTagFeed) {
                 FloatingActionButton(
                     onClick = onOpenCompose,
                     modifier = Modifier.testTag(MessagesFeedTags.FAB),
@@ -290,6 +337,7 @@ fun MessagesFeedScreen(
                     onRefresh = onRefresh,
                     onLoadMore = onLoadMore,
                     onOpenMessage = onOpenMessage,
+                    onOpenTag = onOpenTag,
                     onDig = onDig,
                     onDelete = onDelete,
                     onPush = onPush,
@@ -407,6 +455,7 @@ private fun FeedContent(
     onRefresh: () -> Unit,
     onLoadMore: () -> Unit,
     onOpenMessage: (String) -> Unit,
+    onOpenTag: ((String) -> Unit)?,
     onDig: (Message) -> Unit,
     onDelete: (Message) -> Unit,
     onPush: (Message) -> Unit,
@@ -426,11 +475,12 @@ private fun FeedContent(
         when {
             state.isEmpty && state.isRefreshing -> LoadingState()
             state.isEmpty && state.errorMessage != null -> ErrorState(state.errorMessage, onRefresh)
-            state.isEmpty -> EmptyState()
+            state.isEmpty -> EmptyState(tag = state.tag)
             else -> FeedList(
                 state = state,
                 onLoadMore = onLoadMore,
                 onOpenMessage = onOpenMessage,
+                onOpenTag = onOpenTag,
                 onDig = onDig,
                 onDelete = onDelete,
                 onPush = onPush,
@@ -451,6 +501,7 @@ private fun FeedList(
     state: MessagesFeedUiState,
     onLoadMore: () -> Unit,
     onOpenMessage: (String) -> Unit,
+    onOpenTag: ((String) -> Unit)?,
     onDig: (Message) -> Unit,
     onDelete: (Message) -> Unit,
     onPush: (Message) -> Unit,
@@ -494,6 +545,7 @@ private fun FeedList(
                 onQuote = { onQuote(message) },
                 // The embedded original opens on its own page.
                 onOpenPushedMessage = onOpenMessage,
+                onTagClick = onOpenTag,
             )
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         }
@@ -515,10 +567,16 @@ private fun LoadingState() {
 }
 
 @Composable
-private fun EmptyState() {
+private fun EmptyState(tag: String? = null) {
     Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
         Text(
-            text = "No messages yet. Be the first to post.",
+            // The tag feed hides the composer, so "be the first to post" would be
+            // an invitation the screen cannot honour.
+            text = if (tag != null) {
+                "Nothing tagged \u201C$tag\u201D yet."
+            } else {
+                "No messages yet. Be the first to post."
+            },
             style = MaterialTheme.typography.bodyLarge,
             textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurfaceVariant,

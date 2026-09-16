@@ -43,12 +43,19 @@ interface MessagesApi {
      * `offset`, `onlyMine` and `tag`): there is no following/followers parameter,
      * because the server scopes the feed by the account's saved
      * `viewingPreference`. Null omits the parameter.
+     *
+     * [tag] filters the feed to messages carrying that tag. Tags are free-form and
+     * routinely contain spaces and punctuation (`life is short, o brave girl` is a
+     * real one), so the value is passed **raw** and Retrofit percent-encodes it
+     * exactly once — pre-encoding here would double-encode it and match nothing.
+     * Null omits the parameter, which is the unfiltered feed.
      */
     @GET("api/messages")
     suspend fun getMessages(
         @Query("limit") limit: Int,
         @Query("cursor") cursor: String? = null,
         @Query("onlyMine") onlyMine: Boolean? = null,
+        @Query("tag") tag: String? = null,
     ): MessagesResponse
 
     /** Creates a new message (or a reply when `parentId` is set). The created
