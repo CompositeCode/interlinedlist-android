@@ -47,6 +47,7 @@ class ProfileScreenTest {
         onOpenFollowers: () -> Unit = {},
         onOpenFollowing: () -> Unit = {},
         onOpenRequests: () -> Unit = {},
+        onOpenBlog: () -> Unit = {},
         onSignOut: () -> Unit = {},
     ) {
         composeRule.setContent {
@@ -64,6 +65,7 @@ class ProfileScreenTest {
                     onOpenSessions = {},
                     onOpenConnectedAccounts = {},
                     onOpenAccountSettings = {},
+                    onOpenBlog = onOpenBlog,
                     onSignOut = onSignOut,
                     onRetry = {},
                 )
@@ -129,6 +131,20 @@ class ProfileScreenTest {
         assert(followers)
         assert(requests)
         assert(signOut)
+    }
+
+    @Test
+    fun profile_blogRow_isInTheMenuAndRoutesOut() {
+        var blog = false
+        stubbedProfileScreen(
+            state = ProfileUiState(user = sampleUser(), isLoading = false),
+            onOpenBlog = { blog = true },
+        )
+
+        // Sits in the Account menu alongside the in-app rows, not as a footer.
+        composeRule.onNodeWithTag(AccountMenuTestTags.BLOG).assertIsDisplayed().performClick()
+
+        assert(blog)
     }
 
     @Test
