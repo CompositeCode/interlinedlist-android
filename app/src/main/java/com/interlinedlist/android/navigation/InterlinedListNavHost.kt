@@ -333,6 +333,10 @@ private fun MainShell(
                 onBack = { tabNav.popBackStack() },
                 onOpenThread = { username -> tabNav.navigateToDmThread(username) },
                 onComposeNew = { tabNav.navigateToNewDm() },
+                // DMs are limited to mutual follows; when the recipient set is
+                // empty the picker routes to the existing user search so the
+                // user can go and follow someone.
+                onFindPeople = { tabNav.navigate(Routes.USER_SEARCH) },
             )
 
             // ---- Lists ----
