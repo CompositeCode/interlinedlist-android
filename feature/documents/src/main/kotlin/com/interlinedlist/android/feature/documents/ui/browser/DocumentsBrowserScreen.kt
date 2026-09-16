@@ -19,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Dashboard
@@ -66,6 +67,7 @@ object DocumentsBrowserTestTags {
     const val CREATE_FOLDER = "browserCreateFolder"
     const val SEARCH_ACTION = "browserSearchAction"
     const val TEMPLATES_ACTION = "browserTemplatesAction"
+    const val POWERED_DOCUMENT_ACTION = "browserPoweredDocumentAction"
     const val SEARCH_FIELD = "browserSearchField"
     const val SEARCH_RESULTS = "browserSearchResults"
     const val BREADCRUMB = "browserBreadcrumb"
@@ -91,6 +93,7 @@ fun DocumentsRoute(
     onOpenDocument: (String) -> Unit,
     modifier: Modifier = Modifier,
     onOpenTemplates: () -> Unit = {},
+    onOpenPoweredDocument: () -> Unit = {},
     viewModel: DocumentsBrowserViewModel = hiltViewModel(),
 ) {
     DocumentsFolderRoute(
@@ -99,6 +102,7 @@ fun DocumentsRoute(
         onBack = null,
         modifier = modifier,
         onOpenTemplates = onOpenTemplates,
+        onOpenPoweredDocument = onOpenPoweredDocument,
         viewModel = viewModel,
     )
 }
@@ -114,6 +118,7 @@ fun DocumentsFolderRoute(
     onBack: (() -> Unit)?,
     modifier: Modifier = Modifier,
     onOpenTemplates: () -> Unit = {},
+    onOpenPoweredDocument: () -> Unit = {},
     viewModel: DocumentsBrowserViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -132,6 +137,7 @@ fun DocumentsFolderRoute(
         onSearchQueryChange = viewModel::onSearchQueryChange,
         onBack = onBack,
         onOpenTemplates = onOpenTemplates,
+        onOpenPoweredDocument = onOpenPoweredDocument,
         modifier = modifier,
     )
 }
@@ -154,6 +160,7 @@ fun DocumentsBrowserScreen(
     onBack: (() -> Unit)?,
     modifier: Modifier = Modifier,
     onOpenTemplates: () -> Unit = {},
+    onOpenPoweredDocument: () -> Unit = {},
 ) {
     var dialog by remember { mutableStateOf<BrowserDialog>(BrowserDialog.None) }
 
@@ -187,6 +194,17 @@ fun DocumentsBrowserScreen(
                         modifier = Modifier.testTag(DocumentsBrowserTestTags.TEMPLATES_ACTION),
                     ) {
                         Icon(Icons.Default.Dashboard, contentDescription = "Templates")
+                    }
+                    // Drawn only when the AI gate says this account may use AI, so a
+                    // free account is never offered a control that would fail.
+                    if (state.isAiEnabled) {
+                        IconButton(
+                            onClick = onOpenPoweredDocument,
+                            modifier = Modifier
+                                .testTag(DocumentsBrowserTestTags.POWERED_DOCUMENT_ACTION),
+                        ) {
+                            Icon(Icons.Default.AutoAwesome, contentDescription = "Powered Document")
+                        }
                     }
                     IconButton(
                         onClick = { dialog = BrowserDialog.CreateFolder },

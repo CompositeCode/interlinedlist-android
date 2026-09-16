@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.interlinedlist.android.core.common.result.ApiResult
+import com.interlinedlist.android.feature.ai.domain.AiGate
 import com.interlinedlist.android.feature.documents.data.DocumentsRepository
 import com.interlinedlist.android.feature.documents.domain.Document
 import com.interlinedlist.android.feature.documents.domain.FolderContents
@@ -39,6 +40,12 @@ data class DocumentsBrowserUiState(
     val isSearchActive: Boolean = false,
     val isSearching: Boolean = false,
     val searchResults: List<Document> = emptyList(),
+    /**
+     * Whether the Powered Document control may be drawn. False unless
+     * `GET /api/ai/status` says this account may use AI, so a free account — or a
+     * deployment with no provider configured — never sees the entry point at all.
+     */
+    val isAiEnabled: Boolean = false,
 ) {
     val isEmpty: Boolean get() = contents.isEmpty && !isLoading
 
@@ -62,6 +69,7 @@ data class DocumentsBrowserUiState(
 @HiltViewModel
 class DocumentsBrowserViewModel @Inject constructor(
     private val repository: DocumentsRepository,
+    private val aiGate: AiGate,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -77,6 +85,7 @@ class DocumentsBrowserViewModel @Inject constructor(
     init {
         observeContents()
         observeFolders()
+        observeAiAvailability()
         refresh()
     }
 
@@ -92,6 +101,20 @@ class DocumentsBrowserViewModel @Inject constructor(
         viewModelScope.launch {
             repository.observeFolderSummaries().collect { folders ->
                 _uiState.update { it.copy(allFolders = folders) }
+            }
+        }
+    }
+
+    /**
+     * The AI gate decides whether the Powered Document control exists. It is
+     * resolved once per app session and shared by every AI surface, so opening the
+     * Documents tab costs at most one `/api/ai/status` read.
+     */
+    private fun observeAiAvailability() {
+        viewModelScope.launch { aiGate.ensureResolved() }
+        viewModelScope.launch {
+            aiGate.availability.collect { availability ->
+                _uiState.update { it.copy(isAiEnabled = availability.isEnabled) }
             }
         }
     }

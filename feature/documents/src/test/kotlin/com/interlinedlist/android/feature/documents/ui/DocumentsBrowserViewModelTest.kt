@@ -4,10 +4,14 @@ import androidx.lifecycle.SavedStateHandle
 import com.google.common.truth.Truth.assertThat
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
+import com.interlinedlist.android.feature.ai.domain.AiAvailability
+import com.interlinedlist.android.feature.ai.domain.AiGate
+import com.interlinedlist.android.feature.ai.domain.AiQuota
 import com.interlinedlist.android.feature.documents.domain.DocumentFolder
 import com.interlinedlist.android.feature.documents.domain.FolderNode
 import com.interlinedlist.android.feature.documents.ui.browser.DocumentsBrowserViewModel
 import com.interlinedlist.android.feature.documents.ui.browser.FOLDER_ID_ARG
+import com.interlinedlist.android.feature.documents.ui.powered.FakeAiRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -24,21 +28,54 @@ class DocumentsBrowserViewModelTest {
 
     private val dispatcher = StandardTestDispatcher()
     private lateinit var repo: FakeDocumentsRepository
+    private lateinit var ai: FakeAiRepository
 
     @Before
     fun setUp() {
         Dispatchers.setMain(dispatcher)
         repo = FakeDocumentsRepository()
+        ai = FakeAiRepository()
     }
 
     @After
     fun tearDown() = Dispatchers.resetMain()
 
     private fun rootViewModel() =
-        DocumentsBrowserViewModel(repo, SavedStateHandle())
+        DocumentsBrowserViewModel(repo, AiGate(ai), SavedStateHandle())
 
     private fun folderViewModel(folderId: String) =
-        DocumentsBrowserViewModel(repo, SavedStateHandle(mapOf(FOLDER_ID_ARG to folderId)))
+        DocumentsBrowserViewModel(repo, AiGate(ai), SavedStateHandle(mapOf(FOLDER_ID_ARG to folderId)))
+
+    @Test
+    fun `a subscriber with AI configured sees the Powered Document control`() = runTest(dispatcher) {
+        ai.availability = AiAvailability.Available(AiQuota(0, 50, 50))
+
+        val vm = rootViewModel()
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.isAiEnabled).isTrue()
+    }
+
+    @Test
+    fun `a free account never sees the Powered Document control`() = runTest(dispatcher) {
+        ai.availability = AiAvailability.NotSubscribed
+
+        val vm = rootViewModel()
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.isAiEnabled).isFalse()
+    }
+
+    @Test
+    fun `a deployment with no AI provider never shows the Powered Document control`() =
+        runTest(dispatcher) {
+            ai.availability = AiAvailability.Unavailable
+
+            val vm = rootViewModel()
+            advanceUntilIdle()
+
+            assertThat(vm.uiState.value.isAiEnabled).isFalse()
+        }
 
     @Test
     fun `root level shows top-level folders and unfiled documents`() = runTest(dispatcher) {
