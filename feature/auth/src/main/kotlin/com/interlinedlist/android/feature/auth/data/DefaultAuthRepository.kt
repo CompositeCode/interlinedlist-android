@@ -5,6 +5,7 @@ import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.database.dao.UserDao
 import com.interlinedlist.android.core.database.entity.CachedUserEntity
 import com.interlinedlist.android.core.datastore.SessionStore
+import com.interlinedlist.android.core.common.session.SessionTeardownTask
 import com.interlinedlist.android.core.model.User
 import com.interlinedlist.android.core.network.api.InterlinedListApi
 import com.interlinedlist.android.core.network.dto.SyncTokenRequest
@@ -26,6 +27,12 @@ class DefaultAuthRepository @Inject constructor(
     private val userDao: UserDao,
     private val json: Json,
     private val dispatchers: DispatcherProvider,
+    /**
+     * Steps contributed by other feature modules that must run while the session is
+     * still valid (e.g. unregistering this device's push token). Dagger supplies an
+     * empty set when nothing contributes — see `AuthModule.sessionTeardownTasks`.
+     */
+    private val sessionTeardownTasks: Set<@JvmSuppressWildcards SessionTeardownTask>,
 ) : AuthRepository {
 
     override fun isLoggedIn(): Boolean = sessionStore.isLoggedIn
@@ -85,6 +92,12 @@ class DefaultAuthRepository @Inject constructor(
         }
 
     override suspend fun logout() = withContext(dispatchers.io) {
+        // Teardown runs FIRST, while the bearer token is still persisted, because the
+        // contributed steps make authenticated calls (push-token unregister). This is
+        // the app's single sign-out path — account deletion funnels through it too —
+        // so a teardown step cannot be skipped by some other exit. A failing step must
+        // never strand the user signed in, so each is individually guarded.
+        sessionTeardownTasks.forEach { task -> runCatching { task.onSessionEnding() } }
         sessionStore.clear()
         userDao.clear()
     }

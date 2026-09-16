@@ -1,5 +1,6 @@
 package com.interlinedlist.android.feature.auth.di
 
+import com.interlinedlist.android.core.common.session.SessionTeardownTask
 import com.interlinedlist.android.feature.auth.data.AuthRepository
 import com.interlinedlist.android.feature.auth.data.DefaultAuthRepository
 import com.interlinedlist.android.feature.auth.data.remote.AuthApi
@@ -8,6 +9,7 @@ import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import dagger.multibindings.Multibinds
 import retrofit2.Retrofit
 import javax.inject.Singleton
 
@@ -18,6 +20,15 @@ abstract class AuthModule {
     @Binds
     @Singleton
     abstract fun bindAuthRepository(impl: DefaultAuthRepository): AuthRepository
+
+    /**
+     * Declares the set of session-teardown steps run on sign-out / account deletion so
+     * it can be injected even when no module contributes one (Dagger then supplies an
+     * empty set). Feature modules opt in with `@Binds @IntoSet` — see
+     * `PushTokenSessionTeardown` in `:feature:notifications`.
+     */
+    @Multibinds
+    abstract fun sessionTeardownTasks(): Set<SessionTeardownTask>
 }
 
 /**

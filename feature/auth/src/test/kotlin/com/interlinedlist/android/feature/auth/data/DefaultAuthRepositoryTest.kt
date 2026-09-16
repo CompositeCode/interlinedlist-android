@@ -3,6 +3,7 @@ package com.interlinedlist.android.feature.auth.data
 import com.google.common.truth.Truth.assertThat
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
+import com.interlinedlist.android.core.common.session.SessionTeardownTask
 import com.interlinedlist.android.core.datastore.SessionStore
 import com.interlinedlist.android.core.network.api.InterlinedListApi
 import com.interlinedlist.android.feature.auth.data.remote.AuthApi
@@ -53,13 +54,16 @@ class DefaultAuthRepositoryTest {
     @After
     fun tearDown() = server.shutdown()
 
-    private fun repository() = DefaultAuthRepository(
+    private fun repository(
+        teardownTasks: Set<SessionTeardownTask> = emptySet(),
+    ) = DefaultAuthRepository(
         api = api,
         authApi = authApi,
         sessionStore = session,
         userDao = dao,
         json = json,
         dispatchers = TestDispatcherProvider(dispatcher),
+        sessionTeardownTasks = teardownTasks,
     )
 
     private fun enqueue(code: Int, body: String = "") {
@@ -199,5 +203,67 @@ class DefaultAuthRepositoryTest {
 
         assertThat(result).isInstanceOf(ApiResult.Success::class.java)
         assertThat(server.takeRequest().path).contains("api/auth/send-verification-email")
+    }
+
+    // ---- sign-out / account deletion teardown ------------------------------
+
+    @Test
+    fun `sign-out runs session teardown while the token is still valid, then clears it`() =
+        runTest(dispatcher) {
+            session.saveToken("il_tok_abc")
+            session.userId = "u1"
+            val teardown = RecordingTeardown(session)
+
+            repository(teardownTasks = setOf(teardown)).logout()
+
+            assertThat(teardown.runCount).isEqualTo(1)
+            // The push-token unregister is an authenticated call, so the token MUST
+            // still be readable at teardown time.
+            assertThat(teardown.tokenSeen).isEqualTo("il_tok_abc")
+            assertThat(session.currentToken()).isNull()
+            assertThat(dao.cleared).isTrue()
+        }
+
+    @Test
+    fun `account deletion signs out through the same path, so teardown still runs`() =
+        runTest(dispatcher) {
+            // AccountSettings deletes the account and then calls this very logout(), so
+            // there is no second sign-out path that could bypass the teardown hook.
+            session.saveToken("il_tok_abc")
+            val teardown = RecordingTeardown(session)
+
+            repository(teardownTasks = setOf(teardown)).logout()
+
+            assertThat(teardown.runCount).isEqualTo(1)
+            assertThat(teardown.tokenSeen).isEqualTo("il_tok_abc")
+            assertThat(session.currentToken()).isNull()
+        }
+
+    @Test
+    fun `a failing teardown step never strands the user signed in`() = runTest(dispatcher) {
+        session.saveToken("il_tok_abc")
+        val exploding = object : SessionTeardownTask {
+            override suspend fun onSessionEnding() = error("push unregister failed")
+        }
+        val teardown = RecordingTeardown(session)
+
+        repository(teardownTasks = setOf(exploding, teardown)).logout()
+
+        assertThat(teardown.runCount).isEqualTo(1) // the other step still ran
+        assertThat(session.currentToken()).isNull()
+        assertThat(dao.cleared).isTrue()
+    }
+}
+
+/** Records that teardown ran, and what the session looked like at that moment. */
+private class RecordingTeardown(private val session: SessionStore) : SessionTeardownTask {
+    var runCount = 0
+        private set
+    var tokenSeen: String? = null
+        private set
+
+    override suspend fun onSessionEnding() {
+        runCount++
+        tokenSeen = session.currentToken()
     }
 }
