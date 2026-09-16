@@ -1,5 +1,7 @@
 package com.interlinedlist.android.feature.profile.domain
 
+import com.interlinedlist.android.core.network.preferences.NotificationTrayLimitStore
+
 /**
  * Bounds and server defaults for the numeric message preferences, plus the fallbacks
  * the Settings UI shows when `GET /api/user` omits a preference.
@@ -35,6 +37,21 @@ object SettingsBounds {
 
     /** The page size a fresh account gets (observed live on a real account). */
     const val DEFAULT_MESSAGES_PER_PAGE: Int = 20
+
+    /**
+     * How many notifications the tray holds. The help centre publishes this range
+     * outright — `/help/settings`: "The default is 20 and you can set any value from
+     * 10 to 40", corroborated by `/help/api/notifications` ("clamped to 10-40").
+     *
+     * The bounds are taken from [NotificationTrayLimitStore] rather than restated
+     * here, because that store is what `:feature:notifications` sizes its list and its
+     * system-tray group by: one source of truth, so Settings can never offer a value
+     * the readers would clamp away.
+     */
+    val NOTIFICATION_TRAY_LIMIT: IntRange = NotificationTrayLimitStore.RANGE
+
+    /** The tray limit a fresh account gets (help centre: "The default is 20"). */
+    const val DEFAULT_NOTIFICATION_TRAY_LIMIT: Int = NotificationTrayLimitStore.DEFAULT
 
     /** New messages start public unless the account says otherwise. */
     const val DEFAULT_PUBLICLY_VISIBLE: Boolean = true
@@ -75,3 +92,7 @@ val UserSettings.showAdvancedPostSettingsOrDefault: Boolean
 /** Whether the account is private, falling back to public when the API omits it. */
 val UserSettings.isPrivateAccountOrDefault: Boolean
     get() = isPrivateAccount ?: SettingsBounds.DEFAULT_PRIVATE_ACCOUNT
+
+/** The notification tray limit to show, falling back to the server default. */
+val UserSettings.notificationTrayLimitOrDefault: Int
+    get() = notificationTrayLimit ?: SettingsBounds.DEFAULT_NOTIFICATION_TRAY_LIMIT

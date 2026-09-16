@@ -41,6 +41,7 @@ class SettingsScreenTest {
         onSelectViewingPreference: (ViewingPreference) -> Unit = {},
         onToggleShowPreviews: (Boolean) -> Unit = {},
         onSetMessagesPerPage: (Int) -> Unit = {},
+        onSetNotificationTrayLimit: (Int) -> Unit = {},
         onSetMaxMessageLength: (Int) -> Unit = {},
         onToggleDefaultPubliclyVisible: (Boolean) -> Unit = {},
         onToggleShowAdvancedPostSettings: (Boolean) -> Unit = {},
@@ -57,6 +58,7 @@ class SettingsScreenTest {
                     onSelectViewingPreference = onSelectViewingPreference,
                     onToggleShowPreviews = onToggleShowPreviews,
                     onSetMessagesPerPage = onSetMessagesPerPage,
+                    onSetNotificationTrayLimit = onSetNotificationTrayLimit,
                     onSetMaxMessageLength = onSetMaxMessageLength,
                     onToggleDefaultPubliclyVisible = onToggleDefaultPubliclyVisible,
                     onToggleShowAdvancedPostSettings = onToggleShowAdvancedPostSettings,
@@ -282,6 +284,78 @@ class SettingsScreenTest {
         assert(saved == 25)
     }
 
+    // --- Notification tray limit (issue #35) ---------------------------------
+    // The web files this under View preferences (/help/settings lists it there, and
+    // its Notifications section points back with "see View Preferences above"), so it
+    // sits in the same group here.
+
+    @Test
+    fun notificationTrayLimit_isOfferedUnderViewPreferences() {
+        setContent(
+            state = SettingsUiState(settings = UserSettings(notificationTrayLimit = 30)),
+        )
+
+        composeRule.onNodeWithTag(SettingsTestTags.VIEW_PREFERENCES).assertIsDisplayed()
+        composeRule.onNodeWithTag(SettingsTestTags.NOTIFICATION_TRAY_LIMIT)
+            .assertTextEquals("30")
+    }
+
+    @Test
+    fun notificationTrayLimit_showsTheServerDefaultWhenTheAccountHasNone() {
+        setContent(
+            state = SettingsUiState(settings = UserSettings(notificationTrayLimit = null)),
+        )
+
+        composeRule.onNodeWithTag(SettingsTestTags.NOTIFICATION_TRAY_LIMIT)
+            .assertTextEquals("20")
+    }
+
+    @Test
+    fun notificationTrayLimit_cannotStepAboveTheDocumentedMaximum() {
+        var saved: Int? = null
+        setContent(
+            state = SettingsUiState(settings = UserSettings(notificationTrayLimit = 40)),
+            onSetNotificationTrayLimit = { saved = it },
+        )
+
+        composeRule.onNodeWithTag(settingsIncrementTag(SettingsTestTags.NOTIFICATION_TRAY_LIMIT))
+            .assertIsNotEnabled()
+
+        assert(saved == null)
+    }
+
+    @Test
+    fun notificationTrayLimit_outOfRangeEntryIsRejectedWithoutReportingAValue() {
+        var saved: Int? = null
+        setContent(
+            state = SettingsUiState(settings = UserSettings(notificationTrayLimit = 20)),
+            onSetNotificationTrayLimit = { saved = it },
+        )
+
+        composeRule.onNodeWithTag(SettingsTestTags.NOTIFICATION_TRAY_LIMIT).performTextClearance()
+        composeRule.onNodeWithTag(SettingsTestTags.NOTIFICATION_TRAY_LIMIT).performTextInput("41")
+        composeRule.onNodeWithTag(SettingsTestTags.NOTIFICATION_TRAY_LIMIT).performImeAction()
+
+        composeRule.onNodeWithTag(settingsNumberErrorTag(SettingsTestTags.NOTIFICATION_TRAY_LIMIT))
+            .assertIsDisplayed()
+        assert(saved == null) { "an out-of-range entry must not be saved, got $saved" }
+    }
+
+    @Test
+    fun notificationTrayLimit_inRangeEntryIsReported() {
+        var saved: Int? = null
+        setContent(
+            state = SettingsUiState(settings = UserSettings(notificationTrayLimit = 20)),
+            onSetNotificationTrayLimit = { saved = it },
+        )
+
+        composeRule.onNodeWithTag(SettingsTestTags.NOTIFICATION_TRAY_LIMIT).performTextClearance()
+        composeRule.onNodeWithTag(SettingsTestTags.NOTIFICATION_TRAY_LIMIT).performTextInput("35")
+        composeRule.onNodeWithTag(SettingsTestTags.NOTIFICATION_TRAY_LIMIT).performImeAction()
+
+        assert(saved == 35)
+    }
+
     @Test
     fun characterLimit_rolledBackSaveRestoresTheFieldToTheStoredValue() {
         // The screen is recomposed with the previous value after a rejected save;
@@ -296,6 +370,7 @@ class SettingsScreenTest {
                     onSelectViewingPreference = {},
                     onToggleShowPreviews = {},
                     onSetMessagesPerPage = {},
+                    onSetNotificationTrayLimit = {},
                     // Optimistic apply, then the server refuses and it rolls back.
                     onSetMaxMessageLength = { settings = settings.copy(maxMessageLength = it) },
                     onToggleDefaultPubliclyVisible = {},
@@ -381,6 +456,7 @@ class SettingsScreenTest {
                     onSelectViewingPreference = {},
                     onToggleShowPreviews = {},
                     onSetMessagesPerPage = {},
+                    onSetNotificationTrayLimit = {},
                     onSetMaxMessageLength = {},
                     onToggleDefaultPubliclyVisible = {},
                     onToggleShowAdvancedPostSettings = {},

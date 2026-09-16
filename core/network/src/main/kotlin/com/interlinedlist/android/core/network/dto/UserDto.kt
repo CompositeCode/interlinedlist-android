@@ -25,6 +25,14 @@ data class UserDto(
      * resolves it.
      */
     val viewingPreference: String? = null,
+    /**
+     * How many notifications the bell tray holds before older ones drop off
+     * (`/help/settings`: "default is 20 and you can set any value from 10 to 40").
+     * Nullable because public/partial user payloads omit it;
+     * [com.interlinedlist.android.core.network.preferences.NotificationTrayLimitStore]
+     * resolves the absent case.
+     */
+    val notificationTrayLimit: Int? = null,
 )
 
 /** Maps the wire model into the domain [User]. */

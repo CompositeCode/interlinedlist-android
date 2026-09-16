@@ -50,6 +50,8 @@ class FakeSettingsRepository : SettingsRepository {
             showAdvancedPostSettings =
                 update.showAdvancedPostSettings ?: current.showAdvancedPostSettings,
             isPrivateAccount = update.isPrivateAccount ?: current.isPrivateAccount,
+            notificationTrayLimit =
+                update.notificationTrayLimit ?: current.notificationTrayLimit,
         )
     }
 }

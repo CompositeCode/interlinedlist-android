@@ -3,6 +3,8 @@ package com.interlinedlist.android.feature.notifications.data
 import com.google.common.truth.Truth.assertThat
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
+import com.interlinedlist.android.core.network.api.InterlinedListApi
+import com.interlinedlist.android.core.network.preferences.NotificationTrayLimitStore
 import com.interlinedlist.android.feature.notifications.data.remote.NotificationsApi
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -27,18 +29,23 @@ class DefaultNotificationsRepositoryTest {
     private lateinit var server: MockWebServer
     private lateinit var api: NotificationsApi
     private lateinit var dao: FakeNotificationDao
+    private lateinit var trayLimitStore: NotificationTrayLimitStore
 
     @Before
     fun setUp() {
         server = MockWebServer()
         server.start()
         val contentType = "application/json".toMediaType()
-        api = Retrofit.Builder()
+        val retrofit = Retrofit.Builder()
             .baseUrl(server.url("/"))
             .addConverterFactory(json.asConverterFactory(contentType))
             .build()
-            .create(NotificationsApi::class.java)
+        api = retrofit.create(NotificationsApi::class.java)
         dao = FakeNotificationDao()
+        trayLimitStore =
+            NotificationTrayLimitStore(retrofit.create(InterlinedListApi::class.java), json)
+        // Pre-seeded so each test's queued responses are spent on notifications alone.
+        trayLimitStore.publish(NotificationTrayLimitStore.DEFAULT)
     }
 
     @After
@@ -47,6 +54,7 @@ class DefaultNotificationsRepositoryTest {
     private fun repository() = DefaultNotificationsRepository(
         api = api,
         notificationDao = dao,
+        trayLimitStore = trayLimitStore,
         json = json,
         dispatchers = TestDispatcherProvider(dispatcher),
     )

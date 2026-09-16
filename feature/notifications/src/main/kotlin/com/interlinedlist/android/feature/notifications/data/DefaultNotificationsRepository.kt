@@ -3,12 +3,12 @@ package com.interlinedlist.android.feature.notifications.data
 import com.interlinedlist.android.core.common.dispatcher.DispatcherProvider
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.network.error.safeApiCall
+import com.interlinedlist.android.core.network.preferences.NotificationTrayLimitStore
 import com.interlinedlist.android.feature.notifications.data.local.NotificationDao
 import com.interlinedlist.android.feature.notifications.data.local.NotificationEntity
 import com.interlinedlist.android.feature.notifications.data.local.toDomain
 import com.interlinedlist.android.feature.notifications.data.local.toEntity
 import com.interlinedlist.android.feature.notifications.data.remote.NotificationsApi
-import com.interlinedlist.android.feature.notifications.data.remote.dto.PaginationDto
 import com.interlinedlist.android.feature.notifications.data.remote.dto.toDomain
 import com.interlinedlist.android.feature.notifications.domain.Notification
 import kotlinx.coroutines.flow.Flow
@@ -18,9 +18,19 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import javax.inject.Inject
 
+/**
+ * Notifications backed by Room, refreshed from the API.
+ *
+ * Every page is sized by the account's `notificationTrayLimit` rather than by a
+ * constant, so the app's list holds what the web's bell tray holds. The limit comes
+ * from [NotificationTrayLimitStore] in `:core:network` because the preference is
+ * written by `:feature:profile`'s Settings screen and no feature module here may
+ * depend on another.
+ */
 class DefaultNotificationsRepository @Inject constructor(
     private val api: NotificationsApi,
     private val notificationDao: NotificationDao,
+    private val trayLimitStore: NotificationTrayLimitStore,
     private val json: Json,
     private val dispatchers: DispatcherProvider,
 ) : NotificationsRepository {
@@ -31,14 +41,14 @@ class DefaultNotificationsRepository @Inject constructor(
     override fun observeUnreadCount(): Flow<Int> = notificationDao.observeUnreadCount()
 
     override suspend fun fetchLatest(): ApiResult<List<Notification>> = withContext(dispatchers.io) {
-        when (val result = safeCall { api.getNotifications(limit = PaginationDto.DEFAULT_LIMIT, offset = 0) }) {
+        when (val result = safeCall { api.getNotifications(limit = pageSize(), offset = 0) }) {
             is ApiResult.Success -> ApiResult.Success(result.data.items.map { it.toDomain() })
             is ApiResult.Failure -> result
         }
     }
 
     override suspend fun refresh(): ApiResult<Boolean> = withContext(dispatchers.io) {
-        when (val result = safeCall { api.getNotifications(limit = PaginationDto.DEFAULT_LIMIT, offset = 0) }) {
+        when (val result = safeCall { api.getNotifications(limit = pageSize(), offset = 0) }) {
             is ApiResult.Success -> {
                 val page = result.data
                 val entities = page.items.mapIndexed { index, dto ->
@@ -54,7 +64,7 @@ class DefaultNotificationsRepository @Inject constructor(
 
     override suspend fun loadMore(currentCount: Int): ApiResult<Boolean> = withContext(dispatchers.io) {
         when (val result = safeCall {
-            api.getNotifications(limit = PaginationDto.DEFAULT_LIMIT, offset = currentCount)
+            api.getNotifications(limit = pageSize(), offset = currentCount)
         }) {
             is ApiResult.Success -> {
                 val page = result.data
@@ -105,6 +115,13 @@ class DefaultNotificationsRepository @Inject constructor(
     }
 
     // --- helpers -----------------------------------------------------------
+
+    /**
+     * How many notifications one page holds: the account's tray limit. The endpoint's
+     * own `limit` accepts 1-50 (`/help/api/notifications`), which comfortably contains
+     * the 10-40 the tray limit is clamped to, so the preference can be sent verbatim.
+     */
+    private suspend fun pageSize(): Int = trayLimitStore.current()
 
     private suspend fun <T> safeCall(block: suspend () -> T): ApiResult<T> =
         safeApiCall(json, block)

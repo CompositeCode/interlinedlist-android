@@ -12,6 +12,7 @@ import com.interlinedlist.android.feature.profile.domain.defaultPubliclyVisibleO
 import com.interlinedlist.android.feature.profile.domain.isPrivateAccountOrDefault
 import com.interlinedlist.android.feature.profile.domain.maxMessageLengthOrDefault
 import com.interlinedlist.android.feature.profile.domain.messagesPerPageOrDefault
+import com.interlinedlist.android.feature.profile.domain.notificationTrayLimitOrDefault
 import com.interlinedlist.android.feature.profile.domain.showAdvancedPostSettingsOrDefault
 import com.interlinedlist.android.feature.profile.ui.common.toUserMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -167,6 +168,34 @@ class SettingsViewModel @Inject constructor(
             optimistic = current.copy(messagesPerPage = messages),
             previous = current,
             update = UserSettingsUpdate(messagesPerPage = messages),
+        )
+    }
+
+    /**
+     * Sets how many notifications the tray holds before older ones drop off. The help
+     * centre documents the supported range as 10 to 40
+     * ([SettingsBounds.NOTIFICATION_TRAY_LIMIT]); anything else is refused without a
+     * request.
+     *
+     * The saved value is not cosmetic: `:feature:notifications` sizes both its list
+     * and its system-tray group by it, so a rejected save must roll back rather than
+     * leave the two disagreeing about how much the tray holds.
+     */
+    fun setNotificationTrayLimit(notifications: Int) {
+        val current = _uiState.value.settings ?: return
+        if (!withinRange(
+                notifications,
+                SettingsBounds.NOTIFICATION_TRAY_LIMIT,
+                "Notification tray limit",
+            )
+        ) {
+            return
+        }
+        if (current.notificationTrayLimitOrDefault == notifications) return
+        save(
+            optimistic = current.copy(notificationTrayLimit = notifications),
+            previous = current,
+            update = UserSettingsUpdate(notificationTrayLimit = notifications),
         )
     }
 

@@ -2,6 +2,8 @@ package com.interlinedlist.android.feature.notifications.push
 
 import com.google.common.truth.Truth.assertThat
 import com.interlinedlist.android.core.common.result.ApiResult
+import com.interlinedlist.android.core.network.api.InterlinedListApi
+import com.interlinedlist.android.core.network.preferences.NotificationTrayLimitStore
 import com.interlinedlist.android.feature.notifications.data.DefaultNotificationsRepository
 import com.interlinedlist.android.feature.notifications.data.FakeNotificationDao
 import com.interlinedlist.android.feature.notifications.data.NotificationPreferencesRepository
@@ -31,18 +33,24 @@ class NotificationPollRunnerTest {
     private lateinit var server: MockWebServer
     private lateinit var api: NotificationsApi
     private lateinit var dao: FakeNotificationDao
+    private lateinit var trayLimitStore: NotificationTrayLimitStore
 
     @Before
     fun setUp() {
         server = MockWebServer()
         server.start()
         val contentType = "application/json".toMediaType()
-        api = Retrofit.Builder()
+        val retrofit = Retrofit.Builder()
             .baseUrl(server.url("/"))
             .addConverterFactory(json.asConverterFactory(contentType))
             .build()
-            .create(NotificationsApi::class.java)
+        api = retrofit.create(NotificationsApi::class.java)
         dao = FakeNotificationDao()
+        trayLimitStore =
+            NotificationTrayLimitStore(retrofit.create(InterlinedListApi::class.java), json)
+        // Pre-seeded so the poll spends its queued responses on notifications, not on
+        // `GET /api/user`; the fetch itself is covered by NotificationTrayLimitStoreTest.
+        trayLimitStore.publish(NotificationTrayLimitStore.DEFAULT)
     }
 
     @After
@@ -51,6 +59,7 @@ class NotificationPollRunnerTest {
     private fun notificationsRepo() = DefaultNotificationsRepository(
         api = api,
         notificationDao = dao,
+        trayLimitStore = trayLimitStore,
         json = json,
         dispatchers = TestDispatcherProvider(dispatcher),
     )
@@ -72,6 +81,7 @@ class NotificationPollRunnerTest {
         notificationsRepository = notificationsRepo(),
         preferencesRepository = prefs,
         lastSeenStore = store,
+        trayLimitStore = trayLimitStore,
         raiser = raiser,
     )
 
