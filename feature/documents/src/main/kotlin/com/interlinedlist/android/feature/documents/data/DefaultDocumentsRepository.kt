@@ -4,6 +4,8 @@ import com.interlinedlist.android.core.common.dispatcher.DispatcherProvider
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
 import com.interlinedlist.android.core.common.result.map
+import com.interlinedlist.android.core.network.api.InterlinedListApi
+import com.interlinedlist.android.core.network.dto.toDomain as userDtoToDomain
 import com.interlinedlist.android.core.network.error.safeApiCall
 import com.interlinedlist.android.feature.documents.data.local.DocumentDao
 import com.interlinedlist.android.feature.documents.data.local.FolderDao
@@ -21,6 +23,7 @@ import com.interlinedlist.android.feature.documents.data.remote.DocumentsApi
 import com.interlinedlist.android.feature.documents.data.remote.dto.CreateDocumentRequest
 import com.interlinedlist.android.feature.documents.data.remote.dto.CreateFolderDocumentRequest
 import com.interlinedlist.android.feature.documents.data.remote.dto.CreateFolderRequest
+import com.interlinedlist.android.feature.documents.data.remote.dto.CreateInviteRequest
 import com.interlinedlist.android.feature.documents.data.remote.dto.CreateShareLinkRequest
 import com.interlinedlist.android.feature.documents.data.remote.dto.FromTemplateRequest
 import com.interlinedlist.android.feature.documents.data.remote.dto.InviteCollaboratorRequest
@@ -34,11 +37,14 @@ import com.interlinedlist.android.feature.documents.domain.CollaboratorCandidate
 import com.interlinedlist.android.feature.documents.domain.CollaboratorRole
 import com.interlinedlist.android.feature.documents.domain.Document
 import com.interlinedlist.android.feature.documents.domain.DocumentFolder
+import com.interlinedlist.android.feature.documents.domain.DocumentInvite
 import com.interlinedlist.android.feature.documents.domain.DocumentTemplate
 import com.interlinedlist.android.feature.documents.domain.FolderContents
 import com.interlinedlist.android.feature.documents.domain.FolderNode
 import com.interlinedlist.android.feature.documents.domain.FolderSummary
 import com.interlinedlist.android.feature.documents.domain.FolderTree
+import com.interlinedlist.android.feature.documents.domain.InviteEmail
+import com.interlinedlist.android.feature.documents.domain.InviteRole
 import com.interlinedlist.android.feature.documents.domain.Presence
 import com.interlinedlist.android.feature.documents.domain.ShareLink
 import com.interlinedlist.android.feature.documents.domain.ShareRole
@@ -62,6 +68,8 @@ import javax.inject.Inject
  */
 class DefaultDocumentsRepository @Inject constructor(
     private val api: DocumentsApi,
+    /** Shared current-user endpoint, used only for the subscriber gate on sending invites. */
+    private val userApi: InterlinedListApi,
     private val documentDao: DocumentDao,
     private val folderDao: FolderDao,
     private val pendingOpDao: PendingOpDao,
@@ -479,6 +487,69 @@ class DefaultDocumentsRepository @Inject constructor(
         }
     }
 
+    // --- Email invites -----------------------------------------------------
+
+    override suspend fun getInvites(documentId: String): ApiResult<List<DocumentInvite>> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.getInvites(documentId) }
+                .map { response -> response.items.map { it.toDomain() } }
+        }
+
+    override suspend fun sendInvite(
+        documentId: String,
+        email: String,
+        role: InviteRole,
+    ): ApiResult<DocumentInvite> = withContext(dispatchers.io) {
+        val address = InviteEmail.normalize(email)
+        if (!InviteEmail.isValid(address)) {
+            return@withContext ApiResult.Failure(AppError.Unknown(InviteEmail.INVALID_MESSAGE))
+        }
+        // Sending is subscriber-only (the server 403s a free owner). Check first so a
+        // free account never issues the write at all. Fail OPEN when the status cannot
+        // be read — a flaky /api/user must not block a paying subscriber; the server
+        // remains the authority and answers with the same SubscriptionRequired error.
+        if (currentUserIsSubscriber() == false) {
+            return@withContext ApiResult.Failure(AppError.SubscriptionRequired(NOT_SUBSCRIBED_MESSAGE))
+        }
+        when (
+            val result = safeApiCall(json) {
+                api.createInvite(documentId, CreateInviteRequest(email = address, role = role.apiValue))
+            }
+        ) {
+            is ApiResult.Success -> {
+                val dto = result.data.inviteOrSelf
+                ApiResult.Success(
+                    dto?.toDomain() ?: DocumentInvite(
+                        email = address,
+                        token = "",
+                        role = role,
+                        expiresAt = null,
+                        createdAt = null,
+                        accepted = false,
+                        revokedAt = null,
+                        url = null,
+                    ),
+                )
+            }
+            is ApiResult.Failure -> result
+        }
+    }
+
+    override suspend fun revokeInvite(documentId: String, token: String): ApiResult<Unit> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.revokeInvite(documentId, token) }.map { }
+        }
+
+    /**
+     * The signed-in account's subscription tier, or null when it cannot be read.
+     * Mirrors the `customerStatus` check the rest of the app gates premium features on.
+     */
+    private suspend fun currentUserIsSubscriber(): Boolean? =
+        when (val result = safeApiCall(json) { userApi.getCurrentUser().user }) {
+            is ApiResult.Success -> result.data.userDtoToDomain().customerStatus.isSubscriber
+            is ApiResult.Failure -> null
+        }
+
     // --- Delta sync --------------------------------------------------------
 
     override suspend fun pullDelta(): ApiResult<Unit> = withContext(dispatchers.io) {
@@ -660,4 +731,9 @@ class DefaultDocumentsRepository @Inject constructor(
 
     /** Treats the synthetic root id as "no parent" for API calls. */
     private fun String.realOrNull(): String? = takeUnless { it == FolderNode.ROOT_ID }
+
+    private companion object {
+        /** Matches the server's own copy for the 403 a free owner receives. */
+        const val NOT_SUBSCRIBED_MESSAGE = "Subscribe to invite people to documents."
+    }
 }

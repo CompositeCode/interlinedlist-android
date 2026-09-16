@@ -3,6 +3,7 @@ package com.interlinedlist.android.feature.documents.data
 import com.google.common.truth.Truth.assertThat
 import com.interlinedlist.android.core.common.dispatcher.DispatcherProvider
 import com.interlinedlist.android.core.common.result.ApiResult
+import com.interlinedlist.android.core.network.api.InterlinedListApi
 import com.interlinedlist.android.core.common.result.AppError
 import com.interlinedlist.android.feature.documents.data.remote.DocumentsApi
 import com.interlinedlist.android.feature.documents.domain.ShareRole
@@ -50,7 +51,8 @@ class DefaultDocumentsRepositoryShareTest {
             .build()
         api = retrofit.create(DocumentsApi::class.java)
         repository = DefaultDocumentsRepository(
-            api, FakeDocumentDao(), FakeFolderDao(), FakePendingOpDao(), FakeSyncMetaDao(), json, dispatchers,
+            api, retrofit.create(InterlinedListApi::class.java),
+            FakeDocumentDao(), FakeFolderDao(), FakePendingOpDao(), FakeSyncMetaDao(), json, dispatchers,
         )
     }
 

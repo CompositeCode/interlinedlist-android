@@ -3,6 +3,7 @@ package com.interlinedlist.android.feature.documents.data
 import com.google.common.truth.Truth.assertThat
 import com.interlinedlist.android.core.common.dispatcher.DispatcherProvider
 import com.interlinedlist.android.core.common.result.ApiResult
+import com.interlinedlist.android.core.network.api.InterlinedListApi
 import com.interlinedlist.android.feature.documents.data.local.SyncMetaEntity
 import com.interlinedlist.android.feature.documents.data.remote.DocumentsApi
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
@@ -57,7 +58,8 @@ class DefaultDocumentsRepositorySyncTest {
         pendingDao = FakePendingOpDao()
         metaDao = FakeSyncMetaDao()
         repository = DefaultDocumentsRepository(
-            api, documentDao, folderDao, pendingDao, metaDao, json, dispatchers,
+            api, retrofit.create(InterlinedListApi::class.java),
+            documentDao, folderDao, pendingDao, metaDao, json, dispatchers,
         )
     }
 
@@ -223,7 +225,8 @@ class DefaultDocumentsRepositorySyncTest {
                 .build()
             api = retrofit.create(DocumentsApi::class.java)
             repository = DefaultDocumentsRepository(
-                api, documentDao, folderDao, pendingDao, metaDao, json, dispatchers,
+                api, retrofit.create(InterlinedListApi::class.java),
+                documentDao, folderDao, pendingDao, metaDao, json, dispatchers,
             )
             server.enqueue(
                 MockResponse().setResponseCode(200)

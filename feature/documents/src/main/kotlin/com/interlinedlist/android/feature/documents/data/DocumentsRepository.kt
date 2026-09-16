@@ -6,9 +6,11 @@ import com.interlinedlist.android.feature.documents.domain.CollaboratorCandidate
 import com.interlinedlist.android.feature.documents.domain.CollaboratorRole
 import com.interlinedlist.android.feature.documents.domain.Document
 import com.interlinedlist.android.feature.documents.domain.DocumentFolder
+import com.interlinedlist.android.feature.documents.domain.DocumentInvite
 import com.interlinedlist.android.feature.documents.domain.DocumentTemplate
 import com.interlinedlist.android.feature.documents.domain.FolderContents
 import com.interlinedlist.android.feature.documents.domain.FolderSummary
+import com.interlinedlist.android.feature.documents.domain.InviteRole
 import com.interlinedlist.android.feature.documents.domain.Presence
 import com.interlinedlist.android.feature.documents.domain.ShareLink
 import com.interlinedlist.android.feature.documents.domain.ShareRole
@@ -153,6 +155,29 @@ interface DocumentsRepository {
 
     /** Claims edit/admin access to a shared document via its token. */
     suspend fun claimSharedDocument(token: String): ApiResult<Unit>
+
+    // --- Email invites -----------------------------------------------------
+
+    /**
+     * Pending email invites for a document. Free for any owner — a lapsed
+     * subscription must never hide invites the owner still needs to revoke.
+     */
+    suspend fun getInvites(documentId: String): ApiResult<List<DocumentInvite>>
+
+    /**
+     * Invites [email] at [role]. Refuses locally — issuing no request at all — when
+     * the address is not a valid one, or when the signed-in account is known not to
+     * be a subscriber (sending is a subscriber feature), in which case the failure is
+     * [com.interlinedlist.android.core.common.result.AppError.SubscriptionRequired].
+     */
+    suspend fun sendInvite(
+        documentId: String,
+        email: String,
+        role: InviteRole,
+    ): ApiResult<DocumentInvite>
+
+    /** Revokes a pending invite, killing its link immediately. Never subscriber-gated. */
+    suspend fun revokeInvite(documentId: String, token: String): ApiResult<Unit>
 
     // --- Delta sync --------------------------------------------------------
 
