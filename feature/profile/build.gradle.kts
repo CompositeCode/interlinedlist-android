@@ -40,8 +40,11 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
-    // Avatar picker uses rememberLauncherForActivityResult from activity-compose.
+    // Avatar picker and the location permission request use
+    // rememberLauncherForActivityResult from activity-compose.
     implementation(libs.androidx.activity.compose)
+    // LocationManagerCompat backports one-shot location reads below API 30.
+    implementation(libs.androidx.core.ktx)
 
     // This module owns its own Room cache (see DocumentsDatabase) — it must not
     // reuse the shared :core:database, so it pulls Room in directly.

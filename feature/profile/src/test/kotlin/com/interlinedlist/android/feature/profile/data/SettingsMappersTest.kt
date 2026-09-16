@@ -4,6 +4,8 @@ import com.google.common.truth.Truth.assertThat
 import com.interlinedlist.android.feature.profile.data.mapper.toRequest
 import com.interlinedlist.android.feature.profile.data.mapper.toUserSettings
 import com.interlinedlist.android.feature.profile.data.remote.dto.ProfileUserDto
+import com.interlinedlist.android.feature.profile.domain.Coordinates
+import com.interlinedlist.android.feature.profile.domain.LocationUpdate
 import com.interlinedlist.android.feature.profile.domain.UserSettingsUpdate
 import com.interlinedlist.android.feature.profile.domain.ViewingPreference
 import kotlinx.serialization.encodeToString
@@ -82,6 +84,43 @@ class SettingsMappersTest {
         assertThat(body).isEqualTo("""{"showPreviews":true}""")
     }
 
+    // --- Profile location (issue #37) ----------------------------------------
+    // Setting a location is what the app does. Clearing is modelled and serialised
+    // correctly — an explicit JSON null, since `explicitNulls = false` drops a Kotlin
+    // one — but the live endpoint refuses it (400 "latitude must be a number between
+    // -90 and 90"), so nothing sends it. The shape is pinned here anyway: when the
+    // API grows the ability, re-enabling it must not need a serialisation change too.
+
+    @Test
+    fun `setting a location sends both coordinates as JSON numbers`() {
+        val body = json.encodeToString(
+            UserSettingsUpdate(
+                location = LocationUpdate.Set(Coordinates(47.6062, -122.3321)),
+            ).toRequest(),
+        )
+
+        assertThat(body).isEqualTo("""{"latitude":47.6062,"longitude":-122.3321}""")
+    }
+
+    @Test
+    fun `a clear would send both coordinates as explicit nulls`() {
+        val body = json.encodeToString(
+            UserSettingsUpdate(location = LocationUpdate.Clear).toRequest(),
+        )
+
+        // Not `{}`: an omitted key means "leave it alone", so the keys would have to
+        // reach the server for it to unset anything — which it currently refuses to do.
+        assertThat(body).isEqualTo("""{"latitude":null,"longitude":null}""")
+    }
+
+    @Test
+    fun `an update that does not mention the location leaves both coordinates out`() {
+        val body = json.encodeToString(UserSettingsUpdate(showPreviews = true).toRequest())
+
+        assertThat(body).doesNotContain("latitude")
+        assertThat(body).doesNotContain("longitude")
+    }
+
     @Test
     fun `an update carries every field when they are all set`() {
         val request = UserSettingsUpdate(
@@ -95,8 +134,7 @@ class SettingsMappersTest {
             viewingPreference = ViewingPreference.MINE,
             showPreviews = false,
             showAdvancedPostSettings = true,
-            latitude = 45.52,
-            longitude = -122.68,
+            location = LocationUpdate.Set(Coordinates(45.52, -122.68)),
             isPrivateAccount = true,
             githubDefaultRepo = "adron/notes",
             notificationTrayLimit = 25,

@@ -7,6 +7,8 @@ import com.interlinedlist.android.core.common.result.AppError
 import com.interlinedlist.android.core.network.api.InterlinedListApi
 import com.interlinedlist.android.core.network.preferences.NotificationTrayLimitStore
 import com.interlinedlist.android.feature.profile.data.remote.ProfileApi
+import com.interlinedlist.android.feature.profile.domain.Coordinates
+import com.interlinedlist.android.feature.profile.domain.LocationUpdate
 import com.interlinedlist.android.feature.profile.domain.UserSettingsUpdate
 import com.interlinedlist.android.feature.profile.domain.ViewingPreference
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
@@ -16,8 +18,10 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.MediaType.Companion.toMediaType
@@ -80,6 +84,8 @@ class DefaultSettingsRepositoryTest {
         showAdvancedPostSettings: Boolean = false,
         isPrivateAccount: Boolean = false,
         notificationTrayLimit: Int = 25,
+        latitude: String = "45.52",
+        longitude: String = "-122.68",
     ) = server.enqueue(
         MockResponse().setResponseCode(200).setBody(
             """
@@ -95,8 +101,8 @@ class DefaultSettingsRepositoryTest {
                 "viewingPreference": "$viewingPreference",
                 "showPreviews": $showPreviews,
                 "showAdvancedPostSettings": $showAdvancedPostSettings,
-                "latitude": 45.52,
-                "longitude": -122.68,
+                "latitude": $latitude,
+                "longitude": $longitude,
                 "isPrivateAccount": $isPrivateAccount,
                 "githubDefaultRepo": "adron/notes",
                 "notificationTrayLimit": $notificationTrayLimit
@@ -413,4 +419,105 @@ class DefaultSettingsRepositoryTest {
 
             assertThat(trayLimitStore.current()).isEqualTo(20)
         }
+
+    // --- Profile location (issue #37) ----------------------------------------
+
+    @Test
+    fun `saving a location PATCHes both coordinates and nothing else`() = runTest(testDispatcher) {
+        enqueueUser(latitude = "47.6062", longitude = "-122.3321")
+
+        val result = repository.update(
+            UserSettingsUpdate(location = LocationUpdate.Set(Coordinates(47.6062, -122.3321))),
+        )
+
+        val body = server.takeJsonBody()
+        assertThat(body.keys).containsExactly("latitude", "longitude")
+        val latitude = body.getValue("latitude").jsonPrimitive
+        assertThat(latitude.isString).isFalse()
+        assertThat(latitude.doubleOrNull).isEqualTo(47.6062)
+        assertThat(body.getValue("longitude").jsonPrimitive.doubleOrNull).isEqualTo(-122.3321)
+        assertThat((result as ApiResult.Success).data.latitude).isEqualTo(47.6062)
+        assertThat(result.data.longitude).isEqualTo(-122.3321)
+        assertThat(repository.observeSettings().first()?.latitude).isEqualTo(47.6062)
+    }
+
+    /**
+     * The clear path is modelled and serialised correctly but **the live API refuses
+     * it**, so nothing in the app sends one (see `LocationUpdate.Clear`). The two
+     * tests below keep that state of affairs honest: the first pins the request shape
+     * so re-enabling it later is a one-liner, the second pins what the server does
+     * with it today.
+     */
+    @Test
+    fun `a clear would carry both coordinates as explicit nulls`() = runTest(testDispatcher) {
+        enqueueUser(latitude = "null", longitude = "null")
+
+        repository.update(UserSettingsUpdate(location = LocationUpdate.Clear))
+
+        val body = server.takeJsonBody()
+        // The keys must be present *and* null: `explicitNulls = false` would have
+        // dropped a Kotlin null, leaving an empty, pointless request.
+        assertThat(body.keys).containsExactly("latitude", "longitude")
+        assertThat(body.getValue("latitude")).isEqualTo(JsonNull)
+        assertThat(body.getValue("longitude")).isEqualTo(JsonNull)
+    }
+
+    @Test
+    fun `the API refuses a clear and the cached location survives it`() =
+        runTest(testDispatcher) {
+            enqueueUser(latitude = "47.6062", longitude = "-122.3321")
+            repository.refresh()
+            server.takeRequest()
+
+            // Verbatim from the live endpoint, probed with a real account: a null
+            // latitude, an empty string and the string "null" all answer with this.
+            server.enqueue(
+                MockResponse().setResponseCode(400).setBody(
+                    """
+                    {
+                      "error": "latitude must be a number between -90 and 90",
+                      "code": "bad_request"
+                    }
+                    """.trimIndent(),
+                ),
+            )
+            val result = repository.update(UserSettingsUpdate(location = LocationUpdate.Clear))
+
+            assertThat(result).isInstanceOf(ApiResult.Failure::class.java)
+            // A 400 normalises to Unknown, which keeps the server's own wording — so a
+            // clear wired up by mistake would surface the reason, not a generic error.
+            val error = (result as ApiResult.Failure).error
+            assertThat(error).isInstanceOf(AppError.Unknown::class.java)
+            assertThat(error.message).isEqualTo("latitude must be a number between -90 and 90")
+            assertThat(repository.observeSettings().first()?.latitude).isEqualTo(47.6062)
+            assertThat(repository.observeSettings().first()?.longitude).isEqualTo(-122.3321)
+        }
+
+    @Test
+    fun `a rejected location save leaves the cached coordinates untouched`() =
+        runTest(testDispatcher) {
+            enqueueUser(latitude = "47.6062", longitude = "-122.3321")
+            repository.refresh()
+            server.takeRequest()
+
+            server.enqueue(MockResponse().setResponseCode(500).setBody("""{ "error": "boom" }"""))
+            val result = repository.update(
+                UserSettingsUpdate(location = LocationUpdate.Set(Coordinates(10.0, 10.0))),
+            )
+
+            assertThat(result).isInstanceOf(ApiResult.Failure::class.java)
+            assertThat(repository.observeSettings().first()?.latitude).isEqualTo(47.6062)
+            assertThat(repository.observeSettings().first()?.longitude).isEqualTo(-122.3321)
+        }
+
+    @Test
+    fun `a user with no coordinates reads as having no location`() = runTest(testDispatcher) {
+        enqueueUser(latitude = "null", longitude = "null")
+
+        val settings = (repository.refresh() as ApiResult.Success).data
+
+        assertThat(settings.latitude).isNull()
+        assertThat(settings.longitude).isNull()
+    }
+
 }
