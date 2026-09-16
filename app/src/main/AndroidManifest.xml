@@ -55,6 +55,25 @@
                 <data android:scheme="interlinedlist" android:host="verify-email-change" />
                 <data android:scheme="interlinedlist" android:host="undo-email-change" />
             </intent-filter>
+
+            <!--
+                Blog links.
+
+                Only the app's OWN scheme is registered here. The public
+                https://interlinedlist.com/blog URLs are deliberately NOT claimed: the
+                blog is server-rendered and exposes no listing/post API, so the app has
+                nothing to render in-app and can only hand the URL to a browser. Claiming
+                a browser-bound link just to bounce it back out is a worse experience than
+                letting the browser have it — and the no-Custom-Tabs fallback (a plain
+                ACTION_VIEW) would resolve straight back into this activity. Revisit if a
+                real in-app renderer ever lands (see issue #87).
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="interlinedlist" android:host="blog" />
+            </intent-filter>
         </activity>
 
         <!--

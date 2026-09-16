@@ -82,6 +82,9 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.core.splashscreen)
     implementation(libs.kotlinx.coroutines.android)
+    // Custom Tabs: the blog is server-rendered with no public JSON endpoint, so it is
+    // read in a themed Custom Tab rather than in-app.
+    implementation(libs.androidx.browser)
 
     // DI
     implementation(libs.hilt.android)
@@ -95,6 +98,7 @@ dependencies {
 
     // Test
     testImplementation(libs.junit)
+    testImplementation(libs.truth)
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))

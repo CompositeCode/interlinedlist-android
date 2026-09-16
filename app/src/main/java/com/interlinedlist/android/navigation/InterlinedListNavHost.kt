@@ -10,6 +10,7 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.MailOutline
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
@@ -32,6 +33,8 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.navigation.navDeepLink
 import androidx.navigation.navigation
+import com.interlinedlist.android.blog.BlogLauncher
+import com.interlinedlist.android.blog.BlogLink
 import com.interlinedlist.android.feature.auth.nav.AuthRoutes
 import com.interlinedlist.android.feature.auth.nav.authGraph
 import com.interlinedlist.android.feature.directmessages.navigation.DirectMessagesDestinations
@@ -520,6 +523,8 @@ private fun MainShell(
                 // Sign-out reuses the existing auth-backed logout; the profile
                 // module intentionally owns no session state.
                 val logoutViewModel: HomeViewModel = hiltViewModel()
+                val accountContext = LocalContext.current
+                val colorScheme = MaterialTheme.colorScheme
                 ProfileRoute(
                     onEditProfile = { tabNav.navigate(Routes.PROFILE_EDIT) },
                     onSearchUsers = { tabNav.navigate(Routes.USER_SEARCH) },
@@ -534,6 +539,11 @@ private fun MainShell(
                     onOpenBlockedMuted = { tabNav.navigate(Routes.ACCOUNT_BLOCKED_MUTED) },
                     onOpenAccountSettings = { tabNav.navigate(Routes.ACCOUNT_SETTINGS) },
                     onOpenSettings = { tabNav.navigate(Routes.SETTINGS) },
+                    // Leaves the app rather than navigating: the blog is server-rendered
+                    // with no listing API, so it opens in a themed Custom Tab.
+                    onOpenBlog = {
+                        BlogLauncher.open(accountContext, BlogLink.INDEX_URL, colorScheme)
+                    },
                     onSignOut = { logoutViewModel.logout(onLoggedOut) },
                 )
             }

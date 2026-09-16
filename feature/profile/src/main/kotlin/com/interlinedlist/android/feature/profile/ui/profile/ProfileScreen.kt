@@ -15,6 +15,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.Devices
@@ -64,6 +66,7 @@ object AccountMenuTestTags {
     const val BLOCKED_MUTED = "accountMenuBlockedMuted"
     const val ACCOUNT_SETTINGS = "accountMenuAccountSettings"
     const val SETTINGS = "accountMenuSettings"
+    const val BLOG = "accountMenuBlog"
 }
 
 /**
@@ -88,6 +91,8 @@ object AccountMenuTestTags {
  * @param onOpenBlockedMuted navigate to the "Blocked & muted" screen (within this module).
  * @param onOpenAccountSettings navigate to the Account settings screen (within this module).
  * @param onOpenSettings navigate to the Settings (preferences) screen (within this module).
+ * @param onOpenBlog open the public blog. NOT an in-app destination: the blog is
+ *   server-rendered with no listing API, so the app opens it in a themed Custom Tab.
  * @param onSignOut invoked after the caller performs sign-out; the profile module does
  *   not own session state, so the app wires this to the auth logout + navigation.
  */
@@ -110,6 +115,8 @@ fun ProfileRoute(
     onOpenBlockedMuted: () -> Unit = {},
     // Defaulted likewise; wire this to the `settings` route for the preferences screen.
     onOpenSettings: () -> Unit = {},
+    // Defaulted likewise; the app wires this to its Custom Tab launcher.
+    onOpenBlog: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: ProfileViewModel = hiltViewModel(),
 ) {
@@ -131,6 +138,7 @@ fun ProfileRoute(
         onOpenBlockedMuted = onOpenBlockedMuted,
         onOpenAccountSettings = onOpenAccountSettings,
         onOpenSettings = onOpenSettings,
+        onOpenBlog = onOpenBlog,
         onSignOut = onSignOut,
         onRetry = viewModel::refresh,
         modifier = modifier,
@@ -157,6 +165,7 @@ fun ProfileScreen(
     onRetry: () -> Unit,
     onOpenBlockedMuted: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
+    onOpenBlog: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -271,6 +280,17 @@ fun ProfileScreen(
                     onClick = onSearchUsers,
                     tag = AccountMenuTestTags.SEARCH_USERS,
                 )
+                // Leaves the app: the blog is server-rendered with no listing API, so
+                // it opens in a Custom Tab. Flagged with the "opens outside" affordance
+                // instead of the forward arrow the in-app rows carry.
+                AccountMenuRow(
+                    icon = Icons.AutoMirrored.Filled.MenuBook,
+                    label = "Blog",
+                    onClick = onOpenBlog,
+                    tag = AccountMenuTestTags.BLOG,
+                    trailingIcon = Icons.AutoMirrored.Filled.OpenInNew,
+                    trailingContentDescription = "Opens in a browser",
+                )
                 AccountMenuRow(
                     icon = Icons.AutoMirrored.Filled.Logout,
                     label = "Sign out",
@@ -307,13 +327,20 @@ fun ProfileScreen(
     }
 }
 
-/** A single tappable row in the Account hub's menu. */
+/**
+ * A single tappable row in the Account hub's menu.
+ *
+ * [trailingIcon] defaults to the forward arrow used by rows that navigate within the
+ * app; rows that leave the app pass the "opens outside" affordance instead.
+ */
 @Composable
 private fun AccountMenuRow(
     icon: ImageVector,
     label: String,
     onClick: () -> Unit,
     tag: String,
+    trailingIcon: ImageVector = Icons.AutoMirrored.Filled.ArrowForward,
+    trailingContentDescription: String? = null,
 ) {
     Row(
         modifier = Modifier
@@ -332,8 +359,8 @@ private fun AccountMenuRow(
             modifier = Modifier.weight(1f),
         )
         Icon(
-            Icons.AutoMirrored.Filled.ArrowForward,
-            contentDescription = null,
+            trailingIcon,
+            contentDescription = trailingContentDescription,
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
