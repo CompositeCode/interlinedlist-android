@@ -24,6 +24,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
@@ -33,6 +35,7 @@ import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Sell
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -42,6 +45,7 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.InputChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -60,6 +64,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -73,6 +78,7 @@ import com.interlinedlist.android.feature.messages.domain.LinkedNetwork
 import com.interlinedlist.android.feature.messages.domain.Message
 import com.interlinedlist.android.feature.messages.domain.MessageVisibility
 import com.interlinedlist.android.feature.messages.domain.ReportReason
+import com.interlinedlist.android.feature.messages.domain.TagSuggestion
 import com.interlinedlist.android.feature.messages.ui.components.EditMessageSheet
 import com.interlinedlist.android.feature.messages.ui.components.MessageCard
 import com.interlinedlist.android.feature.messages.ui.components.ModerationDialog
@@ -115,11 +121,25 @@ object MessagesFeedTags {
     const val VISIBILITY_PRIVATE = "messagesComposeVisibilityPrivate"
     const val VISIBILITY_HINT = "messagesComposeVisibilityHint"
 
+    /** The composer's tag field, its Add action, and the committed tag chips. */
+    const val COMPOSE_TAG_INPUT = "messagesComposeTagInput"
+    const val COMPOSE_TAG_ADD = "messagesComposeTagAdd"
+    const val COMPOSE_TAGS = "messagesComposeTags"
+    /** Prefix for a committed tag chip; suffixed with the tag. */
+    const val COMPOSE_TAG_PREFIX = "messagesComposeTag_"
+    /** The autocomplete suggestion row, and one suggestion chip within it. */
+    const val TAG_SUGGESTIONS = "messagesComposeTagSuggestions"
+    const val TAG_SUGGESTION_PREFIX = "messagesComposeTagSuggestion_"
+
     /** The quoted message attached to the composer, and its always-public banner. */
     const val QUOTE_ATTACHED = "messagesComposeQuoteAttached"
     const val QUOTE_PUBLIC_BANNER = "messagesComposeQuoteBanner"
 
     fun destinationTag(networkId: String): String = DESTINATION_PREFIX + networkId
+
+    fun composeTagTag(tag: String): String = COMPOSE_TAG_PREFIX + tag
+
+    fun tagSuggestionTag(tag: String): String = TAG_SUGGESTION_PREFIX + tag
 
     fun viewPreferenceTag(preference: ViewingPreference): String =
         VIEW_PREFERENCE_PREFIX + preference.wire
@@ -169,6 +189,10 @@ fun MessagesRoute(
             }
         },
         onRemoveAttachment = viewModel::onRemoveAttachment,
+        onTagQueryChange = viewModel::onTagQueryChange,
+        onCommitTag = viewModel::commitTag,
+        onSelectTagSuggestion = viewModel::onSelectTagSuggestion,
+        onRemoveTag = viewModel::onRemoveTag,
         onScheduleChange = viewModel::onScheduleChange,
         onVisibilityChange = viewModel::onVisibilityChange,
         onToggleNetwork = viewModel::onToggleNetwork,
@@ -211,6 +235,10 @@ fun MessagesFeedScreen(
     onFetchMetadata: (Message) -> Unit = {},
     onAttachMedia: (Uri, Boolean) -> Unit = { _, _ -> },
     onRemoveAttachment: (PendingAttachment) -> Unit = {},
+    onTagQueryChange: (String) -> Unit = {},
+    onCommitTag: () -> Unit = {},
+    onSelectTagSuggestion: (TagSuggestion) -> Unit = {},
+    onRemoveTag: (String) -> Unit = {},
     onScheduleChange: (String?) -> Unit = {},
     onVisibilityChange: (MessageVisibility) -> Unit = {},
     onToggleNetwork: (String) -> Unit = {},
@@ -285,6 +313,10 @@ fun MessagesFeedScreen(
             onPost = onPost,
             onAttachMedia = onAttachMedia,
             onRemoveAttachment = onRemoveAttachment,
+            onTagQueryChange = onTagQueryChange,
+            onCommitTag = onCommitTag,
+            onSelectTagSuggestion = onSelectTagSuggestion,
+            onRemoveTag = onRemoveTag,
             onScheduleChange = onScheduleChange,
             onVisibilityChange = onVisibilityChange,
             onToggleNetwork = onToggleNetwork,
@@ -545,6 +577,10 @@ private fun ComposeSheet(
     onPost: () -> Unit,
     onAttachMedia: (Uri, Boolean) -> Unit,
     onRemoveAttachment: (PendingAttachment) -> Unit,
+    onTagQueryChange: (String) -> Unit,
+    onCommitTag: () -> Unit,
+    onSelectTagSuggestion: (TagSuggestion) -> Unit,
+    onRemoveTag: (String) -> Unit,
     onScheduleChange: (String?) -> Unit,
     onVisibilityChange: (MessageVisibility) -> Unit,
     onToggleNetwork: (String) -> Unit,
@@ -625,6 +661,20 @@ private fun ComposeSheet(
             }
 
             Spacer(Modifier.height(12.dp))
+            TagInput(
+                tags = state.composeTags,
+                query = state.tagQuery,
+                suggestions = state.tagSuggestions,
+                canCommit = state.canCommitTag,
+                isLoadingSuggestions = state.isLoadingTagSuggestions,
+                enabled = !state.isPosting,
+                onQueryChange = onTagQueryChange,
+                onCommit = onCommitTag,
+                onSelectSuggestion = onSelectTagSuggestion,
+                onRemoveTag = onRemoveTag,
+            )
+
+            Spacer(Modifier.height(12.dp))
             VisibilityRow(
                 visibility = state.composeVisibility,
                 enabled = !state.isPosting,
@@ -702,6 +752,118 @@ private fun AttachmentRow(
         }
     }
 }
+
+/**
+ * The tag input: the tags already added, a field to type the next one, and the
+ * server's prefix suggestions underneath.
+ *
+ * A tag is a **free-form label**, not a hashtag — the live API happily returns
+ * tags containing spaces and punctuation — so the field never splits what is
+ * typed. A tag is committed deliberately: by tapping Add, by pressing the
+ * keyboard's Done action, or by tapping one of the suggestions.
+ *
+ * The suggestions are rendered in the order the server sent them and are not
+ * re-filtered here: matching is the server's case-insensitive literal prefix,
+ * and second-guessing it would show (or hide) results it would never have given.
+ */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun TagInput(
+    tags: List<String>,
+    query: String,
+    suggestions: List<TagSuggestion>,
+    canCommit: Boolean,
+    isLoadingSuggestions: Boolean,
+    enabled: Boolean,
+    onQueryChange: (String) -> Unit,
+    onCommit: () -> Unit,
+    onSelectSuggestion: (TagSuggestion) -> Unit,
+    onRemoveTag: (String) -> Unit,
+) {
+    Column {
+        Text(
+            text = "Tags",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (tags.isNotEmpty()) {
+            Spacer(Modifier.height(6.dp))
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth().testTag(MessagesFeedTags.COMPOSE_TAGS),
+            ) {
+                tags.forEach { tag ->
+                    InputChip(
+                        selected = true,
+                        onClick = { onRemoveTag(tag) },
+                        enabled = enabled,
+                        label = { Text(tag) },
+                        trailingIcon = {
+                            Icon(
+                                Icons.Filled.Close,
+                                contentDescription = "Remove tag $tag",
+                                modifier = Modifier.size(16.dp),
+                            )
+                        },
+                        modifier = Modifier.testTag(MessagesFeedTags.composeTagTag(tag)),
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        OutlinedTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            enabled = enabled,
+            singleLine = true,
+            placeholder = { Text("Add a tag") },
+            leadingIcon = {
+                // The lookup is debounced, so say when one is actually running.
+                if (isLoadingSuggestions) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                } else {
+                    Icon(Icons.Filled.Sell, contentDescription = null, modifier = Modifier.size(18.dp))
+                }
+            },
+            trailingIcon = {
+                TextButton(
+                    onClick = onCommit,
+                    enabled = enabled && canCommit,
+                    modifier = Modifier.testTag(MessagesFeedTags.COMPOSE_TAG_ADD),
+                ) {
+                    Text("Add")
+                }
+            },
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { onCommit() }),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag(MessagesFeedTags.COMPOSE_TAG_INPUT),
+        )
+        if (suggestions.isNotEmpty()) {
+            Spacer(Modifier.height(6.dp))
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth().testTag(MessagesFeedTags.TAG_SUGGESTIONS),
+            ) {
+                suggestions.forEach { suggestion ->
+                    AssistChip(
+                        onClick = { onSelectSuggestion(suggestion) },
+                        enabled = enabled,
+                        label = { Text(suggestion.chipLabel) },
+                        modifier = Modifier.testTag(
+                            MessagesFeedTags.tagSuggestionTag(suggestion.tag),
+                        ),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** A suggestion reads as the tag itself, with its usage count when it has one. */
+private val TagSuggestion.chipLabel: String
+    get() = if (count > 0) "$tag ($count)" else tag
 
 /**
  * The Public / Private control. Seeded from the account's default-visibility

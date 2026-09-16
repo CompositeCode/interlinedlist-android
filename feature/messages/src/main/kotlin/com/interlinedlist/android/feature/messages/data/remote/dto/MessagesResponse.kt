@@ -115,6 +115,10 @@ data class CrossPostStatusDto(
  * push (repost), and with content it is a quote. It is mutually exclusive with
  * [parentId] and [scheduledAt], and a push/quote is always public.
  *
+ * [tags] are free-form string labels ("Case-sensitive; lowercase recommended" —
+ * `/help/api/messages`). They are sent exactly as the user committed them: a tag
+ * may contain spaces and punctuation, so nothing splits or rewrites them.
+ *
  * Only non-null fields are serialised (the shared Json uses `explicitNulls =
  * false`), so a plain InterlinedList-only post sends just
  * `{ content, publiclyVisible }` and a bare push sends no `content` at all.
@@ -129,6 +133,7 @@ data class CreateMessageRequest(
     val imageUrls: List<String>? = null,
     val videoUrls: List<String>? = null,
     val scheduledAt: String? = null,
+    val tags: List<String>? = null,
     val mastodonProviderIds: List<String>? = null,
     val crossPostToBluesky: Boolean? = null,
     val crossPostToLinkedIn: Boolean? = null,

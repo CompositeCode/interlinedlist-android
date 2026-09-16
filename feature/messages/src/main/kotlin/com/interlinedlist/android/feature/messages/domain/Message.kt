@@ -30,6 +30,12 @@ data class Message(
     /** Link-preview card built from fetched metadata, when present. */
     val linkPreview: LinkPreview? = null,
     /**
+     * Free-form labels attached to the message, exactly as the feed returned
+     * them (`tags[]`). They may contain spaces and punctuation, so they are never
+     * tokenised or normalised — only rendered.
+     */
+    val tags: List<String> = emptyList(),
+    /**
      * ISO-8601 send time for a scheduled (not-yet-published) message; null for a
      * normal message. Present on rows returned by the scheduled endpoint.
      */
@@ -64,6 +70,9 @@ data class Message(
 
     /** True when any image or video media is attached. */
     val hasMedia: Boolean get() = imageUrls.isNotEmpty() || videoUrls.isNotEmpty()
+
+    /** True when the card should render a tag row. */
+    val hasTags: Boolean get() = tags.isNotEmpty()
 
     /** True when the message has been edited since it was posted. */
     val isEdited: Boolean get() = editedAt != null

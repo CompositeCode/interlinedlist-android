@@ -12,9 +12,14 @@ import com.interlinedlist.android.feature.messages.domain.Message
 import com.interlinedlist.android.feature.messages.domain.MessageVisibility
 import com.interlinedlist.android.feature.messages.domain.PushedMessage
 import com.interlinedlist.android.feature.messages.domain.ReportReason
+import com.interlinedlist.android.feature.messages.domain.TagSuggestion
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * A configurable in-memory [MessagesRepository] for ViewModel tests. Feed/reply
@@ -56,6 +61,9 @@ class FakeMessagesRepository : MessagesRepository {
     var cancelScheduledResult: ApiResult<Unit> = ApiResult.Success(Unit)
     var reportResult: ApiResult<Unit> = ApiResult.Success(Unit)
     var metadataResult: ApiResult<Message>? = null
+    /** Per-query canned autocomplete answers; anything else falls back below. */
+    val autocompleteResponses = mutableMapOf<String, ApiResult<List<TagSuggestion>>>()
+    var autocompleteResult: ApiResult<List<TagSuggestion>> = ApiResult.Success(emptyList())
     /** The account's saved feed preference, as read from `GET /api/user`. */
     var viewingPreferenceResult: ApiResult<ViewingPreference> = ApiResult.Success(ViewingPreference.ALL)
     /** What the `PATCH /api/user/update` of the preference answers with. */
@@ -86,6 +94,32 @@ class FakeMessagesRepository : MessagesRepository {
     var blockedUsernames = mutableListOf<String>()
     var mutedUsernames = mutableListOf<String>()
     var lastReportUser: ReportUserArgs? = null
+    /** Every query [autocompleteTags] was asked for, in order. */
+    val autocompleteQueries = mutableListOf<String>()
+    /** Queries whose in-flight call was cancelled before it could answer. */
+    val cancelledAutocompleteQueries = mutableListOf<String>()
+    /** Queries the fake actually answered (as opposed to never getting to). */
+    val completedAutocompleteQueries = mutableListOf<String>()
+    private val autocompleteGates = mutableMapOf<String, TagGate>()
+
+    /**
+     * Makes the lookup for [query] hang until [releaseAutocomplete], so a test can
+     * hold a request "in flight" across the next keystroke.
+     *
+     * [ignoreCancellation] models the nastier race: the server had already
+     * answered, so the response lands **even though** the caller was cancelled.
+     * Only a stale-query guard can discard that one.
+     */
+    fun gateAutocomplete(query: String, ignoreCancellation: Boolean = false) {
+        autocompleteGates[query] = TagGate(CompletableDeferred(), ignoreCancellation)
+    }
+
+    /** Lets a gated lookup answer. */
+    fun releaseAutocomplete(query: String) {
+        autocompleteGates[query]?.signal?.complete(Unit)
+    }
+
+    private class TagGate(val signal: CompletableDeferred<Unit>, val ignoreCancellation: Boolean)
 
     /** Snapshot of the arguments passed to the last [createMessage] call. */
     data class CreateArgs(
@@ -96,6 +130,7 @@ class FakeMessagesRepository : MessagesRepository {
         val crossPost: CrossPostSelection = CrossPostSelection.NONE,
         val visibility: MessageVisibility = MessageVisibility.PUBLIC,
         val pushedMessageId: String? = null,
+        val tags: List<String> = emptyList(),
     )
 
     /** Snapshot of the arguments passed to the last [report] call. */
@@ -151,9 +186,10 @@ class FakeMessagesRepository : MessagesRepository {
         crossPost: CrossPostSelection,
         visibility: MessageVisibility,
         pushedMessageId: String?,
+        tags: List<String>,
     ): ApiResult<CreatedMessage> {
         lastCreate = CreateArgs(
-            content, imageUrls, videoUrls, scheduledAt, crossPost, visibility, pushedMessageId,
+            content, imageUrls, videoUrls, scheduledAt, crossPost, visibility, pushedMessageId, tags,
         )
         return when (val result = createResult) {
             is ApiResult.Success -> ApiResult.Success(CreatedMessage(result.data, createCrossPosts))
@@ -258,6 +294,26 @@ class FakeMessagesRepository : MessagesRepository {
         return metadataResult ?: ApiResult.Failure(AppError.Unknown("metadataResult not set"))
     }
 
+    override suspend fun autocompleteTags(query: String, limit: Int): ApiResult<List<TagSuggestion>> {
+        autocompleteQueries += query
+        autocompleteGates[query]?.let { gate ->
+            if (gate.ignoreCancellation) {
+                // The request is already past the point of no return: it answers
+                // whatever the caller does.
+                withContext(NonCancellable) { gate.signal.await() }
+            } else {
+                try {
+                    gate.signal.await()
+                } catch (cancellation: CancellationException) {
+                    cancelledAutocompleteQueries += query
+                    throw cancellation
+                }
+            }
+        }
+        completedAutocompleteQueries += query
+        return autocompleteResponses[query] ?: autocompleteResult
+    }
+
     override suspend fun search(query: String): ApiResult<List<Message>> = searchResult
 }
 
@@ -290,6 +346,7 @@ fun sampleMessage(
     pushCount: Int = 0,
     pushedMessageId: String? = null,
     pushedMessage: PushedMessage? = null,
+    tags: List<String> = emptyList(),
 ) = Message(
     id = id,
     content = content,
@@ -311,6 +368,7 @@ fun sampleMessage(
     pushCount = pushCount,
     pushedMessageId = pushedMessageId,
     pushedMessage = pushedMessage,
+    tags = tags,
 )
 
 /** Builds a sample embedded original (the `pushedMessage` on a push/quote). */

@@ -12,9 +12,12 @@ import com.interlinedlist.android.feature.messages.domain.LinkedNetwork
 import com.interlinedlist.android.feature.messages.domain.Message
 import com.interlinedlist.android.feature.messages.domain.MessageVisibility
 import com.interlinedlist.android.feature.messages.domain.ReportReason
+import com.interlinedlist.android.feature.messages.domain.TagSuggestion
 import com.interlinedlist.android.feature.messages.ui.isSubscriptionGate
 import com.interlinedlist.android.feature.messages.ui.toUserMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -53,6 +56,14 @@ data class MessagesFeedUiState(
     val attachments: List<PendingAttachment> = emptyList(),
     /** Optional future send time (ISO-8601) for the in-progress compose. */
     val scheduledAt: String? = null,
+    /** Tags already committed to the in-progress compose, in the order added. */
+    val composeTags: List<String> = emptyList(),
+    /** What the user has typed into the tag field but not yet committed. */
+    val tagQuery: String = "",
+    /** Server-supplied prefix suggestions for [tagQuery], in the server's order. */
+    val tagSuggestions: List<TagSuggestion> = emptyList(),
+    /** True while a suggestion lookup is pending or in flight. */
+    val isLoadingTagSuggestions: Boolean = false,
     /**
      * Visibility the in-progress compose will post with: the account's
      * `defaultPubliclyVisible` preference unless the user overrode it here — or
@@ -100,6 +111,10 @@ data class MessagesFeedUiState(
         get() = (composeText.isNotBlank() || attachments.any { it.hostedUrl != null }) &&
             !isPosting && !isUploading
 
+    /** A tag can be committed when the field holds something new and non-blank. */
+    val canCommitTag: Boolean
+        get() = tagQuery.trim().let { it.isNotEmpty() && it !in composeTags }
+
     /** True when the account has no linked networks to cross-post to. */
     val hasNoLinkedNetworks: Boolean get() = linkedNetworks.isEmpty()
 
@@ -145,6 +160,10 @@ private data class FeedTransientState(
     val isPosting: Boolean = false,
     val attachments: List<PendingAttachment> = emptyList(),
     val scheduledAt: String? = null,
+    val composeTags: List<String> = emptyList(),
+    val tagQuery: String = "",
+    val tagSuggestions: List<TagSuggestion> = emptyList(),
+    val isLoadingTagSuggestions: Boolean = false,
     /** The account preference; the fallback until/unless the user overrides it. */
     val defaultVisibility: MessageVisibility = MessageVisibility.PUBLIC,
     /** The user's per-message choice for the open composer; null = use the default. */
@@ -181,6 +200,16 @@ private data class FeedTransientState(
 
     /** More pages remain exactly while the server handed back a cursor. */
     val canLoadMore: Boolean get() = nextCursor != null
+
+    /**
+     * The tags to send with the post: the committed ones, plus whatever is still
+     * typed in the field. Requiring a separate commit tap before posting would
+     * silently drop a tag the user clearly intended.
+     */
+    val tagsToPost: List<String>
+        get() = tagQuery.trim().let { pending ->
+            if (pending.isEmpty() || pending in composeTags) composeTags else composeTags + pending
+        }
 }
 
 @HiltViewModel
@@ -189,6 +218,13 @@ class MessagesFeedViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val transient = MutableStateFlow(FeedTransientState())
+
+    /**
+     * The one in-flight tag-suggestion lookup, held so the next keystroke can
+     * cancel it. Cancelling covers both halves of the work: the pending debounce
+     * delay and, if it already started, the network request itself.
+     */
+    private var tagSuggestionJob: Job? = null
 
     /**
      * Room is the source of truth: the feed list comes from the cache Flow and is
@@ -210,6 +246,10 @@ class MessagesFeedViewModel @Inject constructor(
                 isPosting = t.isPosting,
                 attachments = t.attachments,
                 scheduledAt = t.scheduledAt,
+                composeTags = t.composeTags,
+                tagQuery = t.tagQuery,
+                tagSuggestions = t.tagSuggestions,
+                isLoadingTagSuggestions = t.isLoadingTagSuggestions,
                 composeVisibility = t.composeVisibility,
                 quoteTarget = t.quoteTarget,
                 linkedNetworks = t.linkedNetworks,
@@ -440,17 +480,25 @@ class MessagesFeedViewModel @Inject constructor(
         it.copy(isComposeOpen = true, errorMessage = null, crossPostStatuses = emptyList())
     }
 
-    fun dismissCompose() = transient.update {
-        it.copy(
-            isComposeOpen = false,
-            composeText = "",
-            attachments = emptyList(),
-            scheduledAt = null,
-            // Drop the per-message override; the next compose starts from the default.
-            visibilityOverride = null,
-            quoteTarget = null,
-            selectedNetworkIds = emptySet(),
-        )
+    fun dismissCompose() {
+        // Nothing left to suggest for: drop the pending/in-flight lookup.
+        tagSuggestionJob?.cancel()
+        transient.update {
+            it.copy(
+                isComposeOpen = false,
+                composeText = "",
+                attachments = emptyList(),
+                scheduledAt = null,
+                composeTags = emptyList(),
+                tagQuery = "",
+                tagSuggestions = emptyList(),
+                isLoadingTagSuggestions = false,
+                // Drop the per-message override; the next compose starts from the default.
+                visibilityOverride = null,
+                quoteTarget = null,
+                selectedNetworkIds = emptySet(),
+            )
+        }
     }
 
     /**
@@ -523,6 +571,80 @@ class MessagesFeedViewModel @Inject constructor(
         it.copy(attachments = it.attachments - attachment)
     }
 
+    // --- tags --------------------------------------------------------------
+
+    /**
+     * Records the in-progress tag text and asks the server for suggestions.
+     *
+     * Every keystroke **supersedes** the last one: the previous lookup is
+     * cancelled — whether it is still waiting out the debounce or already has a
+     * request in flight — so a fast typist produces one request, not a pile of
+     * concurrent ones. Only after [TAG_SUGGESTION_DEBOUNCE_MS] of quiet does the
+     * call actually go out.
+     *
+     * The response is applied only while it still answers the current text. A
+     * reply that arrives after the user has typed on is dropped, so a slow
+     * response for an older prefix can never overwrite a newer one.
+     */
+    fun onTagQueryChange(value: String) {
+        transient.update { it.copy(tagQuery = value) }
+        tagSuggestionJob?.cancel()
+        // The server 400s on an empty `q`, and there is nothing to complete.
+        val query = value.trim()
+        if (query.isEmpty()) {
+            transient.update { it.copy(tagSuggestions = emptyList(), isLoadingTagSuggestions = false) }
+            return
+        }
+        transient.update { it.copy(isLoadingTagSuggestions = true) }
+        tagSuggestionJob = viewModelScope.launch {
+            delay(TAG_SUGGESTION_DEBOUNCE_MS)
+            val result = repository.autocompleteTags(query)
+            // Guard against a stale answer: by the time a response lands the user
+            // may have typed on, and the newer lookup's answer is the right one.
+            if (transient.value.tagQuery.trim() != query) return@launch
+            transient.update {
+                it.copy(
+                    // Suggestions are an assist, not the task: a failed lookup
+                    // just leaves the user typing their own tag, with no error.
+                    tagSuggestions = (result as? ApiResult.Success)?.data.orEmpty(),
+                    isLoadingTagSuggestions = false,
+                )
+            }
+        }
+    }
+
+    /**
+     * Commits whatever is in the tag field as a tag. Only surrounding whitespace
+     * is trimmed: a tag is a free-form label ("life is short, o brave girl" is a
+     * real one), so the text is never split on spaces or otherwise rewritten.
+     * Duplicates are ignored — tags are case-sensitive, so only an exact repeat
+     * counts as one.
+     */
+    fun commitTag() = addTag(transient.value.tagQuery)
+
+    /** Adds a suggestion the user tapped, exactly as the server spelled it. */
+    fun onSelectTagSuggestion(suggestion: TagSuggestion) = addTag(suggestion.tag)
+
+    /** Removes an already-committed tag from the in-progress compose. */
+    fun onRemoveTag(tag: String) = transient.update {
+        it.copy(composeTags = it.composeTags - tag)
+    }
+
+    private fun addTag(raw: String) {
+        val tag = raw.trim()
+        if (tag.isEmpty()) return
+        // The field is now empty, so there is nothing left to suggest for.
+        tagSuggestionJob?.cancel()
+        transient.update {
+            it.copy(
+                composeTags = if (tag in it.composeTags) it.composeTags else it.composeTags + tag,
+                tagQuery = "",
+                tagSuggestions = emptyList(),
+                isLoadingTagSuggestions = false,
+            )
+        }
+    }
+
     fun post() {
         val snapshot = transient.value
         val text = snapshot.composeText.trim()
@@ -534,6 +656,8 @@ class MessagesFeedViewModel @Inject constructor(
         // Fold the selected linked networks into the cross-post request fields.
         val selected = snapshot.linkedNetworks.filter { it.id in snapshot.selectedNetworkIds }
         val crossPost = CrossPostSelection.from(selected)
+        // The compose is closing either way; a suggestion lookup is now moot.
+        tagSuggestionJob?.cancel()
         transient.update { it.copy(isPosting = true, errorMessage = null, crossPostStatuses = emptyList()) }
         viewModelScope.launch {
             when (
@@ -546,6 +670,9 @@ class MessagesFeedViewModel @Inject constructor(
                     visibility = snapshot.composeVisibility,
                     // Present only for a quote; the repository forces it public.
                     pushedMessageId = snapshot.quoteTarget?.id,
+                    // Committed chips, plus anything still sitting uncommitted in
+                    // the field — the user meant that word as a tag too.
+                    tags = snapshot.tagsToPost,
                 )
             ) {
                 is ApiResult.Success -> transient.update {
@@ -555,6 +682,10 @@ class MessagesFeedViewModel @Inject constructor(
                         composeText = "",
                         attachments = emptyList(),
                         scheduledAt = null,
+                        composeTags = emptyList(),
+                        tagQuery = "",
+                        tagSuggestions = emptyList(),
+                        isLoadingTagSuggestions = false,
                         visibilityOverride = null,
                         quoteTarget = null,
                         selectedNetworkIds = emptySet(),
@@ -677,4 +808,13 @@ class MessagesFeedViewModel @Inject constructor(
     private fun FeedTransientState.withError(error: AppError?): FeedTransientState =
         if (error == null) this
         else copy(errorMessage = error.toUserMessage(), subscriptionRequired = error.isSubscriptionGate)
+
+    companion object {
+        /**
+         * Quiet period before a tag prefix is looked up. Long enough that typing
+         * a word straight through costs one request, short enough that the
+         * suggestions still feel live.
+         */
+        const val TAG_SUGGESTION_DEBOUNCE_MS = 300L
+    }
 }
