@@ -50,6 +50,10 @@ dependencies {
     // opened from the messages, lists and documents surfaces, so it has no
     // navigation entry of its own here.
     implementation(project(":core:materialize"))
+    // Depended on so its Hilt modules join the app component: it registers this device
+    // under Settings → Applications and contributes the sign-out deregistration. It
+    // also provides the DeviceLabelProvider `:feature:auth` injects for `sync-token`.
+    implementation(project(":core:appsettings"))
 
     // Features
     implementation(project(":feature:auth"))

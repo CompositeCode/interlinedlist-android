@@ -35,6 +35,7 @@ import androidx.navigation.navDeepLink
 import androidx.navigation.navigation
 import com.interlinedlist.android.blog.BlogLauncher
 import com.interlinedlist.android.blog.BlogLink
+import com.interlinedlist.android.core.appsettings.ui.AppDeviceRegistrationViewModel
 import com.interlinedlist.android.feature.auth.nav.AuthRoutes
 import com.interlinedlist.android.feature.auth.nav.authGraph
 import com.interlinedlist.android.feature.directmessages.navigation.DirectMessagesDestinations
@@ -290,6 +291,16 @@ private fun MainShell(
     // cannot be skipped by whichever exit the user takes.
     val pushRegistration: PushRegistrationViewModel = hiltViewModel()
     LaunchedEffect(Unit) { pushRegistration.runForSession() }
+
+    // Companion-app device registry (the web's Settings → Applications). Entering this
+    // shell is "just signed in" or "launched signed in", which is exactly when the
+    // registration should be created or refreshed; a brand-new install also seeds its
+    // settings from the account's main workstation here. Failures are swallowed inside
+    // the manager and retried on the next launch, so nothing the user is waiting on
+    // depends on it. The matching deregistration hangs off the auth module's sign-out
+    // teardown, so it cannot be skipped by whichever exit the user takes.
+    val appDeviceRegistration: AppDeviceRegistrationViewModel = hiltViewModel()
+    LaunchedEffect(Unit) { appDeviceRegistration.registerForSession() }
 
     // Route straight to the launch's destination once, when present: a tapped
     // notification, or a tapped link (a tag feed) resolved in MainActivity.
