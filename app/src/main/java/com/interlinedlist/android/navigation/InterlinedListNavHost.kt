@@ -607,6 +607,8 @@ private fun MainShell(
                 OrganizationDetailRoute(
                     onBack = { tabNav.popBackStack() },
                     onDeleted = { tabNav.popBackStack() },
+                    // Leaving drops access to the org, so return to the index.
+                    onLeft = { tabNav.popBackStack() },
                 )
             }
 

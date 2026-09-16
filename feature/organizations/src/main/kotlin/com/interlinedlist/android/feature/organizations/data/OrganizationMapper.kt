@@ -15,7 +15,7 @@ object OrganizationMapper {
         avatarUrl = dto.resolvedAvatar,
         isPublic = dto.resolvedPublic,
         memberCount = dto.resolvedMemberCount,
-        role = dto.role?.let(OrgRole::fromApi),
+        role = dto.resolvedRole?.let(OrgRole::fromApi),
         updatedAt = dto.updatedAt,
     )
 

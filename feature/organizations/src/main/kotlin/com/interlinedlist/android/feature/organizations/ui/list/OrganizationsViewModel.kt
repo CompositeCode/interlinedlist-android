@@ -6,6 +6,7 @@ import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.feature.organizations.data.OrganizationsRepository
 import com.interlinedlist.android.feature.organizations.domain.Organization
 import com.interlinedlist.android.feature.organizations.ui.isSubscriptionGate
+import com.interlinedlist.android.feature.organizations.ui.toJoinMessage
 import com.interlinedlist.android.feature.organizations.ui.toUserMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,6 +28,8 @@ data class OrganizationsUiState(
     val nextOffset: Int = 0,
     val errorMessage: String? = null,
     val subscriptionRequired: Boolean = false,
+    /** Ids of organizations whose join request is in flight. */
+    val joiningOrgIds: Set<String> = emptySet(),
 ) {
     val isEmpty: Boolean
         get() = organizations.isEmpty() && !isRefreshing && errorMessage == null && !subscriptionRequired
@@ -126,6 +129,25 @@ class OrganizationsViewModel @Inject constructor(
                         subscriptionRequired = result.error.isSubscriptionGate,
                     )
                 }
+            }
+        }
+    }
+
+    /**
+     * Joins a public organization listed in the index. The repository refreshes the
+     * cached row on success, so the card flips to its member state through the Room
+     * stream without a full reload.
+     */
+    fun joinOrganization(orgId: String) {
+        if (orgId in _uiState.value.joiningOrgIds) return
+        _uiState.update { it.copy(joiningOrgIds = it.joiningOrgIds + orgId, errorMessage = null) }
+        viewModelScope.launch {
+            val result = repository.joinOrganization(orgId)
+            _uiState.update { state ->
+                state.copy(
+                    joiningOrgIds = state.joiningOrgIds - orgId,
+                    errorMessage = (result as? ApiResult.Failure)?.error?.toJoinMessage(),
+                )
             }
         }
     }

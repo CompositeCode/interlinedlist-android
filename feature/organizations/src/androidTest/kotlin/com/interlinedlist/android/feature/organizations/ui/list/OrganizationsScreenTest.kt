@@ -6,6 +6,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.interlinedlist.android.core.designsystem.theme.InterlinedListTheme
+import com.interlinedlist.android.feature.organizations.domain.OrgRole
 import com.interlinedlist.android.feature.organizations.domain.Organization
 import org.junit.Rule
 import org.junit.Test
@@ -25,6 +26,7 @@ class OrganizationsScreenTest {
     private fun setScreen(
         state: OrganizationsUiState,
         onOpenOrg: (String) -> Unit = {},
+        onJoinOrg: (String) -> Unit = {},
     ) {
         composeRule.setContent {
             InterlinedListTheme {
@@ -33,6 +35,7 @@ class OrganizationsScreenTest {
                     onOpenOrg = onOpenOrg,
                     onBack = {},
                     onLoadMore = {},
+                    onJoinOrg = onJoinOrg,
                     onCreateOrganization = { _, _, _ -> },
                 )
             }
@@ -85,5 +88,52 @@ class OrganizationsScreenTest {
 
         composeRule.onNodeWithTag(OrganizationsTestTags.CREATE_FAB).performClick()
         composeRule.onNodeWithTag(OrganizationsTestTags.CREATE_NAME).assertIsDisplayed()
+    }
+
+    @Test
+    fun rendersMembershipState_joinForNonMembers_roleForMembers() {
+        setScreen(
+            state = OrganizationsUiState(
+                organizations = listOf(
+                    // Public, no role -> not a member: offer Join.
+                    Organization("1", "Metals", null, null, true, 1, null, null),
+                    // A membership reports a role: show it, never offer Join.
+                    Organization("2", "Bikey Life", null, null, true, 3, OrgRole.MEMBER, null),
+                ),
+                isRefreshing = false,
+            ),
+        )
+
+        composeRule.onNodeWithTag(OrganizationsTestTags.join("1")).assertIsDisplayed()
+        composeRule.onNodeWithTag(OrganizationsTestTags.membership("1")).assertDoesNotExist()
+        composeRule.onNodeWithTag(OrganizationsTestTags.membership("2")).assertIsDisplayed()
+        composeRule.onNodeWithTag(OrganizationsTestTags.join("2")).assertDoesNotExist()
+    }
+
+    @Test
+    fun joinButton_reportsTheOrgId() {
+        var joined: String? = null
+        setScreen(
+            state = OrganizationsUiState(
+                organizations = listOf(Organization("1", "Metals", null, null, true, 1, null, null)),
+                isRefreshing = false,
+            ),
+            onJoinOrg = { joined = it },
+        )
+
+        composeRule.onNodeWithTag(OrganizationsTestTags.join("1")).performClick()
+        assert(joined == "1")
+    }
+
+    @Test
+    fun privateOrgsTheUserIsNotIn_offerNoJoin() {
+        setScreen(
+            state = OrganizationsUiState(
+                organizations = listOf(Organization("1", "Acme", null, null, false, 2, null, null)),
+                isRefreshing = false,
+            ),
+        )
+
+        composeRule.onNodeWithTag(OrganizationsTestTags.join("1")).assertDoesNotExist()
     }
 }

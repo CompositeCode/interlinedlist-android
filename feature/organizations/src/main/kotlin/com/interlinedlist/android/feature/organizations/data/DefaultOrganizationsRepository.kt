@@ -9,6 +9,7 @@ import com.interlinedlist.android.feature.organizations.data.local.OrganizationD
 import com.interlinedlist.android.feature.organizations.data.remote.OrganizationsApi
 import com.interlinedlist.android.feature.organizations.data.remote.dto.AddMemberRequest
 import com.interlinedlist.android.feature.organizations.data.remote.dto.CreateOrganizationRequest
+import com.interlinedlist.android.feature.organizations.data.remote.dto.JoinOrganizationRequest
 import com.interlinedlist.android.feature.organizations.data.remote.dto.OrganizationsResponse
 import com.interlinedlist.android.feature.organizations.data.remote.dto.UpdateMemberRequest
 import com.interlinedlist.android.feature.organizations.data.remote.dto.UpdateOrganizationRequest
@@ -32,6 +33,7 @@ class DefaultOrganizationsRepository @Inject constructor(
     private val api: OrganizationsApi,
     private val dao: OrganizationDao,
     private val json: kotlinx.serialization.json.Json,
+    private val currentUserId: CurrentUserIdProvider,
     private val dispatchers: DispatcherProvider,
 ) : OrganizationsRepository {
 
@@ -141,6 +143,47 @@ class DefaultOrganizationsRepository @Inject constructor(
                 is ApiResult.Failure -> result
             }
         }
+
+    override suspend fun joinOrganization(orgId: String): ApiResult<Unit> =
+        withContext(dispatchers.io) {
+            when (val result = safeApiCall(json) { api.joinOrganization(JoinOrganizationRequest(orgId)) }) {
+                // Re-read the org so the cached row carries the new role and member
+                // count; the index then renders "Member" instead of "Join".
+                is ApiResult.Success -> {
+                    getOrganization(orgId)
+                    ApiResult.Success(Unit)
+                }
+                is ApiResult.Failure -> result
+            }
+        }
+
+    override suspend fun leaveOrganization(orgId: String): ApiResult<Unit> =
+        withContext(dispatchers.io) {
+            val userId = currentUserId.currentUserId()?.takeIf { it.isNotBlank() }
+                ?: return@withContext ApiResult.Failure(
+                    AppError.Unauthorized("We couldn't confirm who you're signed in as. Sign in again and retry."),
+                )
+            when (val result = safeApiCall(json) { api.removeMember(orgId, userId) }) {
+                is ApiResult.Success -> {
+                    refreshAfterLeaving(orgId)
+                    ApiResult.Success(Unit)
+                }
+                is ApiResult.Failure -> result
+            }
+        }
+
+    /**
+     * Re-reads an org just left so the cache drops the membership. A private org is
+     * invisible to a non-member, so a 403/404 means it should leave the cache too.
+     */
+    private suspend fun refreshAfterLeaving(orgId: String) {
+        val refreshed = getOrganization(orgId)
+        if (refreshed is ApiResult.Failure &&
+            (refreshed.error is AppError.Forbidden || refreshed.error is AppError.NotFound)
+        ) {
+            dao.deleteById(orgId)
+        }
+    }
 
     override suspend fun getMembers(orgId: String, limit: Int): ApiResult<List<OrgMember>> =
         withContext(dispatchers.io) {

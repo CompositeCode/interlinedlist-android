@@ -2,6 +2,8 @@ package com.interlinedlist.android.feature.organizations.di
 
 import android.content.Context
 import androidx.room.Room
+import com.interlinedlist.android.core.datastore.SessionStore
+import com.interlinedlist.android.feature.organizations.data.CurrentUserIdProvider
 import com.interlinedlist.android.feature.organizations.data.DefaultOrganizationsRepository
 import com.interlinedlist.android.feature.organizations.data.OrganizationsRepository
 import com.interlinedlist.android.feature.organizations.data.local.OrganizationDao
@@ -50,4 +52,10 @@ object OrganizationsDataModule {
 
     @Provides
     fun provideOrganizationDao(db: OrganizationsDatabase): OrganizationDao = db.organizationDao()
+
+    /** Adapts the Android-backed [SessionStore] to the module's id contract. */
+    @Provides
+    @Singleton
+    fun provideCurrentUserIdProvider(sessionStore: SessionStore): CurrentUserIdProvider =
+        CurrentUserIdProvider { sessionStore.userId }
 }

@@ -2,6 +2,7 @@ package com.interlinedlist.android.feature.organizations.data.remote
 
 import com.interlinedlist.android.feature.organizations.data.remote.dto.AddMemberRequest
 import com.interlinedlist.android.feature.organizations.data.remote.dto.CreateOrganizationRequest
+import com.interlinedlist.android.feature.organizations.data.remote.dto.JoinOrganizationRequest
 import com.interlinedlist.android.feature.organizations.data.remote.dto.MembersResponse
 import com.interlinedlist.android.feature.organizations.data.remote.dto.OrgUsersResponse
 import com.interlinedlist.android.feature.organizations.data.remote.dto.OrganizationEnvelope
@@ -32,6 +33,14 @@ interface OrganizationsApi {
     /** The current user's org memberships (sync-token authed); mirrors the index shape. */
     @GET("api/user/organizations")
     suspend fun getUserOrganizations(): OrganizationsResponse
+
+    /**
+     * Joins a public organization. Confirmed live: the body key is
+     * `organizationId`, the response is 201 `{ message, membership }`, a private
+     * org answers 403 and an existing membership answers 409.
+     */
+    @POST("api/user/organizations")
+    suspend fun joinOrganization(@Body body: JoinOrganizationRequest)
 
     @POST("api/organizations")
     suspend fun createOrganization(@Body body: CreateOrganizationRequest): OrganizationEnvelope
@@ -68,6 +77,10 @@ interface OrganizationsApi {
         @Body body: UpdateMemberRequest,
     )
 
+    /**
+     * Removes a membership. Used both for removing someone else and for *leaving*
+     * (passing the signed-in user's own id) — the API has no separate leave route.
+     */
     @DELETE("api/organizations/{id}/members/{userId}")
     suspend fun removeMember(
         @Path("id") id: String,

@@ -46,6 +46,19 @@ interface OrganizationsRepository {
     /** Deletes an organization and evicts it from the cache. */
     suspend fun deleteOrganization(id: String): ApiResult<Unit>
 
+    /**
+     * Joins a public organization (`POST /api/user/organizations`). On success the
+     * cached row is re-read so it carries the new role and member count.
+     */
+    suspend fun joinOrganization(orgId: String): ApiResult<Unit>
+
+    /**
+     * Leaves an organization by removing the signed-in user's own membership. The
+     * server refuses to orphan an organization: the last owner gets a 400
+     * ("Cannot remove the last owner"), which is reported as a failure.
+     */
+    suspend fun leaveOrganization(orgId: String): ApiResult<Unit>
+
     /** Members of an organization (users granted access), with their roles. */
     suspend fun getMembers(orgId: String, limit: Int = DEFAULT_PAGE_SIZE): ApiResult<List<OrgMember>>
 

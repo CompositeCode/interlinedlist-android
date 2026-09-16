@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -57,6 +58,7 @@ import com.interlinedlist.android.feature.organizations.domain.MemberCandidate
 import com.interlinedlist.android.feature.organizations.domain.OrgMember
 import com.interlinedlist.android.feature.organizations.domain.OrgRole
 import com.interlinedlist.android.feature.organizations.domain.Organization
+import com.interlinedlist.android.feature.organizations.ui.LAST_OWNER_EXPLANATION
 
 /** Stable test tags for the organization detail screen. */
 object OrganizationDetailTestTags {
@@ -72,6 +74,12 @@ object OrganizationDetailTestTags {
     const val EDIT_DIALOG = "orgDetailEditDialog"
     const val DELETE_DIALOG = "orgDetailDeleteDialog"
     const val DELETE_CONFIRM = "orgDetailDeleteConfirm"
+    const val JOIN = "orgDetailJoin"
+    const val JOIN_PROMPT = "orgDetailJoinPrompt"
+    const val LEAVE = "orgDetailLeave"
+    const val LEAVE_DIALOG = "orgDetailLeaveDialog"
+    const val LEAVE_CONFIRM = "orgDetailLeaveConfirm"
+    const val LAST_OWNER_NOTICE = "orgDetailLastOwnerNotice"
     fun member(userId: String) = "orgMember_$userId"
     fun remove(userId: String) = "orgMemberRemove_$userId"
     fun candidate(userId: String) = "orgCandidate_$userId"
@@ -79,13 +87,14 @@ object OrganizationDetailTestTags {
 
 /**
  * Hilt-wired entry for a single organization. Reads its `orgId` from the nav
- * SavedStateHandle (see [ORG_ID_ARG]); [onBack] and [onDeleted] let the app pop
- * navigation after viewing or deleting the org.
+ * SavedStateHandle (see [ORG_ID_ARG]); [onBack], [onDeleted] and [onLeft] let the
+ * app pop navigation after viewing, deleting, or leaving the org.
  */
 @Composable
 fun OrganizationDetailRoute(
     onBack: () -> Unit,
     onDeleted: () -> Unit,
+    onLeft: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: OrganizationDetailViewModel = hiltViewModel(),
 ) {
@@ -99,6 +108,8 @@ fun OrganizationDetailRoute(
         onRemoveMember = viewModel::removeMember,
         onSaveEdit = { name, description, isPublic -> viewModel.updateOrganization(name, description, isPublic) },
         onDelete = { viewModel.deleteOrganization(onDeleted) },
+        onJoin = viewModel::join,
+        onLeave = { viewModel.leave(onLeft) },
         modifier = modifier,
     )
 }
@@ -115,11 +126,14 @@ fun OrganizationDetailScreen(
     onRemoveMember: (OrgMember) -> Unit,
     onSaveEdit: (name: String?, description: String?, isPublic: Boolean?) -> Unit,
     onDelete: () -> Unit,
+    onJoin: () -> Unit,
+    onLeave: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     var showEdit by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showLeaveConfirm by remember { mutableStateOf(false) }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -149,6 +163,16 @@ fun OrganizationDetailScreen(
                             onClick = { menuOpen = false; showDeleteConfirm = true },
                             modifier = Modifier.testTag(OrganizationDetailTestTags.DELETE),
                         )
+                        if (state.isMember) {
+                            DropdownMenuItem(
+                                text = { Text("Leave organization") },
+                                leadingIcon = {
+                                    Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null)
+                                },
+                                onClick = { menuOpen = false; showLeaveConfirm = true },
+                                modifier = Modifier.testTag(OrganizationDetailTestTags.LEAVE),
+                            )
+                        }
                     }
                 },
             )
@@ -186,26 +210,32 @@ fun OrganizationDetailScreen(
                     )
                 }
 
-                OutlinedTextField(
-                    value = state.searchQuery,
-                    onValueChange = onSearchQueryChange,
-                    label = { Text("Add a member") },
-                    singleLine = true,
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
-                        .testTag(OrganizationDetailTestTags.SEARCH),
-                )
+                // The members endpoint is members-only, so a non-member is offered
+                // the join action instead of member management.
+                if (state.isMember) {
+                    OutlinedTextField(
+                        value = state.searchQuery,
+                        onValueChange = onSearchQueryChange,
+                        label = { Text("Add a member") },
+                        singleLine = true,
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                            .testTag(OrganizationDetailTestTags.SEARCH),
+                    )
 
-                MemberList(
-                    members = state.members,
-                    candidates = state.candidates,
-                    isEmpty = state.isEmpty,
-                    onAddCandidate = onAddCandidate,
-                    onChangeRole = onChangeRole,
-                    onRemoveMember = onRemoveMember,
-                )
+                    MemberList(
+                        members = state.members,
+                        candidates = state.candidates,
+                        isEmpty = state.isEmpty,
+                        onAddCandidate = onAddCandidate,
+                        onChangeRole = onChangeRole,
+                        onRemoveMember = onRemoveMember,
+                    )
+                } else {
+                    JoinPrompt(canJoin = state.canJoin, isJoining = state.isJoining, onJoin = onJoin)
+                }
             }
         }
     }
@@ -218,6 +248,15 @@ fun OrganizationDetailScreen(
                 showEdit = false
                 onSaveEdit(name, description, isPublic)
             },
+        )
+    }
+
+    if (showLeaveConfirm) {
+        LeaveOrganizationDialog(
+            organizationName = state.title,
+            isLastOwner = state.isLastOwner,
+            onDismiss = { showLeaveConfirm = false },
+            onConfirm = { showLeaveConfirm = false; onLeave() },
         )
     }
 
@@ -237,6 +276,86 @@ fun OrganizationDetailScreen(
                 TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") }
             },
         )
+    }
+}
+
+/**
+ * Confirmation before leaving. A sole owner is told why they cannot leave (the
+ * organization would be orphaned, and the server refuses with 400) and is offered
+ * no destructive action — only a way out of the dialog.
+ */
+@Composable
+private fun LeaveOrganizationDialog(
+    organizationName: String,
+    isLastOwner: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.testTag(OrganizationDetailTestTags.LEAVE_DIALOG),
+        title = { Text(if (isLastOwner) "You're the last owner" else "Leave organization?") },
+        text = {
+            if (isLastOwner) {
+                Text(
+                    text = LAST_OWNER_EXPLANATION,
+                    modifier = Modifier.testTag(OrganizationDetailTestTags.LAST_OWNER_NOTICE),
+                )
+            } else {
+                Text(
+                    "You'll lose access to \"$organizationName\". " +
+                        "You can join again while it stays public.",
+                )
+            }
+        },
+        confirmButton = {
+            if (isLastOwner) {
+                TextButton(onClick = onDismiss) { Text("Got it") }
+            } else {
+                TextButton(
+                    onClick = onConfirm,
+                    modifier = Modifier.testTag(OrganizationDetailTestTags.LEAVE_CONFIRM),
+                ) { Text("Leave") }
+            }
+        },
+        dismissButton = {
+            if (!isLastOwner) TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
+}
+
+/** Shown to a non-member: join a public org, or explain that a private one needs an invite. */
+@Composable
+private fun JoinPrompt(canJoin: Boolean, isJoining: Boolean, onJoin: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(24.dp)
+            .testTag(OrganizationDetailTestTags.JOIN_PROMPT),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = if (canJoin) "You're not a member yet" else "Members only",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = if (canJoin) {
+                "Join to see its members and take part."
+            } else {
+                "This organization is private. Ask an owner or admin to add you."
+            },
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (canJoin) {
+            Spacer(Modifier.height(12.dp))
+            Button(
+                onClick = onJoin,
+                enabled = !isJoining,
+                modifier = Modifier.testTag(OrganizationDetailTestTags.JOIN),
+            ) { Text(if (isJoining) "Joining…" else "Join") }
+        }
     }
 }
 
@@ -480,6 +599,8 @@ private fun OrganizationDetailScreenPreview() {
             onRemoveMember = {},
             onSaveEdit = { _, _, _ -> },
             onDelete = {},
+            onJoin = {},
+            onLeave = {},
         )
     }
 }
