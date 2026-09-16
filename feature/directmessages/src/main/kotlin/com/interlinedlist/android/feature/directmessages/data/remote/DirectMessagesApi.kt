@@ -1,7 +1,7 @@
 package com.interlinedlist.android.feature.directmessages.data.remote
 
+import com.interlinedlist.android.feature.directmessages.data.remote.dto.ConversationsResponse
 import com.interlinedlist.android.feature.directmessages.data.remote.dto.ImageUploadResponse
-import com.interlinedlist.android.feature.directmessages.data.remote.dto.InboxResponse
 import com.interlinedlist.android.feature.directmessages.data.remote.dto.MessageDto
 import com.interlinedlist.android.feature.directmessages.data.remote.dto.RecipientsResponse
 import com.interlinedlist.android.feature.directmessages.data.remote.dto.SendMessageRequest
@@ -28,13 +28,15 @@ import retrofit2.http.Query
  */
 interface DirectMessagesApi {
 
-    /** Lists a DM folder (default inbox), cursor-paginated by `nextCursor`. */
-    @GET("api/dm")
-    suspend fun getInbox(
-        @Query("folder") folder: String? = null,
+    /**
+     * The inbox: one row per conversation (grouped by `pairKey`), newest
+     * activity first, cursor-paginated by `nextCursor`.
+     */
+    @GET("api/dm/conversations")
+    suspend fun getConversations(
         @Query("cursor") cursor: String? = null,
         @Query("take") take: Int? = null,
-    ): InboxResponse
+    ): ConversationsResponse
 
     /** Sends a direct message. */
     @POST("api/dm")

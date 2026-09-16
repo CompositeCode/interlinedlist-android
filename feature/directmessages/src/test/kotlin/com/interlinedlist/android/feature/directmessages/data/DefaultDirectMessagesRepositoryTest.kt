@@ -65,20 +65,35 @@ class DefaultDirectMessagesRepositoryTest {
         dispatchers = testDispatchers,
     )
 
+    private fun conversationsBody(
+        username: String,
+        unreadCount: Int,
+        body: String,
+        createdAt: String,
+        nextCursor: String? = null,
+    ) = """
+        {
+          "items": [
+            {
+              "pairKey": "me:$username",
+              "otherUser": {"id":"$username-id","username":"$username","displayName":"$username","avatar":null},
+              "lastMessage": {"id":"dm-$username","senderId":"$username-id","recipientId":"me",
+                              "body":"$body","createdAt":"$createdAt","readAt":null},
+              "unreadCount": $unreadCount
+            }
+          ],
+          "nextCursor": ${if (nextCursor == null) "null" else "\"$nextCursor\""}
+        }
+    """.trimIndent()
+
     @Test
-    fun `refreshInbox caches conversations and returns next cursor`() = runTest {
+    fun `refreshInbox reads the conversations endpoint and returns the next cursor`() = runTest {
         server.enqueue(
             MockResponse().setBody(
-                """
-                {
-                  "items": [
-                    {"id":"m1","senderId":"other","recipientId":"me","body":"hi there",
-                     "createdAt":"2026-07-31T10:00:00Z","readAt":null,
-                     "user":{"id":"other","username":"adron","displayName":"Adron","avatar":null}}
-                  ],
-                  "nextCursor": "cursor-2"
-                }
-                """.trimIndent(),
+                conversationsBody(
+                    username = "adron", unreadCount = 2, body = "hi there",
+                    createdAt = "2026-07-31T10:00:00Z", nextCursor = "cursor-2",
+                ),
             ),
         )
 
@@ -86,22 +101,154 @@ class DefaultDirectMessagesRepositoryTest {
 
         assertThat(result).isInstanceOf(ApiResult.Success::class.java)
         assertThat((result as ApiResult.Success).data).isEqualTo("cursor-2")
+        assertThat(server.takeRequest().path).startsWith("/api/dm/conversations")
 
         val conversations = repo().observeConversations().first()
         assertThat(conversations).hasSize(1)
-        assertThat(conversations.first().username).isEqualTo("adron")
-        assertThat(conversations.first().lastMessageBody).isEqualTo("hi there")
-        assertThat(conversations.first().hasUnread).isTrue()
+        with(conversations.first()) {
+            assertThat(username).isEqualTo("adron")
+            assertThat(pairKey).isEqualTo("me:adron")
+            assertThat(lastMessageBody).isEqualTo("hi there")
+            assertThat(unreadCount).isEqualTo(2)
+            assertThat(hasUnread).isTrue()
+        }
     }
 
     @Test
-    fun `refreshInbox forwards the cursor query param`() = runTest {
-        server.enqueue(MockResponse().setBody("""{"items":[],"nextCursor":null}"""))
+    fun `refreshInbox emits one row per conversation`() = runTest {
+        // Two conversations; the same pairKey never appears twice in a response,
+        // so the inbox must render exactly one row for each.
+        server.enqueue(
+            MockResponse().setBody(
+                """
+                {
+                  "items": [
+                    {"pairKey":"me:adron",
+                     "otherUser":{"id":"u2","username":"adron","displayName":"Adron","avatar":null},
+                     "lastMessage":{"id":"dm_2","senderId":"u2","recipientId":"me","body":"newest",
+                                    "createdAt":"2026-07-31T12:00:00Z","readAt":null},
+                     "unreadCount":1},
+                    {"pairKey":"me:blake",
+                     "otherUser":{"id":"u3","username":"blake","displayName":"Blake","avatar":null},
+                     "lastMessage":{"id":"dm_1","senderId":"me","recipientId":"u3","body":"older",
+                                    "createdAt":"2026-07-31T09:00:00Z","readAt":null},
+                     "unreadCount":0}
+                  ],
+                  "nextCursor": null
+                }
+                """.trimIndent(),
+            ),
+        )
 
-        repo().refreshInbox(cursor = "page-2")
+        assertThat(repo().refreshInbox()).isInstanceOf(ApiResult.Success::class.java)
 
-        val recorded = server.takeRequest()
-        assertThat(recorded.path).contains("cursor=page-2")
+        val conversations = repo().observeConversations().first()
+        // Newest activity first, one row per conversation.
+        assertThat(conversations.map { it.username }).containsExactly("adron", "blake").inOrder()
+        assertThat(conversations.first().lastMessageBody).isEqualTo("newest")
+        assertThat(conversations.last().hasUnread).isFalse()
+    }
+
+    @Test
+    fun `cursor paging forwards the cursor and appends the next page`() = runTest {
+        server.enqueue(
+            MockResponse().setBody(
+                conversationsBody(
+                    username = "adron", unreadCount = 1, body = "page one",
+                    createdAt = "2026-07-31T12:00:00Z", nextCursor = "page-2",
+                ),
+            ),
+        )
+        server.enqueue(
+            MockResponse().setBody(
+                conversationsBody(
+                    username = "blake", unreadCount = 0, body = "page two",
+                    createdAt = "2026-07-31T09:00:00Z", nextCursor = null,
+                ),
+            ),
+        )
+
+        val r = repo()
+        val first = r.refreshInbox(cursor = null)
+        assertThat((first as ApiResult.Success).data).isEqualTo("page-2")
+        assertThat(server.takeRequest().path).doesNotContain("cursor=")
+
+        val second = r.refreshInbox(cursor = "page-2")
+        assertThat((second as ApiResult.Success).data).isNull()
+        assertThat(server.takeRequest().path).contains("cursor=page-2")
+
+        // Paging appends: page one's conversation is still cached.
+        val conversations = r.observeConversations().first()
+        assertThat(conversations.map { it.username }).containsExactly("adron", "blake").inOrder()
+    }
+
+    @Test
+    fun `cached unread counts add up to the unread-count endpoint`() = runTest {
+        server.enqueue(
+            MockResponse().setBody(
+                """
+                {
+                  "items": [
+                    {"pairKey":"me:adron",
+                     "otherUser":{"id":"u2","username":"adron"},
+                     "lastMessage":{"id":"dm_2","senderId":"u2","recipientId":"me","body":"a",
+                                    "createdAt":"2026-07-31T12:00:00Z","readAt":null},
+                     "unreadCount":3},
+                    {"pairKey":"me:blake",
+                     "otherUser":{"id":"u3","username":"blake"},
+                     "lastMessage":{"id":"dm_1","senderId":"u3","recipientId":"me","body":"b",
+                                    "createdAt":"2026-07-31T11:00:00Z","readAt":null},
+                     "unreadCount":4}
+                  ],
+                  "nextCursor": null
+                }
+                """.trimIndent(),
+            ),
+        )
+        server.enqueue(MockResponse().setBody("""{"count":7}"""))
+
+        val r = repo()
+        r.refreshInbox()
+        val endpointCount = (r.unreadCount() as ApiResult.Success).data
+
+        val summed = r.observeConversations().first().sumOf { it.unreadCount }
+        assertThat(summed).isEqualTo(endpointCount)
+        assertThat(r.observeConversations().first().count { it.hasUnread }).isEqualTo(2)
+    }
+
+    @Test
+    fun `a conversation without a participant username is skipped`() = runTest {
+        server.enqueue(
+            MockResponse().setBody(
+                """{"items":[{"pairKey":"me:ghost","unreadCount":1}],"nextCursor":null}""",
+            ),
+        )
+
+        assertThat(repo().refreshInbox()).isInstanceOf(ApiResult.Success::class.java)
+        assertThat(repo().observeConversations().first()).isEmpty()
+    }
+
+    @Test
+    fun `opening a thread clears that conversation's unread count`() = runTest {
+        server.enqueue(
+            MockResponse().setBody(
+                conversationsBody(
+                    username = "adron", unreadCount = 2, body = "hi",
+                    createdAt = "2026-07-31T10:00:00Z",
+                ),
+            ),
+        )
+        server.enqueue(
+            MockResponse().setBody("""{"items":[],"olderCursor":null,"isMutual":true,"isBlocked":false}"""),
+        )
+
+        val r = repo()
+        r.refreshInbox()
+        assertThat(r.observeConversations().first().first().unreadCount).isEqualTo(2)
+
+        r.refreshThread("adron")
+
+        assertThat(r.observeConversations().first().first().unreadCount).isEqualTo(0)
     }
 
     @Test
@@ -154,6 +301,28 @@ class DefaultDirectMessagesRepositoryTest {
         val thread = repo().observeThread("adron").first()
         assertThat(thread.map { it.id }).contains("srv1")
         assertThat(thread.first { it.id == "srv1" }.pending).isFalse()
+    }
+
+    @Test
+    fun `send unwraps the documented message envelope`() = runTest {
+        // POST /api/dm returns `{ "message": { ... } }` (help centre + OpenAPI).
+        server.enqueue(
+            MockResponse().setResponseCode(201).setBody(
+                """
+                {"message":{"id":"dm_001","pairKey":"u1:u2","senderId":"me","recipientId":"other",
+                 "body":"hello","imageUrls":[],"createdAt":"2026-07-31T11:00:00Z","readAt":null}}
+                """.trimIndent(),
+            ),
+        )
+
+        val r = repo()
+        val result = r.send(username = "adron", body = "hello")
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        assertThat((result as ApiResult.Success).data.id).isEqualTo("dm_001")
+        val thread = r.observeThread("adron").first()
+        assertThat(thread.map { it.id }).containsExactly("dm_001")
+        assertThat(thread.first().pending).isFalse()
     }
 
     @Test

@@ -3,17 +3,23 @@ package com.interlinedlist.android.feature.directmessages.data.remote.dto
 import kotlinx.serialization.Serializable
 
 /**
- * Response for `GET /api/dm` (inbox/sent folders).
+ * Response for `GET /api/dm/conversations` — one row per conversation, grouped
+ * by `pairKey`, newest activity first, cursor-paginated by `nextCursor`.
  *
- * Confirmed live shape: `{ "items": [...], "nextCursor": null }`. Each item is a
- * message; the last message of a conversation represents that conversation in
- * the inbox folder.
+ * The response body is unmodelled in the OpenAPI spec, so the list is accepted
+ * under `items` (the convention every other cursor-paginated endpoint uses) or
+ * under a named `conversations` key (the convention `recipients`/`notifications`
+ * use).
  */
 @Serializable
-data class InboxResponse(
-    val items: List<MessageDto> = emptyList(),
+data class ConversationsResponse(
+    val items: List<ConversationDto> = emptyList(),
+    val conversations: List<ConversationDto> = emptyList(),
     val nextCursor: String? = null,
-)
+) {
+    /** The conversation rows under whichever key the endpoint used. */
+    val rows: List<ConversationDto> get() = items.ifEmpty { conversations }
+}
 
 /**
  * Response for `GET /api/dm/thread/{username}`.
@@ -61,8 +67,9 @@ data class SendMessageRequest(
 )
 
 /**
- * Response for `POST /api/dm`. Some create endpoints wrap the created object
- * under `data`; accept both the bare message and the wrapped form.
+ * Response for `POST /api/dm`. The documented shape wraps the created message
+ * under `message`; other create endpoints wrap it under `data`. Both envelopes
+ * and the bare message are accepted.
  */
 @Serializable
 data class SendMessageResponse(
@@ -72,10 +79,11 @@ data class SendMessageResponse(
     val body: String? = null,
     val imageUrls: List<String> = emptyList(),
     val createdAt: String? = null,
+    val message: MessageDto? = null,
     val data: MessageDto? = null,
 ) {
-    /** The created message, unwrapping the `data` envelope when present. */
-    fun message(): MessageDto? = data ?: id?.let {
+    /** The created message, unwrapping the `message`/`data` envelope when present. */
+    fun createdMessage(): MessageDto? = message ?: data ?: id?.let {
         MessageDto(
             id = it,
             senderId = senderId ?: "",

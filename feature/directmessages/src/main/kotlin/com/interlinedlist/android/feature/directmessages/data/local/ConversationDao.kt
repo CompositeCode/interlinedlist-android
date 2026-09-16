@@ -20,7 +20,8 @@ interface ConversationDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAll(conversations: List<ConversationEntity>)
 
-    @Query("UPDATE dm_conversation SET hasUnread = 0 WHERE username = :username")
+    /** Zeroes a conversation's unread count (the server does this on thread open). */
+    @Query("UPDATE dm_conversation SET unreadCount = 0 WHERE username = :username")
     suspend fun clearUnread(username: String)
 
     @Query("DELETE FROM dm_conversation")

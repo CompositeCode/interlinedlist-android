@@ -1,14 +1,22 @@
 package com.interlinedlist.android.feature.directmessages.data
 
-/** A conversation summary shown in the inbox list. */
+/**
+ * A conversation shown in the inbox — one row per `pairKey`, as returned by
+ * `GET /api/dm/conversations`.
+ */
 data class Conversation(
     val username: String,
     val displayName: String?,
     val avatarUrl: String?,
     val lastMessageBody: String,
     val lastMessageAtMillis: Long,
-    val hasUnread: Boolean,
-)
+    /** Unread received messages in this conversation, per the server. */
+    val unreadCount: Int,
+    val pairKey: String? = null,
+) {
+    /** Whether the inbox row should render its unread affordance. */
+    val hasUnread: Boolean get() = unreadCount > 0
+}
 
 /** A single direct message shown in a thread. */
 data class DirectMessage(
