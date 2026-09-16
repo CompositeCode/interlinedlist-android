@@ -18,4 +18,6 @@ data class CachedOrganizationEntity(
     val memberCount: Int,
     val role: String?,
     val updatedAt: String?,
+    /** Built-in organization ("The Public"): not leavable, not deletable. */
+    val isSystem: Boolean = false,
 )

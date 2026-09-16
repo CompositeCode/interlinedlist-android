@@ -34,6 +34,18 @@ class OrganizationMapperTest {
     }
 
     @Test
+    fun `maps the system flag so built-in organizations are recognisable`() {
+        val system = OrganizationMapper.fromDto(
+            OrganizationDto(id = "sys", name = "The Public", isPublic = true, isSystem = true),
+        )
+        val ordinary = OrganizationMapper.fromDto(OrganizationDto(id = "o1", name = "Acme"))
+
+        assertThat(system.isSystem).isTrue()
+        // Absent means "not a system organization".
+        assertThat(ordinary.isSystem).isFalse()
+    }
+
+    @Test
     fun `defaults an absent public flag to private and a missing count to zero`() {
         val org = OrganizationMapper.fromDto(OrganizationDto(id = "o2", name = "Nameless"))
 
@@ -53,6 +65,7 @@ class OrganizationMapperTest {
             memberCount = 3,
             role = OrgRole.OWNER,
             updatedAt = "2026-01-01",
+            isSystem = true,
         )
 
         val restored = OrganizationMapper.fromEntity(OrganizationMapper.toEntity(org))

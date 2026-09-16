@@ -17,9 +17,11 @@ fun AppError.toUserMessage(): String = when (this) {
 val AppError.isSubscriptionGate: Boolean get() = this is AppError.SubscriptionRequired
 
 /**
- * The server's guard against orphaning an organization: a sole owner may not leave
- * (400 `{"error":"Cannot remove the last owner"}`). Detected on the message because
- * the status code is a plain bad request.
+ * The server's guard against orphaning an organization. Both halves are plain 400s
+ * with `code: "bad_request"`, so they are detected on the message (verified live):
+ *
+ * - `{"error":"Cannot remove the last owner"}` — removing, or leaving as, the sole owner
+ * - `{"error":"Cannot demote the last owner"}` — changing the sole owner's role
  */
 val AppError.isLastOwnerRejection: Boolean
     get() = message?.contains("last owner", ignoreCase = true) == true
@@ -49,3 +51,31 @@ fun AppError.toLeaveMessage(): String = when {
 const val LAST_OWNER_EXPLANATION: String =
     "You're the only owner of this organization. Make another member an owner, " +
         "or delete the organization, before you leave."
+
+/**
+ * Explains why a role change was refused. The server refuses to demote the only
+ * owner, which would leave the organization without one.
+ */
+fun AppError.toRoleChangeMessage(): String = when {
+    isLastOwnerRejection -> LAST_OWNER_DEMOTE_EXPLANATION
+    else -> toUserMessage()
+}
+
+/** Explains why removing a member was refused — most often the last-owner guard. */
+fun AppError.toRemoveMemberMessage(): String = when {
+    isLastOwnerRejection -> LAST_OWNER_REMOVE_EXPLANATION
+    else -> toUserMessage()
+}
+
+/**
+ * Shown both before the attempt (the UI can see there is only one owner) and after
+ * the server refuses with "Cannot demote the last owner", so the paths read alike.
+ */
+const val LAST_OWNER_DEMOTE_EXPLANATION: String =
+    "This is the organization's only owner. Make someone else an owner first, " +
+        "then you can change this role."
+
+/** The removal counterpart of [LAST_OWNER_DEMOTE_EXPLANATION]. */
+const val LAST_OWNER_REMOVE_EXPLANATION: String =
+    "This is the organization's only owner. Make someone else an owner first, " +
+        "then you can remove them."

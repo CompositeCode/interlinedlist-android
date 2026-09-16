@@ -7,12 +7,17 @@ import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.feature.organizations.data.OrganizationsRepository
 import com.interlinedlist.android.feature.organizations.domain.MemberCandidate
 import com.interlinedlist.android.feature.organizations.domain.OrgMember
+import com.interlinedlist.android.feature.organizations.domain.OrgPermissions
 import com.interlinedlist.android.feature.organizations.domain.OrgRole
 import com.interlinedlist.android.feature.organizations.domain.Organization
+import com.interlinedlist.android.feature.organizations.ui.LAST_OWNER_DEMOTE_EXPLANATION
 import com.interlinedlist.android.feature.organizations.ui.LAST_OWNER_EXPLANATION
+import com.interlinedlist.android.feature.organizations.ui.LAST_OWNER_REMOVE_EXPLANATION
 import com.interlinedlist.android.feature.organizations.ui.isSubscriptionGate
 import com.interlinedlist.android.feature.organizations.ui.toJoinMessage
 import com.interlinedlist.android.feature.organizations.ui.toLeaveMessage
+import com.interlinedlist.android.feature.organizations.ui.toRemoveMemberMessage
+import com.interlinedlist.android.feature.organizations.ui.toRoleChangeMessage
 import com.interlinedlist.android.feature.organizations.ui.toUserMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -45,11 +50,20 @@ data class OrganizationDetailUiState(
     val title: String get() = organization?.displayName.orEmpty()
     val isEmpty: Boolean get() = members.isEmpty() && !isLoading && errorMessage == null && isMember
 
+    /**
+     * What the signed-in user's role permits here. Drives which affordances render;
+     * the server remains authoritative for every mutation.
+     */
+    val permissions: OrgPermissions get() = OrgPermissions.of(organization)
+
     /** Whether the signed-in user belongs to this organization. */
-    val isMember: Boolean get() = organization?.isMember == true
+    val isMember: Boolean get() = permissions.isMember
 
     /** A public organization the user has not joined can be joined from here. */
-    val canJoin: Boolean get() = organization?.canJoin == true
+    val canJoin: Boolean get() = permissions.canJoin
+
+    /** How many owners the loaded member list holds; the server protects the last one. */
+    private val ownerCount: Int get() = members.count { it.role == OrgRole.OWNER }
 
     /**
      * True when the user is this organization's only owner. Leaving would orphan
@@ -57,9 +71,29 @@ data class OrganizationDetailUiState(
      * owner"), so the UI explains it up front instead of failing. Requires a loaded
      * member list; without one the server's rejection is the backstop.
      */
-    val isLastOwner: Boolean
-        get() = organization?.role == OrgRole.OWNER &&
-            members.count { it.role == OrgRole.OWNER } == 1
+    val isLastOwner: Boolean get() = organization?.role == OrgRole.OWNER && ownerCount == 1
+
+    /**
+     * True when [member] is the organization's only owner, so demoting or removing
+     * them is refused by the server ("Cannot demote/remove the last owner").
+     */
+    fun isOnlyOwner(member: OrgMember): Boolean =
+        member.role == OrgRole.OWNER && ownerCount == 1
+
+    /** Whether [member]'s role may be changed *and* the change would be accepted. */
+    fun canChangeRoleOf(member: OrgMember): Boolean = permissions.canChangeRoleOf(member.role)
+
+    /** Whether [member] may be removed by the signed-in user. */
+    fun canRemove(member: OrgMember): Boolean = permissions.canRemove(member.role)
+
+    /**
+     * Roles offered for [member]. The only owner may not be demoted, so they are
+     * offered `owner` alone rather than chips that would be rejected.
+     */
+    fun assignableRolesFor(member: OrgMember): List<OrgRole> {
+        val assignable = permissions.assignableRolesFor(member.role)
+        return if (isOnlyOwner(member)) assignable.filter { it == OrgRole.OWNER } else assignable
+    }
 }
 
 @HiltViewModel
@@ -100,7 +134,7 @@ class OrganizationDetailViewModel @Inject constructor(
             }
             // Members are members-only on the server (403 otherwise), so a
             // non-member sees the join prompt rather than a permission error.
-            if (organization?.isMember != true) {
+            if (!OrgPermissions.of(organization).canViewMembers) {
                 _uiState.update { it.copy(members = emptyList()) }
                 return@launch
             }
@@ -115,7 +149,7 @@ class OrganizationDetailViewModel @Inject constructor(
 
     /** Joins this (public) organization, then reloads so membership state is server-truth. */
     fun join() {
-        if (_uiState.value.isJoining) return
+        if (_uiState.value.isJoining || !_uiState.value.canJoin) return
         _uiState.update { it.copy(isJoining = true, errorMessage = null) }
         viewModelScope.launch {
             when (val result = repository.joinOrganization(orgId)) {
@@ -137,7 +171,7 @@ class OrganizationDetailViewModel @Inject constructor(
      */
     fun leave(onLeft: () -> Unit = {}) {
         val state = _uiState.value
-        if (state.isLeaving) return
+        if (state.isLeaving || !state.permissions.canLeave) return
         if (state.isLastOwner) {
             _uiState.update { it.copy(errorMessage = LAST_OWNER_EXPLANATION) }
             return
@@ -156,12 +190,17 @@ class OrganizationDetailViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Saves name, description and visibility. Visibility is sent on the same `PUT`,
+     * so it is gated by the same permission.
+     */
     fun updateOrganization(
         name: String?,
         description: String?,
         isPublic: Boolean?,
         onDone: () -> Unit = {},
     ) {
+        if (!_uiState.value.permissions.canEditOrganization) return
         _uiState.update { it.copy(isSaving = true) }
         viewModelScope.launch {
             when (val result = repository.updateOrganization(orgId, name, description, isPublic)) {
@@ -177,6 +216,7 @@ class OrganizationDetailViewModel @Inject constructor(
     }
 
     fun deleteOrganization(onDeleted: () -> Unit = {}) {
+        if (!_uiState.value.permissions.canDeleteOrganization) return
         viewModelScope.launch {
             when (val result = repository.deleteOrganization(orgId)) {
                 is ApiResult.Success -> {
@@ -208,6 +248,7 @@ class OrganizationDetailViewModel @Inject constructor(
     }
 
     fun addMember(candidate: MemberCandidate, role: OrgRole = OrgRole.MEMBER) {
+        if (!_uiState.value.permissions.canAddMember) return
         viewModelScope.launch {
             when (val result = repository.addMember(orgId, candidate.userId, role)) {
                 is ApiResult.Success -> {
@@ -220,29 +261,51 @@ class OrganizationDetailViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Changes a member's role. Demoting the organization's only owner is refused by
+     * the server (400 "Cannot demote the last owner"), so it is explained up front;
+     * a server rejection is explained the same way when the guard cannot see it.
+     */
     fun changeRole(member: OrgMember, role: OrgRole) {
         if (member.role == role) return
+        val state = _uiState.value
+        if (!state.canChangeRoleOf(member)) return
+        if (role != OrgRole.OWNER && state.isOnlyOwner(member)) {
+            _uiState.update { it.copy(errorMessage = LAST_OWNER_DEMOTE_EXPLANATION) }
+            return
+        }
         viewModelScope.launch {
             when (val result = repository.updateMemberRole(orgId, member.userId, role)) {
-                is ApiResult.Success -> _uiState.update { state ->
-                    state.copy(
-                        members = state.members.map {
+                is ApiResult.Success -> _uiState.update { current ->
+                    current.copy(
+                        members = current.members.map {
                             if (it.userId == member.userId) it.copy(role = role) else it
                         },
                     )
                 }
-                is ApiResult.Failure -> _uiState.update { it.copy(errorMessage = result.error.toUserMessage()) }
+                is ApiResult.Failure -> _uiState.update {
+                    it.copy(errorMessage = result.error.toRoleChangeMessage())
+                }
             }
         }
     }
 
+    /** Removes a member. The only owner is protected exactly as [changeRole] is. */
     fun removeMember(member: OrgMember) {
+        val state = _uiState.value
+        if (!state.canRemove(member)) return
+        if (state.isOnlyOwner(member)) {
+            _uiState.update { it.copy(errorMessage = LAST_OWNER_REMOVE_EXPLANATION) }
+            return
+        }
         viewModelScope.launch {
             when (val result = repository.removeMember(orgId, member.userId)) {
-                is ApiResult.Success -> _uiState.update { state ->
-                    state.copy(members = state.members.filterNot { it.userId == member.userId })
+                is ApiResult.Success -> _uiState.update { current ->
+                    current.copy(members = current.members.filterNot { it.userId == member.userId })
                 }
-                is ApiResult.Failure -> _uiState.update { it.copy(errorMessage = result.error.toUserMessage()) }
+                is ApiResult.Failure -> _uiState.update {
+                    it.copy(errorMessage = result.error.toRemoveMemberMessage())
+                }
             }
         }
     }

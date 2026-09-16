@@ -10,7 +10,8 @@ import androidx.room.RoomDatabase
  */
 @Database(
     entities = [CachedOrganizationEntity::class],
-    version = 1,
+    // v2 adds `isSystem`; the cache is disposable (destructive migration).
+    version = 2,
     exportSchema = false,
 )
 abstract class OrganizationsDatabase : RoomDatabase() {

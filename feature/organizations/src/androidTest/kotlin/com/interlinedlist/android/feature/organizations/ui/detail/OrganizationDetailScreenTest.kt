@@ -1,8 +1,10 @@
 package com.interlinedlist.android.feature.organizations.ui.detail
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.interlinedlist.android.core.designsystem.theme.InterlinedListTheme
@@ -17,6 +19,10 @@ import org.junit.runner.RunWith
  * Compose UI coverage for the stateless [OrganizationDetailScreen]. Runs on-device;
  * the orchestrator executes instrumented tests after merge, so this is written to
  * compile and be correct.
+ *
+ * The role × action expectations mirror
+ * `https://interlinedlist.com/help/organizations`, and are asserted in plain JVM
+ * form by `OrgPermissionsTest`; here they are checked at the rendering level.
  */
 @RunWith(AndroidJUnit4::class)
 class OrganizationDetailScreenTest {
@@ -26,7 +32,9 @@ class OrganizationDetailScreenTest {
 
     private fun setScreen(
         state: OrganizationDetailUiState,
+        onChangeRole: (OrgMember, OrgRole) -> Unit = { _, _ -> },
         onRemoveMember: (OrgMember) -> Unit = {},
+        onSaveEdit: (String?, String?, Boolean?) -> Unit = { _, _, _ -> },
         onDelete: () -> Unit = {},
         onJoin: () -> Unit = {},
         onLeave: () -> Unit = {},
@@ -38,9 +46,9 @@ class OrganizationDetailScreenTest {
                     onBack = {},
                     onSearchQueryChange = {},
                     onAddCandidate = {},
-                    onChangeRole = { _, _ -> },
+                    onChangeRole = onChangeRole,
                     onRemoveMember = onRemoveMember,
-                    onSaveEdit = { _, _, _ -> },
+                    onSaveEdit = onSaveEdit,
                     onDelete = onDelete,
                     onJoin = onJoin,
                     onLeave = onLeave,
@@ -49,14 +57,32 @@ class OrganizationDetailScreenTest {
         }
     }
 
-    private fun loaded() = OrganizationDetailUiState(
-        organization = Organization("o1", "Acme Corp", "Makers", null, false, 2, OrgRole.OWNER, null),
-        members = listOf(
-            OrgMember("u1", "ada", "Ada", null, OrgRole.OWNER, active = true),
-            OrgMember("u2", "grace", null, null, OrgRole.MEMBER, active = true),
+    private fun state(
+        role: OrgRole?,
+        members: List<OrgMember> = emptyList(),
+        isPublic: Boolean = false,
+        isSystem: Boolean = false,
+    ) = OrganizationDetailUiState(
+        organization = Organization(
+            id = "o1",
+            name = "Acme Corp",
+            description = "Makers",
+            avatarUrl = null,
+            isPublic = isPublic,
+            memberCount = members.size,
+            role = role,
+            updatedAt = null,
+            isSystem = isSystem,
         ),
+        members = members,
         isLoading = false,
     )
+
+    private val ada = OrgMember("u1", "ada", "Ada", null, OrgRole.OWNER, active = true)
+    private val secondOwner = OrgMember("u3", "linus", null, null, OrgRole.OWNER, active = true)
+    private val grace = OrgMember("u2", "grace", null, null, OrgRole.MEMBER, active = true)
+
+    private fun loaded() = state(OrgRole.OWNER, listOf(ada, secondOwner, grace))
 
     @Test
     fun rendersMembers_andSearchField() {
@@ -72,8 +98,8 @@ class OrganizationDetailScreenTest {
         var removed: OrgMember? = null
         setScreen(state = loaded(), onRemoveMember = { removed = it })
 
-        composeRule.onNodeWithTag(OrganizationDetailTestTags.remove("u1")).performClick()
-        assert(removed?.userId == "u1")
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.remove("u2")).performClick()
+        assert(removed?.userId == "u2")
     }
 
     @Test
@@ -91,26 +117,14 @@ class OrganizationDetailScreenTest {
 
     @Test
     fun showsEmptyState_whenNoMembers() {
-        setScreen(
-            state = OrganizationDetailUiState(
-                organization = Organization("o1", "Acme", null, null, false, 0, OrgRole.OWNER, null),
-                members = emptyList(),
-                isLoading = false,
-            ),
-        )
+        setScreen(state = state(OrgRole.OWNER))
 
         composeRule.onNodeWithTag(OrganizationDetailTestTags.EMPTY).assertIsDisplayed()
     }
 
     @Test
     fun nonMember_seesJoinPrompt_andNoMemberTools() {
-        setScreen(
-            state = OrganizationDetailUiState(
-                // No role: the API reports membership only for the caller's own orgs.
-                organization = Organization("o1", "Metals", null, null, true, 1, null, null),
-                isLoading = false,
-            ),
-        )
+        setScreen(state = state(role = null, isPublic = true))
 
         composeRule.onNodeWithTag(OrganizationDetailTestTags.JOIN_PROMPT).assertIsDisplayed()
         composeRule.onNodeWithTag(OrganizationDetailTestTags.JOIN).assertIsDisplayed()
@@ -120,13 +134,7 @@ class OrganizationDetailScreenTest {
     @Test
     fun nonMember_join_reportsTheAction() {
         var joined = false
-        setScreen(
-            state = OrganizationDetailUiState(
-                organization = Organization("o1", "Metals", null, null, true, 1, null, null),
-                isLoading = false,
-            ),
-            onJoin = { joined = true },
-        )
+        setScreen(state = state(role = null, isPublic = true), onJoin = { joined = true })
 
         composeRule.onNodeWithTag(OrganizationDetailTestTags.JOIN).performClick()
         assert(joined)
@@ -134,12 +142,7 @@ class OrganizationDetailScreenTest {
 
     @Test
     fun nonMemberOfPrivateOrg_isNotOfferedJoin() {
-        setScreen(
-            state = OrganizationDetailUiState(
-                organization = Organization("o1", "Acme", null, null, false, 2, null, null),
-                isLoading = false,
-            ),
-        )
+        setScreen(state = state(role = null, isPublic = false))
 
         composeRule.onNodeWithTag(OrganizationDetailTestTags.JOIN_PROMPT).assertIsDisplayed()
         composeRule.onNodeWithTag(OrganizationDetailTestTags.JOIN).assertDoesNotExist()
@@ -149,14 +152,7 @@ class OrganizationDetailScreenTest {
     fun member_leaveFlow_confirmsBeforeLeaving() {
         var left = false
         setScreen(
-            state = OrganizationDetailUiState(
-                organization = Organization("o1", "Bikey Life", null, null, true, 3, OrgRole.MEMBER, null),
-                members = listOf(
-                    OrgMember("u1", "ada", "Ada", null, OrgRole.OWNER, active = true),
-                    OrgMember("me", "me", null, null, OrgRole.MEMBER, active = true),
-                ),
-                isLoading = false,
-            ),
+            state = state(OrgRole.MEMBER, listOf(ada, grace), isPublic = true),
             onLeave = { left = true },
         )
 
@@ -171,14 +167,7 @@ class OrganizationDetailScreenTest {
     fun soleOwner_isExplainedInsteadOfBeingAllowedToLeave() {
         var left = false
         setScreen(
-            state = OrganizationDetailUiState(
-                organization = Organization("o1", "Acme", null, null, false, 2, OrgRole.OWNER, null),
-                members = listOf(
-                    OrgMember("me", "me", null, null, OrgRole.OWNER, active = true),
-                    OrgMember("u2", "grace", null, null, OrgRole.MEMBER, active = true),
-                ),
-                isLoading = false,
-            ),
+            state = state(OrgRole.OWNER, listOf(ada, grace)),
             onLeave = { left = true },
         )
 
@@ -190,16 +179,137 @@ class OrganizationDetailScreenTest {
         assert(!left)
     }
 
+    // ---- Role-gated affordances --------------------------------------------
+
     @Test
-    fun nonMember_isNotOfferedLeave() {
+    fun nonMember_isOfferedNoOverflowAtAll() {
+        // #81 left Edit and Delete exposed to non-members; with nothing permitted
+        // the menu itself is gone, so neither can be reached.
+        setScreen(state = state(role = null, isPublic = true))
+
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.OVERFLOW).assertDoesNotExist()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.EDIT).assertDoesNotExist()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.DELETE).assertDoesNotExist()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.LEAVE).assertDoesNotExist()
+    }
+
+    @Test
+    fun member_seesLeaveButNeitherEditNorDelete() {
+        setScreen(state = state(OrgRole.MEMBER, listOf(ada, grace), isPublic = true))
+
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.OVERFLOW).performClick()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.LEAVE).assertIsDisplayed()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.EDIT).assertDoesNotExist()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.DELETE).assertDoesNotExist()
+    }
+
+    @Test
+    fun member_getsNoMemberManagementControls() {
+        setScreen(state = state(OrgRole.MEMBER, listOf(ada, grace), isPublic = true))
+
+        // "Member: Basic access" — the roster is visible, read-only.
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.SEARCH).assertDoesNotExist()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.remove("u2")).assertDoesNotExist()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.roleChip("u2", OrgRole.ADMIN))
+            .assertDoesNotExist()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.roleLabel("u2")).assertIsDisplayed()
+    }
+
+    @Test
+    fun admin_mayEditButNotDelete() {
+        setScreen(state = state(OrgRole.ADMIN, listOf(ada, grace), isPublic = true))
+
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.OVERFLOW).performClick()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.EDIT).assertIsDisplayed()
+        // "Owner: … can delete the org" — an admin cannot.
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.DELETE).assertDoesNotExist()
+    }
+
+    @Test
+    fun admin_mayNotManageAnOwner_butMayManageOthers() {
+        setScreen(state = state(OrgRole.ADMIN, listOf(ada, grace), isPublic = true))
+
+        // "Admin: Can add and remove members and change roles (except owner)"
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.remove("u1")).assertDoesNotExist()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.roleLabel("u1")).assertIsDisplayed()
+
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.remove("u2")).assertIsDisplayed()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.roleChip("u2", OrgRole.ADMIN))
+            .assertIsDisplayed()
+        // An admin cannot hand out ownership.
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.roleChip("u2", OrgRole.OWNER))
+            .assertDoesNotExist()
+    }
+
+    @Test
+    fun owner_mayGrantOwnership() {
+        setScreen(state = loaded())
+
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.roleChip("u2", OrgRole.OWNER))
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun theOnlyOwner_isOfferedNeitherDemotionNorRemoval() {
+        // Ada is the single owner: the server refuses both, so neither is offered.
+        setScreen(state = state(OrgRole.OWNER, listOf(ada, grace)))
+
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.remove("u1")).assertDoesNotExist()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.roleChip("u1", OrgRole.MEMBER))
+            .assertDoesNotExist()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.roleChip("u1", OrgRole.OWNER))
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.MEMBER_LAST_OWNER_NOTICE)
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun systemOrganization_offersNoLeaveOrDelete() {
+        // "You cannot leave the system \"The Public\" organization."
+        setScreen(state = state(OrgRole.OWNER, listOf(ada, secondOwner), isPublic = true, isSystem = true))
+
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.SYSTEM).assertIsDisplayed()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.OVERFLOW).performClick()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.LEAVE).assertDoesNotExist()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.DELETE).assertDoesNotExist()
+        // Editing is still a role question, and an owner may.
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.EDIT).assertIsDisplayed()
+    }
+
+    // ---- Visibility ---------------------------------------------------------
+
+    @Test
+    fun visibility_isShownOnTheHeader() {
+        setScreen(state = state(OrgRole.MEMBER, listOf(ada, grace), isPublic = true))
+
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.VISIBILITY)
+            .assertTextContains("Public · anyone can see and join")
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.VIEWER_ROLE)
+            .assertTextContains("Your role: Member")
+    }
+
+    @Test
+    fun privateVisibility_isShownOnTheHeader() {
+        setScreen(state = state(OrgRole.MEMBER, listOf(ada, grace), isPublic = false))
+
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.VISIBILITY)
+            .assertTextContains("Private · invite-only; an owner or admin adds members")
+    }
+
+    @Test
+    fun owner_canToggleVisibility_andItRoundTripsToTheSave() {
+        var saved: Triple<String?, String?, Boolean?>? = null
         setScreen(
-            state = OrganizationDetailUiState(
-                organization = Organization("o1", "Metals", null, null, true, 1, null, null),
-                isLoading = false,
-            ),
+            state = state(OrgRole.OWNER, listOf(ada, secondOwner), isPublic = false),
+            onSaveEdit = { name, description, isPublic -> saved = Triple(name, description, isPublic) },
         )
 
         composeRule.onNodeWithTag(OrganizationDetailTestTags.OVERFLOW).performClick()
-        composeRule.onNodeWithTag(OrganizationDetailTestTags.LEAVE).assertDoesNotExist()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.EDIT).performClick()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.EDIT_DIALOG).assertIsDisplayed()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.EDIT_VISIBILITY).performClick()
+        composeRule.onNodeWithText("Save").performClick()
+
+        assert(saved?.third == true) { "expected the toggled visibility to reach the save, got $saved" }
     }
 }

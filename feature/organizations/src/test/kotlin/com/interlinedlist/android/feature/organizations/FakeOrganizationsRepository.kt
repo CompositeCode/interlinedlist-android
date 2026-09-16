@@ -32,6 +32,7 @@ class FakeOrganizationsRepository : OrganizationsRepository {
     var addMemberResult: ApiResult<Unit> = ApiResult.Success(Unit)
     var updateRoleResult: ApiResult<Unit> = ApiResult.Success(Unit)
     var removeMemberResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var updateRoleCount = 0
     var joinResult: ApiResult<Unit> = ApiResult.Success(Unit)
     var leaveResult: ApiResult<Unit> = ApiResult.Success(Unit)
 
@@ -66,9 +67,14 @@ class FakeOrganizationsRepository : OrganizationsRepository {
         Organization("new", name, description, null, isPublic, 1, OrgRole.OWNER, null),
     )
 
+    /**
+     * Defaults to an organization the caller owns, so management tests exercise the
+     * mutation rather than the permission gate. Tests that care about a narrower
+     * role (or about non-membership) set [getResult] explicitly.
+     */
     override suspend fun getOrganization(id: String): ApiResult<Organization> =
         getResult ?: ApiResult.Success(
-            Organization(id, "Org $id", null, null, false, 0, OrgRole.MEMBER, null),
+            Organization(id, "Org $id", null, null, false, 0, OrgRole.OWNER, null),
         )
 
     override suspend fun updateOrganization(
@@ -125,8 +131,10 @@ class FakeOrganizationsRepository : OrganizationsRepository {
         return addMemberResult
     }
 
-    override suspend fun updateMemberRole(orgId: String, userId: String, role: OrgRole): ApiResult<Unit> =
-        updateRoleResult
+    override suspend fun updateMemberRole(orgId: String, userId: String, role: OrgRole): ApiResult<Unit> {
+        updateRoleCount++
+        return updateRoleResult
+    }
 
     override suspend fun removeMember(orgId: String, userId: String): ApiResult<Unit> {
         removeMemberCount++
@@ -140,5 +148,9 @@ class FakeOrganizationsRepository : OrganizationsRepository {
         /** The live 400 the server returns when the only owner tries to leave. */
         fun lastOwnerFailure(): ApiResult.Failure =
             ApiResult.Failure(AppError.Unknown("Cannot remove the last owner"))
+
+        /** The live 400 the server returns when the only owner would be demoted. */
+        fun lastOwnerDemoteFailure(): ApiResult.Failure =
+            ApiResult.Failure(AppError.Unknown("Cannot demote the last owner"))
     }
 }

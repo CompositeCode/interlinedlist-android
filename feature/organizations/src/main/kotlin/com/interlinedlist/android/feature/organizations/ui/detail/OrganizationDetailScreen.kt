@@ -80,9 +80,20 @@ object OrganizationDetailTestTags {
     const val LEAVE_DIALOG = "orgDetailLeaveDialog"
     const val LEAVE_CONFIRM = "orgDetailLeaveConfirm"
     const val LAST_OWNER_NOTICE = "orgDetailLastOwnerNotice"
+    const val MEMBER_LAST_OWNER_NOTICE = "orgMemberLastOwnerNotice"
+    const val VISIBILITY = "orgDetailVisibility"
+    const val VIEWER_ROLE = "orgDetailViewerRole"
+    const val SYSTEM = "orgDetailSystem"
+    const val EDIT_VISIBILITY = "orgDetailEditVisibility"
     fun member(userId: String) = "orgMember_$userId"
     fun remove(userId: String) = "orgMemberRemove_$userId"
     fun candidate(userId: String) = "orgCandidate_$userId"
+
+    /** A tappable role chip on a member row; absent when that role is not assignable. */
+    fun roleChip(userId: String, role: OrgRole) = "orgMemberRole_${userId}_${role.apiValue}"
+
+    /** The read-only role label shown when the viewer may not change this member's role. */
+    fun roleLabel(userId: String) = "orgMemberRoleLabel_$userId"
 }
 
 /**
@@ -134,6 +145,7 @@ fun OrganizationDetailScreen(
     var showEdit by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showLeaveConfirm by remember { mutableStateOf(false) }
+    val permissions = state.permissions
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -146,32 +158,40 @@ fun OrganizationDetailScreen(
                     }
                 },
                 actions = {
-                    IconButton(
-                        onClick = { menuOpen = true },
-                        modifier = Modifier.testTag(OrganizationDetailTestTags.OVERFLOW),
-                    ) { Icon(Icons.Default.MoreVert, contentDescription = "More actions") }
-                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                        DropdownMenuItem(
-                            text = { Text("Edit") },
-                            leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
-                            onClick = { menuOpen = false; showEdit = true },
-                            modifier = Modifier.testTag(OrganizationDetailTestTags.EDIT),
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Delete") },
-                            leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
-                            onClick = { menuOpen = false; showDeleteConfirm = true },
-                            modifier = Modifier.testTag(OrganizationDetailTestTags.DELETE),
-                        )
-                        if (state.isMember) {
-                            DropdownMenuItem(
-                                text = { Text("Leave organization") },
-                                leadingIcon = {
-                                    Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null)
-                                },
-                                onClick = { menuOpen = false; showLeaveConfirm = true },
-                                modifier = Modifier.testTag(OrganizationDetailTestTags.LEAVE),
-                            )
+                    // Only the actions this role may take are offered; with none
+                    // left there is nothing to open, so the menu itself is dropped.
+                    if (permissions.hasAnyOrganizationAction) {
+                        IconButton(
+                            onClick = { menuOpen = true },
+                            modifier = Modifier.testTag(OrganizationDetailTestTags.OVERFLOW),
+                        ) { Icon(Icons.Default.MoreVert, contentDescription = "More actions") }
+                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                            if (permissions.canEditOrganization) {
+                                DropdownMenuItem(
+                                    text = { Text("Edit") },
+                                    leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                                    onClick = { menuOpen = false; showEdit = true },
+                                    modifier = Modifier.testTag(OrganizationDetailTestTags.EDIT),
+                                )
+                            }
+                            if (permissions.canDeleteOrganization) {
+                                DropdownMenuItem(
+                                    text = { Text("Delete") },
+                                    leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                                    onClick = { menuOpen = false; showDeleteConfirm = true },
+                                    modifier = Modifier.testTag(OrganizationDetailTestTags.DELETE),
+                                )
+                            }
+                            if (permissions.canLeave) {
+                                DropdownMenuItem(
+                                    text = { Text("Leave organization") },
+                                    leadingIcon = {
+                                        Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null)
+                                    },
+                                    onClick = { menuOpen = false; showLeaveConfirm = true },
+                                    modifier = Modifier.testTag(OrganizationDetailTestTags.LEAVE),
+                                )
+                            }
                         }
                     }
                 },
@@ -212,23 +232,25 @@ fun OrganizationDetailScreen(
 
                 // The members endpoint is members-only, so a non-member is offered
                 // the join action instead of member management.
-                if (state.isMember) {
-                    OutlinedTextField(
-                        value = state.searchQuery,
-                        onValueChange = onSearchQueryChange,
-                        label = { Text("Add a member") },
-                        singleLine = true,
-                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp)
-                            .testTag(OrganizationDetailTestTags.SEARCH),
-                    )
+                if (permissions.canViewMembers) {
+                    // Only owners and admins may add a member, so only they get the
+                    // picker; everyone else sees the roster read-only.
+                    if (permissions.canAddMember) {
+                        OutlinedTextField(
+                            value = state.searchQuery,
+                            onValueChange = onSearchQueryChange,
+                            label = { Text("Add a member") },
+                            singleLine = true,
+                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                                .testTag(OrganizationDetailTestTags.SEARCH),
+                        )
+                    }
 
                     MemberList(
-                        members = state.members,
-                        candidates = state.candidates,
-                        isEmpty = state.isEmpty,
+                        state = state,
                         onAddCandidate = onAddCandidate,
                         onChangeRole = onChangeRole,
                         onRemoveMember = onRemoveMember,
@@ -240,7 +262,7 @@ fun OrganizationDetailScreen(
         }
     }
 
-    if (showEdit && state.organization != null) {
+    if (showEdit && state.organization != null && permissions.canEditOrganization) {
         EditOrganizationDialog(
             organization = state.organization,
             onDismiss = { showEdit = false },
@@ -359,6 +381,12 @@ private fun JoinPrompt(canJoin: Boolean, isJoining: Boolean, onJoin: () -> Unit)
     }
 }
 
+/**
+ * Metadata header. Visibility is stated outright, with the help centre's own
+ * wording for what it means ("Public: Anyone can see and join" / "Private:
+ * Invite-only; members must be added by an owner or admin"), because it decides
+ * who can find and join the organization.
+ */
 @Composable
 private fun OrganizationHeader(org: Organization) {
     Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
@@ -376,10 +404,32 @@ private fun OrganizationHeader(org: Organization) {
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary,
             )
+            org.role?.let { role ->
+                Text(
+                    text = "Your role: ${role.label}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.testTag(OrganizationDetailTestTags.VIEWER_ROLE),
+                )
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = if (org.isPublic) {
+                "Public · anyone can see and join"
+            } else {
+                "Private · invite-only; an owner or admin adds members"
+            },
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.secondary,
+            modifier = Modifier.testTag(OrganizationDetailTestTags.VISIBILITY),
+        )
+        if (org.isSystem) {
             Text(
-                text = if (org.isPublic) "Public" else "Private",
+                text = "Built-in organization · everyone belongs to it",
                 style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.secondary,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.testTag(OrganizationDetailTestTags.SYSTEM),
             )
         }
     }
@@ -387,9 +437,7 @@ private fun OrganizationHeader(org: Organization) {
 
 @Composable
 private fun MemberList(
-    members: List<OrgMember>,
-    candidates: List<MemberCandidate>,
-    isEmpty: Boolean,
+    state: OrganizationDetailUiState,
     onAddCandidate: (MemberCandidate) -> Unit,
     onChangeRole: (OrgMember, OrgRole) -> Unit,
     onRemoveMember: (OrgMember) -> Unit,
@@ -401,19 +449,22 @@ private fun MemberList(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        if (candidates.isNotEmpty()) {
+        if (state.candidates.isNotEmpty()) {
             item { Text("Suggestions", style = MaterialTheme.typography.labelLarge) }
-            items(candidates, key = { "candidate-${it.userId}" }) { candidate ->
+            items(state.candidates, key = { "candidate-${it.userId}" }) { candidate ->
                 CandidateRow(candidate = candidate, onAdd = { onAddCandidate(candidate) })
             }
         }
 
-        if (isEmpty && candidates.isEmpty()) {
-            item { EmptyState() }
+        if (state.isEmpty && state.candidates.isEmpty()) {
+            item { EmptyState(canAddMember = state.permissions.canAddMember) }
         } else {
-            items(members, key = { it.userId }) { member ->
+            items(state.members, key = { it.userId }) { member ->
                 MemberRow(
                     member = member,
+                    assignableRoles = state.assignableRolesFor(member),
+                    canRemove = state.canRemove(member) && !state.isOnlyOwner(member),
+                    isOnlyOwner = state.isOnlyOwner(member),
                     onChangeRole = { onChangeRole(member, it) },
                     onRemove = { onRemoveMember(member) },
                 )
@@ -422,10 +473,19 @@ private fun MemberList(
     }
 }
 
+/**
+ * One member. The role chips are limited to what the viewer may actually assign —
+ * an admin cannot touch an owner or hand out ownership — and the organization's
+ * only owner is offered no demotion at all, because the server refuses it. When the
+ * viewer may change nothing, the role is shown as a plain label instead.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MemberRow(
     member: OrgMember,
+    assignableRoles: List<OrgRole>,
+    canRemove: Boolean,
+    isOnlyOwner: Boolean,
     onChangeRole: (OrgRole) -> Unit,
     onRemove: () -> Unit,
 ) {
@@ -452,20 +512,43 @@ private fun MemberRow(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                IconButton(
-                    onClick = onRemove,
-                    modifier = Modifier.testTag(OrganizationDetailTestTags.remove(member.userId)),
-                ) { Icon(Icons.Default.Close, contentDescription = "Remove member") }
+                if (canRemove) {
+                    IconButton(
+                        onClick = onRemove,
+                        modifier = Modifier.testTag(OrganizationDetailTestTags.remove(member.userId)),
+                    ) { Icon(Icons.Default.Close, contentDescription = "Remove member") }
+                }
             }
             Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OrgRole.entries.forEach { role ->
-                    FilterChip(
-                        selected = member.role == role,
-                        onClick = { onChangeRole(role) },
-                        label = { Text(role.label) },
-                    )
+            if (assignableRoles.isEmpty()) {
+                Text(
+                    text = member.role.label,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.testTag(OrganizationDetailTestTags.roleLabel(member.userId)),
+                )
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    assignableRoles.forEach { role ->
+                        FilterChip(
+                            selected = member.role == role,
+                            onClick = { onChangeRole(role) },
+                            label = { Text(role.label) },
+                            modifier = Modifier.testTag(
+                                OrganizationDetailTestTags.roleChip(member.userId, role),
+                            ),
+                        )
+                    }
                 }
+            }
+            if (isOnlyOwner) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "The only owner can't be demoted or removed.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.testTag(OrganizationDetailTestTags.MEMBER_LAST_OWNER_NOTICE),
+                )
             }
         }
     }
@@ -501,6 +584,12 @@ private fun CandidateRow(candidate: MemberCandidate, onAdd: () -> Unit) {
     }
 }
 
+/**
+ * Edits name, description and visibility. Visibility travels on the same
+ * `PUT /api/organizations/{id}` as the rest, so
+ * [com.interlinedlist.android.feature.organizations.domain.OrgPermissions.canEditVisibility]
+ * matches `canEditOrganization` and this dialog only opens for roles that hold it.
+ */
 @Composable
 private fun EditOrganizationDialog(
     organization: Organization,
@@ -533,8 +622,23 @@ private fun EditOrganizationDialog(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    Text("Public", style = MaterialTheme.typography.bodyLarge)
-                    Switch(checked = isPublic, onCheckedChange = { isPublic = it })
+                    Column(Modifier.weight(1f)) {
+                        Text("Public", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            text = if (isPublic) {
+                                "Anyone can see and join."
+                            } else {
+                                "Invite-only; an owner or admin adds members."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = isPublic,
+                        onCheckedChange = { isPublic = it },
+                        modifier = Modifier.testTag(OrganizationDetailTestTags.EDIT_VISIBILITY),
+                    )
                 }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -552,7 +656,7 @@ private fun EditOrganizationDialog(
 }
 
 @Composable
-private fun EmptyState() {
+private fun EmptyState(canAddMember: Boolean) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -564,7 +668,11 @@ private fun EmptyState() {
             Text("No members yet", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(4.dp))
             Text(
-                "Search above to add someone.",
+                text = if (canAddMember) {
+                    "Search above to add someone."
+                } else {
+                    "Only an owner or admin can add members."
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -585,9 +693,10 @@ private fun OrganizationDetailScreenPreview() {
     InterlinedListTheme {
         OrganizationDetailScreen(
             state = OrganizationDetailUiState(
-                organization = Organization("1", "Acme Corp", "We make everything", null, false, 2, OrgRole.OWNER, null),
+                organization = Organization("1", "Acme Corp", "We make everything", null, false, 3, OrgRole.OWNER, null),
                 members = listOf(
                     OrgMember("u1", "ada", "Ada Lovelace", null, OrgRole.OWNER, active = true),
+                    OrgMember("u3", "linus", null, null, OrgRole.OWNER, active = true),
                     OrgMember("u2", "grace", null, null, OrgRole.MEMBER, active = true),
                 ),
                 isLoading = false,
