@@ -11,6 +11,7 @@ import com.interlinedlist.android.feature.messages.domain.ReportReason
 import com.interlinedlist.android.feature.messages.ui.FakeMessagesRepository
 import com.interlinedlist.android.feature.messages.ui.sampleMessage
 import com.interlinedlist.android.feature.messages.ui.sampleNetwork
+import com.interlinedlist.android.feature.messages.ui.samplePushedMessage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
@@ -875,5 +876,232 @@ class MessagesFeedViewModelTest {
 
         assertThat(repo.refreshPreferences)
             .containsExactly(ViewingPreference.FOLLOWERS, ViewingPreference.FOLLOWERS)
+    }
+
+    // --- push / quote ------------------------------------------------------
+
+    @Test
+    fun `push posts the repost straight away, with no composer and no content`() =
+        runTest(dispatcher) {
+            val repo = FakeMessagesRepository().apply {
+                pushResult = ApiResult.Success(sampleMessage(id = "push1", content = ""))
+            }
+            val vm = MessagesFeedViewModel(repo)
+            backgroundScope.launch { vm.uiState.collect {} }
+            advanceUntilIdle()
+
+            vm.onPush(sampleMessage(id = "orig", mine = false))
+            advanceUntilIdle()
+
+            assertThat(repo.pushedMessageIds).containsExactly("orig")
+            // A push never opens the composer, and posts nothing of its own.
+            assertThat(vm.uiState.value.isComposeOpen).isFalse()
+            assertThat(repo.lastCreate).isNull()
+            assertThat(vm.uiState.value.errorMessage).isNull()
+        }
+
+    @Test
+    fun `push is not sent for a message that cannot be pushed`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository()
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.onPush(sampleMessage(id = "mine", mine = true))
+        vm.onPush(sampleMessage(id = "secret", publiclyVisible = false))
+        vm.onPush(
+            sampleMessage(
+                id = "already",
+                pushedMessageId = "orig",
+                pushedMessage = samplePushedMessage(),
+            ),
+        )
+        advanceUntilIdle()
+
+        assertThat(repo.pushedMessageIds).isEmpty()
+    }
+
+    @Test
+    fun `a repeated tap does not push the same message twice`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            pushResult = ApiResult.Success(sampleMessage(id = "push1", content = ""))
+        }
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        val message = sampleMessage(id = "orig")
+        vm.onPush(message)
+        vm.onPush(message)
+        advanceUntilIdle()
+
+        assertThat(repo.pushedMessageIds).containsExactly("orig")
+    }
+
+    @Test
+    fun `a rejected push surfaces the server's own message`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            pushResult = ApiResult.Failure(AppError.Forbidden("You cannot push your own message"))
+        }
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.onPush(sampleMessage(id = "orig"))
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.errorMessage).isEqualTo("You cannot push your own message")
+    }
+
+    @Test
+    fun `a push that was rejected can be retried`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            pushResult = ApiResult.Failure(AppError.Network("offline"))
+        }
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        val message = sampleMessage(id = "orig")
+        vm.onPush(message)
+        advanceUntilIdle()
+        vm.onPush(message)
+        advanceUntilIdle()
+
+        assertThat(repo.pushedMessageIds).containsExactly("orig", "orig")
+    }
+
+    @Test
+    fun `quote opens the composer with the quoted message attached`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository()
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.openQuote(sampleMessage(id = "orig", content = "the original post"))
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertThat(state.isComposeOpen).isTrue()
+        assertThat(state.isQuoting).isTrue()
+        assertThat(state.quoteTarget?.id).isEqualTo("orig")
+    }
+
+    @Test
+    fun `quote is not offered for a message that cannot be pushed`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository()
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.openQuote(sampleMessage(id = "mine", mine = true))
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.isComposeOpen).isFalse()
+        assertThat(vm.uiState.value.quoteTarget).isNull()
+    }
+
+    @Test
+    fun `quote sends both the note and the pushed message id`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            createResult = ApiResult.Success(sampleMessage(id = "quote1"))
+        }
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.openQuote(sampleMessage(id = "orig"))
+        vm.onComposeTextChange("worth reading")
+        vm.post()
+        advanceUntilIdle()
+
+        assertThat(repo.lastCreate?.content).isEqualTo("worth reading")
+        assertThat(repo.lastCreate?.pushedMessageId).isEqualTo("orig")
+    }
+
+    @Test
+    fun `the visibility control cannot select private for a quote`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            // Even an account that defaults to private posts a quote publicly.
+            defaultVisibilityResult = ApiResult.Success(MessageVisibility.PRIVATE)
+            createResult = ApiResult.Success(sampleMessage(id = "quote1"))
+        }
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.openQuote(sampleMessage(id = "orig"))
+        vm.onVisibilityChange(MessageVisibility.PRIVATE)
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.composeVisibility).isEqualTo(MessageVisibility.PUSH_OR_QUOTE)
+        assertThat(vm.uiState.value.canChangeVisibility).isFalse()
+
+        vm.onComposeTextChange("worth reading")
+        vm.post()
+        advanceUntilIdle()
+
+        assertThat(repo.lastCreate?.visibility).isEqualTo(MessageVisibility.PUBLIC)
+    }
+
+    @Test
+    fun `a quote is never scheduled`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            createResult = ApiResult.Success(sampleMessage(id = "quote1"))
+        }
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.openCompose()
+        vm.onScheduleChange("2026-09-20T09:00:00Z")
+        vm.openQuote(sampleMessage(id = "orig"))
+        vm.onComposeTextChange("worth reading")
+        vm.post()
+        advanceUntilIdle()
+
+        // The create endpoint rejects scheduledAt together with pushedMessageId.
+        assertThat(repo.lastCreate?.scheduledAt).isNull()
+        assertThat(repo.lastCreate?.pushedMessageId).isEqualTo("orig")
+    }
+
+    @Test
+    fun `dismissing the composer drops the attached quote`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository()
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.openQuote(sampleMessage(id = "orig"))
+        vm.dismissCompose()
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.quoteTarget).isNull()
+        assertThat(vm.uiState.value.canChangeVisibility).isTrue()
+    }
+
+    @Test
+    fun `a posted quote leaves the composer ready for an ordinary message`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            createResult = ApiResult.Success(sampleMessage(id = "quote1"))
+        }
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.openQuote(sampleMessage(id = "orig"))
+        vm.onComposeTextChange("worth reading")
+        vm.post()
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.quoteTarget).isNull()
+        assertThat(vm.uiState.value.isQuoting).isFalse()
+
+        vm.openCompose()
+        vm.onComposeTextChange("plain post")
+        vm.post()
+        advanceUntilIdle()
+
+        assertThat(repo.lastCreate?.pushedMessageId).isNull()
     }
 }

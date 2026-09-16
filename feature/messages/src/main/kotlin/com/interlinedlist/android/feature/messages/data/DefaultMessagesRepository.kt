@@ -24,6 +24,7 @@ import com.interlinedlist.android.feature.messages.domain.LinkedNetwork
 import com.interlinedlist.android.feature.messages.domain.Message
 import com.interlinedlist.android.feature.messages.domain.MessageVisibility
 import com.interlinedlist.android.feature.messages.domain.ReportReason
+import com.interlinedlist.android.feature.messages.domain.asPushedOriginal
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -117,11 +118,23 @@ class DefaultMessagesRepository @Inject constructor(
         scheduledAt: String?,
         crossPost: CrossPostSelection,
         visibility: MessageVisibility,
+        pushedMessageId: String?,
     ): ApiResult<CreatedMessage> = withContext(dispatchers.io) {
+        val isReshare = pushedMessageId != null
         val request = CreateMessageRequest(
-            content = content,
-            // Always explicit: the composer owns this choice, not the server default.
-            publiclyVisible = visibility.publiclyVisible,
+            // A push with no comment is the one post that carries no content at
+            // all ("required unless pushing with no comment"), so the field is
+            // dropped entirely. Everything else sends its content verbatim — a
+            // media-only post legitimately posts an empty body.
+            content = content.takeIf { !isReshare || it.isNotBlank() },
+            pushedMessageId = pushedMessageId,
+            // Always explicit: the composer owns this choice, not the server
+            // default. A push/quote is the exception — it is always public.
+            publiclyVisible = if (isReshare) {
+                MessageVisibility.PUSH_OR_QUOTE.publiclyVisible
+            } else {
+                visibility.publiclyVisible
+            },
             imageUrls = imageUrls.ifEmpty { null },
             videoUrls = videoUrls.ifEmpty { null },
             scheduledAt = scheduledAt,
@@ -135,6 +148,7 @@ class DefaultMessagesRepository @Inject constructor(
         when (val result = safeCall { api.createMessage(request) }) {
             is ApiResult.Success -> {
                 val message = result.data.data.toDomain(currentUserId())
+                    .withEmbeddedOriginal(pushedMessageId)
                 if (message.scheduledAt != null) {
                     // Scheduled messages are cached in the scheduled view, not the feed.
                     messageDao.upsert(message.toEntity(feedOrder = 0L))
@@ -149,6 +163,9 @@ class DefaultMessagesRepository @Inject constructor(
             is ApiResult.Failure -> result
         }
     }
+
+    override suspend fun pushMessage(messageId: String): ApiResult<CreatedMessage> =
+        createMessage(content = "", pushedMessageId = messageId)
 
     override suspend fun getDefaultVisibility(): ApiResult<MessageVisibility> =
         withContext(dispatchers.io) {
@@ -456,6 +473,20 @@ class DefaultMessagesRepository @Inject constructor(
             }
             is ApiResult.Failure -> result
         }
+    }
+
+    /**
+     * Fills in the embedded original for a freshly created push/quote. The create
+     * response echoes back only the new message, so the nested `pushedMessage`
+     * the feed payload carries is missing — without this the new row would render
+     * as an empty card until the next refresh. The cached original supplies it.
+     */
+    private suspend fun Message.withEmbeddedOriginal(pushedMessageId: String?): Message {
+        if (pushedMessageId == null || pushedMessage != null) return this
+        return copy(
+            pushedMessageId = pushedMessageId,
+            pushedMessage = currentEntity(pushedMessageId)?.toDomain()?.asPushedOriginal(),
+        )
     }
 
     /** Current cached row for [id], or null. Snapshots the observe Flow. */

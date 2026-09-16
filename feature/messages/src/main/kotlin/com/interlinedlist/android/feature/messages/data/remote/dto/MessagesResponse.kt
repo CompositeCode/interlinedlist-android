@@ -111,14 +111,20 @@ data class CrossPostStatusDto(
  * while [crossPostToBluesky] / [crossPostToLinkedIn] / [crossPostToTwitter] are
  * single boolean flags for the one-account networks.
  *
+ * [pushedMessageId] re-shares another message: with no [content] it is a plain
+ * push (repost), and with content it is a quote. It is mutually exclusive with
+ * [parentId] and [scheduledAt], and a push/quote is always public.
+ *
  * Only non-null fields are serialised (the shared Json uses `explicitNulls =
  * false`), so a plain InterlinedList-only post sends just
- * `{ content, publiclyVisible }`.
+ * `{ content, publiclyVisible }` and a bare push sends no `content` at all.
  */
 @Serializable
 data class CreateMessageRequest(
-    val content: String,
+    /** Null only for a push with no comment — the one case the API allows it. */
+    val content: String? = null,
     val parentId: String? = null,
+    val pushedMessageId: String? = null,
     val publiclyVisible: Boolean? = null,
     val imageUrls: List<String>? = null,
     val videoUrls: List<String>? = null,
