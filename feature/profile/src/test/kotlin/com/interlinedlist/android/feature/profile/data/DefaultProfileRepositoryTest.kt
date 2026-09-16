@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
@@ -157,6 +158,23 @@ class DefaultProfileRepositoryTest {
 
         assertThat(repository.observeCurrentUser().first()?.displayName).isEqualTo("New Name")
     }
+
+    @Test
+    fun `updateProfile PATCHes only the profile fields, never the preference fields`() =
+        runTest(testDispatcher) {
+            server.enqueue(
+                MockResponse().setResponseCode(200).setBody(
+                    """{ "user": { "id": "u1", "username": "adron", "displayName": "New Name", "bio": "New bio" } }""",
+                ),
+            )
+
+            repository.updateProfile(displayName = "New Name", bio = "New bio")
+
+            // Edit-profile must not send (and so must not reset) the settings fields
+            // the Settings screen owns.
+            val body = json.parseToJsonElement(server.takeRequest().body.readUtf8()) as JsonObject
+            assertThat(body.keys).containsExactly("displayName", "bio")
+        }
 
     @Test
     fun `updateProfile re-fetches when the server echoes a thin body`() = runTest(testDispatcher) {
