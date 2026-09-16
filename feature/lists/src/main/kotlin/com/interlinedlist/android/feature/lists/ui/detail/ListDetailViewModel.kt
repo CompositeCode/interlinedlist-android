@@ -6,16 +6,21 @@ import androidx.lifecycle.viewModelScope
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.feature.lists.data.GithubRepository
 import com.interlinedlist.android.feature.lists.data.ListsRepository
+import com.interlinedlist.android.feature.lists.domain.ListFreshness
+import com.interlinedlist.android.feature.lists.domain.ListPresence
 import com.interlinedlist.android.feature.lists.domain.ListRow
 import com.interlinedlist.android.feature.lists.domain.ListSchema
 import com.interlinedlist.android.feature.lists.domain.ListSummary
 import com.interlinedlist.android.feature.lists.ui.isSubscriptionGate
 import com.interlinedlist.android.feature.lists.ui.toUserMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -39,6 +44,10 @@ data class ListDetailUiState(
      * Null when unknown or not applicable — the row form simply omits the hint.
      */
     val nextIssueNumber: Int? = null,
+    /** Other people currently in this list, from the freshness poll's presence half. */
+    val presence: List<ListPresence> = emptyList(),
+    /** The server's own verdict on whether anyone else is involved with this list. */
+    val isCollaborative: Boolean = false,
 ) {
     val title: String get() = summary?.title.orEmpty()
     val isEmpty: Boolean get() = rows.isEmpty() && !isLoading && errorMessage == null
@@ -63,6 +72,21 @@ class ListDetailViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(ListDetailUiState())
     val uiState: StateFlow<ListDetailUiState> = _uiState.asStateFlow()
+
+    /** The freshness/presence loop. Non-null only while the list is on screen. */
+    private var heartbeatJob: Job? = null
+
+    /** The row the user is on, published to everyone else on the next beat. */
+    private var focusedRowId: String? = null
+
+    /** Polled time since the user last did anything, used to stop an idle screen. */
+    private var idleMillis = 0L
+
+    /** Whether the list is currently on screen; nothing may beat when it is not. */
+    private var isOnScreen = false
+
+    /** Set once the server says the list is not collaborative — then we stay quiet. */
+    private var pollingDisabled = false
 
     init {
         load()
@@ -95,7 +119,119 @@ class ListDetailViewModel @Inject constructor(
         }
     }
 
+    // --- Collaborative freshness + presence --------------------------------
+
+    /**
+     * Starts the combined freshness poll and presence heartbeat for as long as the
+     * list is on screen. Idempotent: a second call while one is running is ignored.
+     *
+     * The loop is deliberately frugal, because the server's own guidance is that the
+     * database behind this endpoint bills for being awake:
+     * - [ACTIVE_INTERVAL_MS] while the list is actually moving,
+     * - [IDLE_INTERVAL_MS] when a beat brings no news (and after a failed beat),
+     * - it stops outright once the server reports the list is not collaborative,
+     * - and it stops after [MAX_IDLE_MS] without the user touching anything.
+     */
+    fun startHeartbeat() {
+        isOnScreen = true
+        if (heartbeatJob?.isActive == true) return
+        // A fresh entry re-asks whether anyone else is on the list by now.
+        pollingDisabled = false
+        idleMillis = 0
+        heartbeatJob = launchHeartbeat()
+    }
+
+    private fun launchHeartbeat(): Job = viewModelScope.launch {
+        var interval = ACTIVE_INTERVAL_MS
+        while (isActive) {
+            when (val result = repository.pollFreshness(listId, rowVersions(), focusedRowId)) {
+                is ApiResult.Success -> {
+                    applyFreshness(result.data)
+                    // Nobody else can see this list, so there is nothing to hear
+                    // about: stop rather than keep a shared database awake.
+                    if (!result.data.collaborative) {
+                        pollingDisabled = true
+                        return@launch
+                    }
+                    interval = if (result.data.hasChanges) ACTIVE_INTERVAL_MS else IDLE_INTERVAL_MS
+                }
+                // Transient — back off rather than retry hard; the screen still works.
+                is ApiResult.Failure -> interval = IDLE_INTERVAL_MS
+            }
+            // A screen nobody has touched in ten minutes stops asking.
+            if (idleMillis >= MAX_IDLE_MS) return@launch
+            delay(interval)
+            idleMillis += interval
+        }
+    }
+
+    /**
+     * Stops heartbeating when the list leaves the screen. There is no "leave" call
+     * to make — the heartbeat is what keeps presence alive, so it simply expires
+     * server-side — but the local presence is cleared so a returning screen never
+     * shows who *was* here.
+     */
+    fun stopHeartbeat() {
+        isOnScreen = false
+        heartbeatJob?.cancel()
+        heartbeatJob = null
+        _uiState.update { it.copy(presence = emptyList()) }
+    }
+
+    /**
+     * Publishes which row the user is on (null when they leave the editor). Also
+     * counts as interaction, so opening a row revives an idled-out screen.
+     */
+    fun setFocusedRow(rowId: String?) {
+        focusedRowId = rowId
+        noteInteraction()
+    }
+
+    /**
+     * Resets the idle timer; every user-initiated write calls it. Working in a list
+     * that had gone quiet brings the heartbeat back — but only while the list is on
+     * screen, and never on a list the server already said nobody else can see.
+     */
+    private fun noteInteraction() {
+        idleMillis = 0
+        if (isOnScreen && !pollingDisabled && heartbeatJob?.isActive != true) {
+            heartbeatJob = launchHeartbeat()
+        }
+    }
+
+    /** Versions of the rows on screen. A row with no known version is not asked about. */
+    private fun rowVersions(): Map<String, Int> =
+        _uiState.value.rows.mapNotNull { row -> row.version?.let { row.id to it } }.toMap()
+
+    /**
+     * Applies one poll: replaces exactly the rows the server says moved, drops the
+     * ones it says are gone, and updates who is present. The whole table is never
+     * refetched — that is the entire point of the endpoint.
+     */
+    private fun applyFreshness(freshness: ListFreshness) {
+        _uiState.update { state ->
+            val moved = freshness.changed.associateBy { it.id }
+            val kept = state.rows
+                .filterNot { it.id in freshness.deletedRowIds }
+                .map { moved[it.id] ?: it }
+            val keptIds = kept.mapTo(mutableSetOf()) { it.id }
+            // A changed row we were not holding is appended rather than thrown away.
+            val added = freshness.changed.filterNot { it.id in keptIds || it.id in freshness.deletedRowIds }
+            state.copy(
+                rows = kept + added,
+                presence = freshness.presence,
+                isCollaborative = freshness.collaborative,
+            )
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        stopHeartbeat()
+    }
+
     fun addRow(values: Map<String, String>, onDone: () -> Unit = {}) {
+        noteInteraction()
         _uiState.update { it.copy(isSaving = true) }
         viewModelScope.launch {
             when (val result = repository.addRow(listId, values)) {
@@ -111,6 +247,7 @@ class ListDetailViewModel @Inject constructor(
     }
 
     fun updateRow(rowId: String, values: Map<String, String>, onDone: () -> Unit = {}) {
+        noteInteraction()
         _uiState.update { it.copy(isSaving = true) }
         viewModelScope.launch {
             when (val result = repository.updateRow(listId, rowId, values)) {
@@ -148,6 +285,7 @@ class ListDetailViewModel @Inject constructor(
     }
 
     fun deleteRow(rowId: String) {
+        noteInteraction()
         viewModelScope.launch {
             when (val result = repository.deleteRow(listId, rowId)) {
                 is ApiResult.Success -> _uiState.update { state ->
@@ -338,7 +476,16 @@ class ListDetailViewModel @Inject constructor(
 
     fun clearError() = _uiState.update { it.copy(errorMessage = null) }
 
-    private companion object {
-        const val NEW_CHILD_TITLE = "New list"
+    companion object {
+        private const val NEW_CHILD_TITLE = "New list"
+
+        /** Beat interval while rows are actually moving — the first-party grid's own. */
+        const val ACTIVE_INTERVAL_MS = 10_000L
+
+        /** Backed-off interval once a beat brings no news, or after a failed beat. */
+        const val IDLE_INTERVAL_MS = 60_000L
+
+        /** Polling stops entirely after this long without the user doing anything. */
+        const val MAX_IDLE_MS = 10 * 60_000L
     }
 }

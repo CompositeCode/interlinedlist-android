@@ -6,6 +6,7 @@ import com.interlinedlist.android.feature.lists.domain.InviteRole
 import com.interlinedlist.android.feature.lists.domain.ListConnection
 import com.interlinedlist.android.feature.lists.domain.ListDetail
 import com.interlinedlist.android.feature.lists.domain.ListFolder
+import com.interlinedlist.android.feature.lists.domain.ListFreshness
 import com.interlinedlist.android.feature.lists.domain.ListInvite
 import com.interlinedlist.android.feature.lists.domain.ListRow
 import com.interlinedlist.android.feature.lists.domain.ListSchema
@@ -145,6 +146,22 @@ interface ListsRepository {
     suspend fun updateRow(listId: String, rowId: String, values: Map<String, String>): ApiResult<ListRow>
 
     suspend fun deleteRow(listId: String, rowId: String): ApiResult<Unit>
+
+    /**
+     * One combined freshness poll and presence heartbeat for an open list.
+     *
+     * [rowVersions] are the versions of the rows currently held, keyed by row id;
+     * the server answers with only what moved, so the caller repaints those rows
+     * instead of refetching the table. [focusedRowId] publishes which row the user
+     * is on so other people see it. Rows whose version is unknown are not asked
+     * about — quoting a made-up version would have the server return the whole
+     * table on every beat.
+     */
+    suspend fun pollFreshness(
+        listId: String,
+        rowVersions: Map<String, Int>,
+        focusedRowId: String? = null,
+    ): ApiResult<ListFreshness>
 
     suspend fun getFolders(): ApiResult<List<ListFolder>>
 

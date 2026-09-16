@@ -141,6 +141,29 @@ class DefaultListsRepositoryTest {
     }
 
     @Test
+    fun `getListDetail reads the live rows payload with rowData and version`() = runTest(dispatcher) {
+        server.enqueue(MockResponse().setBody("""{ "list": { "id": "L1", "title": "Reading" } }"""))
+        server.enqueue(MockResponse().setBody("""[ { "key": "status", "type": "text" } ]"""))
+        // Exactly what the API returns: rows under `rows`, values under `rowData`.
+        server.enqueue(
+            MockResponse().setBody(
+                """
+                { "rows": [ { "id": "r1", "rowData": { "status": "in review" }, "version": 1,
+                              "lastEditedByUser": { "id": "u1", "username": "casey" } } ],
+                  "pagination": { "total": 1, "limit": 20, "offset": 0, "hasMore": false } }
+                """.trimIndent(),
+            ),
+        )
+
+        val detail = (repository.getListDetail("L1") as ApiResult.Success).data
+
+        val row = detail.rows.single()
+        assertThat(row.valueFor("status")).isEqualTo("in review")
+        // The version is what the freshness poll later quotes back.
+        assertThat(row.version).isEqualTo(1)
+    }
+
+    @Test
     fun `addRow posts the field map under data and returns the created row`() = runTest(dispatcher) {
         server.enqueue(
             MockResponse().setBody("""{ "row": { "id": "r9", "data": { "title": "New" } } }"""),
