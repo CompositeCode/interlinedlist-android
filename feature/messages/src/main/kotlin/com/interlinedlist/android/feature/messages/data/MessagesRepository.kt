@@ -5,6 +5,7 @@ import com.interlinedlist.android.feature.messages.domain.CreatedMessage
 import com.interlinedlist.android.feature.messages.domain.CrossPostSelection
 import com.interlinedlist.android.feature.messages.domain.LinkedNetwork
 import com.interlinedlist.android.feature.messages.domain.Message
+import com.interlinedlist.android.feature.messages.domain.MessageVisibility
 import com.interlinedlist.android.feature.messages.domain.ReportReason
 import kotlinx.coroutines.flow.Flow
 
@@ -46,6 +47,12 @@ interface MessagesRepository {
      * [crossPost] (InterlinedList-only when [CrossPostSelection.NONE]). A scheduled
      * message does not enter the feed cache. Returns the created message plus any
      * per-network cross-post delivery statuses the endpoint reported.
+     *
+     * [visibility] is always sent explicitly so the server default never silently
+     * decides; callers seed it from [getDefaultVisibility] and let the user
+     * override it per message. A push/quote post must instead pass
+     * [MessageVisibility.PUSH_OR_QUOTE] — amplifying someone else's message is
+     * always public.
      */
     suspend fun createMessage(
         content: String,
@@ -53,7 +60,14 @@ interface MessagesRepository {
         videoUrls: List<String> = emptyList(),
         scheduledAt: String? = null,
         crossPost: CrossPostSelection = CrossPostSelection.NONE,
+        visibility: MessageVisibility = MessageVisibility.PUBLIC,
     ): ApiResult<CreatedMessage>
+
+    /**
+     * The account's default post visibility, read from `defaultPubliclyVisible`
+     * on `GET /api/user`. Seeds the composer's Public/Private toggle.
+     */
+    suspend fun getDefaultVisibility(): ApiResult<MessageVisibility>
 
     /**
      * The caller's already-linked social networks, offered as cross-post

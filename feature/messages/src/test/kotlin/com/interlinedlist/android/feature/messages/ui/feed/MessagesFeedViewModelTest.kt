@@ -5,6 +5,7 @@ import com.google.common.truth.Truth.assertThat
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
 import com.interlinedlist.android.feature.messages.domain.CrossPostStatus
+import com.interlinedlist.android.feature.messages.domain.MessageVisibility
 import com.interlinedlist.android.feature.messages.domain.ReportReason
 import com.interlinedlist.android.feature.messages.ui.FakeMessagesRepository
 import com.interlinedlist.android.feature.messages.ui.sampleMessage
@@ -570,5 +571,114 @@ class MessagesFeedViewModelTest {
         advanceUntilIdle()
 
         assertThat(repo.metadataFetchedIds).containsExactly("m1")
+    }
+
+    // --- compose visibility ------------------------------------------------
+
+    @Test
+    fun `compose visibility defaults to the account preference`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            defaultVisibilityResult = ApiResult.Success(MessageVisibility.PRIVATE)
+        }
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.composeVisibility).isEqualTo(MessageVisibility.PRIVATE)
+    }
+
+    @Test
+    fun `compose visibility falls back to public when the preference cannot be read`() =
+        runTest(dispatcher) {
+            val repo = FakeMessagesRepository().apply {
+                defaultVisibilityResult = ApiResult.Failure(AppError.Network("offline"))
+            }
+            val vm = MessagesFeedViewModel(repo)
+            backgroundScope.launch { vm.uiState.collect {} }
+            advanceUntilIdle()
+
+            assertThat(vm.uiState.value.composeVisibility).isEqualTo(MessageVisibility.PUBLIC)
+            // A missing preference is not a feed-level error.
+            assertThat(vm.uiState.value.errorMessage).isNull()
+        }
+
+    @Test
+    fun `post sends the account default visibility when it is not overridden`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            defaultVisibilityResult = ApiResult.Success(MessageVisibility.PRIVATE)
+            createResult = ApiResult.Success(sampleMessage(id = "new"))
+        }
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.openCompose()
+        vm.onComposeTextChange("hello")
+        vm.post()
+        advanceUntilIdle()
+
+        assertThat(repo.lastCreate?.visibility).isEqualTo(MessageVisibility.PRIVATE)
+    }
+
+    @Test
+    fun `a per-message override wins over the account default`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            defaultVisibilityResult = ApiResult.Success(MessageVisibility.PRIVATE)
+            createResult = ApiResult.Success(sampleMessage(id = "new"))
+        }
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.openCompose()
+        vm.onComposeTextChange("shout it")
+        vm.onVisibilityChange(MessageVisibility.PUBLIC)
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.composeVisibility).isEqualTo(MessageVisibility.PUBLIC)
+
+        vm.post()
+        advanceUntilIdle()
+
+        assertThat(repo.lastCreate?.visibility).isEqualTo(MessageVisibility.PUBLIC)
+    }
+
+    @Test
+    fun `dismissing the composer drops the per-message override`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            defaultVisibilityResult = ApiResult.Success(MessageVisibility.PUBLIC)
+        }
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.openCompose()
+        vm.onVisibilityChange(MessageVisibility.PRIVATE)
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.composeVisibility).isEqualTo(MessageVisibility.PRIVATE)
+
+        vm.dismissCompose()
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.composeVisibility).isEqualTo(MessageVisibility.PUBLIC)
+    }
+
+    @Test
+    fun `a successful post resets the composer back to the account default`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            defaultVisibilityResult = ApiResult.Success(MessageVisibility.PUBLIC)
+            createResult = ApiResult.Success(sampleMessage(id = "new"))
+        }
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.openCompose()
+        vm.onComposeTextChange("private thought")
+        vm.onVisibilityChange(MessageVisibility.PRIVATE)
+        vm.post()
+        advanceUntilIdle()
+
+        assertThat(repo.lastCreate?.visibility).isEqualTo(MessageVisibility.PRIVATE)
+        assertThat(vm.uiState.value.composeVisibility).isEqualTo(MessageVisibility.PUBLIC)
     }
 }

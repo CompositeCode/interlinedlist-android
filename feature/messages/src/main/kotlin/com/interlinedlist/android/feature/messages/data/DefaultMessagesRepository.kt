@@ -13,11 +13,14 @@ import com.interlinedlist.android.feature.messages.data.remote.dto.PaginationDto
 import com.interlinedlist.android.feature.messages.data.remote.dto.ReportRequest
 import com.interlinedlist.android.feature.messages.data.remote.dto.UserReportRequest
 import com.interlinedlist.android.feature.messages.data.remote.dto.toDomain
+import com.interlinedlist.android.core.network.api.InterlinedListApi
+import com.interlinedlist.android.core.network.dto.toDomain
 import com.interlinedlist.android.core.network.error.safeApiCall
 import com.interlinedlist.android.feature.messages.domain.CreatedMessage
 import com.interlinedlist.android.feature.messages.domain.CrossPostSelection
 import com.interlinedlist.android.feature.messages.domain.LinkedNetwork
 import com.interlinedlist.android.feature.messages.domain.Message
+import com.interlinedlist.android.feature.messages.domain.MessageVisibility
 import com.interlinedlist.android.feature.messages.domain.ReportReason
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -31,6 +34,8 @@ import javax.inject.Inject
 
 class DefaultMessagesRepository @Inject constructor(
     private val api: MessagesApi,
+    /** The shared current-user endpoint; supplies the default-visibility preference. */
+    private val userApi: InterlinedListApi,
     private val messageDao: MessageDao,
     private val sessionStore: SessionStore,
     private val json: Json,
@@ -87,9 +92,12 @@ class DefaultMessagesRepository @Inject constructor(
         videoUrls: List<String>,
         scheduledAt: String?,
         crossPost: CrossPostSelection,
+        visibility: MessageVisibility,
     ): ApiResult<CreatedMessage> = withContext(dispatchers.io) {
         val request = CreateMessageRequest(
             content = content,
+            // Always explicit: the composer owns this choice, not the server default.
+            publiclyVisible = visibility.publiclyVisible,
             imageUrls = imageUrls.ifEmpty { null },
             videoUrls = videoUrls.ifEmpty { null },
             scheduledAt = scheduledAt,
@@ -117,6 +125,15 @@ class DefaultMessagesRepository @Inject constructor(
             is ApiResult.Failure -> result
         }
     }
+
+    override suspend fun getDefaultVisibility(): ApiResult<MessageVisibility> =
+        withContext(dispatchers.io) {
+            when (val result = safeCall { userApi.getCurrentUser().user }) {
+                is ApiResult.Success ->
+                    ApiResult.Success(MessageVisibility.of(result.data.toDomain().defaultPubliclyVisible))
+                is ApiResult.Failure -> result
+            }
+        }
 
     override suspend fun getLinkedNetworks(): ApiResult<List<LinkedNetwork>> = withContext(dispatchers.io) {
         when (val result = safeCall { api.getIdentities() }) {

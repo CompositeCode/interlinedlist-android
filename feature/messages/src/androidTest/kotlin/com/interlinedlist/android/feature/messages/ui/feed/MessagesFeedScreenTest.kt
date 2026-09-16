@@ -13,6 +13,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.interlinedlist.android.core.designsystem.theme.InterlinedListTheme
 import com.interlinedlist.android.feature.messages.domain.LinkedNetwork
 import com.interlinedlist.android.feature.messages.domain.Message
+import com.interlinedlist.android.feature.messages.domain.MessageVisibility
 import com.interlinedlist.android.feature.messages.ui.components.EditMessageSheetTags
 import com.interlinedlist.android.feature.messages.ui.components.MessageCardTags
 import com.interlinedlist.android.feature.messages.ui.components.MessageMediaTags
@@ -34,11 +35,12 @@ class MessagesFeedScreenTest {
         imageUrls: List<String> = emptyList(),
         mine: Boolean = false,
         editedAt: String? = null,
+        publiclyVisible: Boolean = true,
     ) = Message(
         id = id, content = body, authorId = "u1", authorUsername = "adron",
         authorDisplayName = "Adron", authorAvatarUrl = null, createdAt = null,
         digCount = 0, replyCount = 0, dugByMe = false, parentId = null, mine = mine,
-        imageUrls = imageUrls, editedAt = editedAt,
+        imageUrls = imageUrls, editedAt = editedAt, publiclyVisible = publiclyVisible,
     )
 
     /** Hosts the stateless feed with a tiny in-memory state holder. */
@@ -73,6 +75,7 @@ class MessagesFeedScreenTest {
                         }
                         state = state.copy(selectedNetworkIds = selected)
                     },
+                    onVisibilityChange = { state = state.copy(composeVisibility = it) },
                     onReport = onReport,
                     onEdit = onEdit,
                     onBlockUser = onBlockUser,
@@ -247,5 +250,55 @@ class MessagesFeedScreenTest {
             ),
         )
         composeRule.onNodeWithTag(MessagesFeedTags.DESTINATIONS_HINT).assertIsDisplayed()
+    }
+
+    @Test
+    fun privateMarker_isShown_onOwnPrivateMessage() {
+        setFeed(
+            MessagesFeedUiState(
+                messages = listOf(message("1", "only me", mine = true, publiclyVisible = false)),
+            ),
+        )
+        composeRule.onNodeWithTag(MessageCardTags.PRIVATE).assertIsDisplayed()
+        composeRule.onNodeWithText("Private").assertIsDisplayed()
+    }
+
+    @Test
+    fun privateMarker_isAbsent_onPublicMessage() {
+        setFeed(
+            MessagesFeedUiState(
+                messages = listOf(message("1", "for everyone", mine = true, publiclyVisible = true)),
+            ),
+        )
+        composeRule.onNodeWithTag(MessageCardTags.PRIVATE).assertDoesNotExist()
+    }
+
+    @Test
+    fun visibilityChips_areShown_inComposer_andReflectTheDefault() {
+        setFeed(
+            MessagesFeedUiState(
+                isComposeOpen = true,
+                composeText = "hi",
+                composeVisibility = MessageVisibility.PRIVATE,
+            ),
+        )
+
+        composeRule.onNodeWithTag(MessagesFeedTags.VISIBILITY_PUBLIC).assertIsDisplayed()
+        composeRule.onNodeWithTag(MessagesFeedTags.VISIBILITY_PRIVATE).assertIsSelected()
+    }
+
+    @Test
+    fun visibilityChips_overrideTheDefault_whenTapped() {
+        setFeed(
+            MessagesFeedUiState(
+                isComposeOpen = true,
+                composeText = "hi",
+                composeVisibility = MessageVisibility.PUBLIC,
+            ),
+        )
+
+        composeRule.onNodeWithTag(MessagesFeedTags.VISIBILITY_PRIVATE).performClick()
+        composeRule.onNodeWithTag(MessagesFeedTags.VISIBILITY_PRIVATE).assertIsSelected()
+        composeRule.onNodeWithTag(MessagesFeedTags.VISIBILITY_HINT).assertIsDisplayed()
     }
 }

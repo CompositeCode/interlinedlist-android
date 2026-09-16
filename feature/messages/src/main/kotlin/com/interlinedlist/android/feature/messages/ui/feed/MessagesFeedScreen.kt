@@ -25,6 +25,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Check
@@ -63,6 +65,7 @@ import com.interlinedlist.android.core.designsystem.theme.InterlinedListTheme
 import com.interlinedlist.android.feature.messages.domain.CrossPostStatus
 import com.interlinedlist.android.feature.messages.domain.LinkedNetwork
 import com.interlinedlist.android.feature.messages.domain.Message
+import com.interlinedlist.android.feature.messages.domain.MessageVisibility
 import com.interlinedlist.android.feature.messages.domain.ReportReason
 import com.interlinedlist.android.feature.messages.ui.components.EditMessageSheet
 import com.interlinedlist.android.feature.messages.ui.components.MessageCard
@@ -95,6 +98,11 @@ object MessagesFeedTags {
     const val DESTINATIONS_HINT = "messagesComposeDestinationsHint"
     /** Post-send banner listing per-network cross-post statuses. */
     const val CROSS_POST_STATUS = "messagesFeedCrossPostStatus"
+
+    /** Composer visibility chips and the private-selection hint. */
+    const val VISIBILITY_PUBLIC = "messagesComposeVisibilityPublic"
+    const val VISIBILITY_PRIVATE = "messagesComposeVisibilityPrivate"
+    const val VISIBILITY_HINT = "messagesComposeVisibilityHint"
 
     fun destinationTag(networkId: String): String = DESTINATION_PREFIX + networkId
 }
@@ -141,6 +149,7 @@ fun MessagesRoute(
         },
         onRemoveAttachment = viewModel::onRemoveAttachment,
         onScheduleChange = viewModel::onScheduleChange,
+        onVisibilityChange = viewModel::onVisibilityChange,
         onToggleNetwork = viewModel::onToggleNetwork,
         onDismissCrossPostStatuses = viewModel::dismissCrossPostStatuses,
         onDismissReport = viewModel::dismissReport,
@@ -179,6 +188,7 @@ fun MessagesFeedScreen(
     onAttachMedia: (Uri, Boolean) -> Unit = { _, _ -> },
     onRemoveAttachment: (PendingAttachment) -> Unit = {},
     onScheduleChange: (String?) -> Unit = {},
+    onVisibilityChange: (MessageVisibility) -> Unit = {},
     onToggleNetwork: (String) -> Unit = {},
     onDismissCrossPostStatuses: () -> Unit = {},
     onDismissReport: () -> Unit = {},
@@ -247,6 +257,7 @@ fun MessagesFeedScreen(
             onAttachMedia = onAttachMedia,
             onRemoveAttachment = onRemoveAttachment,
             onScheduleChange = onScheduleChange,
+            onVisibilityChange = onVisibilityChange,
             onToggleNetwork = onToggleNetwork,
         )
     }
@@ -458,6 +469,7 @@ private fun ComposeSheet(
     onAttachMedia: (Uri, Boolean) -> Unit,
     onRemoveAttachment: (PendingAttachment) -> Unit,
     onScheduleChange: (String?) -> Unit,
+    onVisibilityChange: (MessageVisibility) -> Unit,
     onToggleNetwork: (String) -> Unit,
 ) {
     val imagePicker = rememberLauncherForActivityResult(
@@ -517,6 +529,13 @@ private fun ComposeSheet(
                     onSchedule = onScheduleChange,
                 )
             }
+
+            Spacer(Modifier.height(12.dp))
+            VisibilityRow(
+                visibility = state.composeVisibility,
+                enabled = !state.isPosting,
+                onVisibilityChange = onVisibilityChange,
+            )
 
             Spacer(Modifier.height(12.dp))
             DestinationsRow(
@@ -584,6 +603,61 @@ private fun AttachmentRow(
                 trailingIcon = {
                     Icon(Icons.Filled.Close, contentDescription = "Remove", modifier = Modifier.size(16.dp))
                 },
+            )
+        }
+    }
+}
+
+/**
+ * The Public / Private control. Seeded from the account's default-visibility
+ * preference and overridable for this message only; the selection is always sent
+ * explicitly so the server default never silently decides. A short hint spells out
+ * what "Private" means, since the consequence (nobody else sees the post) is not
+ * recoverable from the chip alone.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun VisibilityRow(
+    visibility: MessageVisibility,
+    enabled: Boolean,
+    onVisibilityChange: (MessageVisibility) -> Unit,
+) {
+    Column {
+        Text(
+            text = "Visibility",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+                selected = visibility == MessageVisibility.PUBLIC,
+                onClick = { onVisibilityChange(MessageVisibility.PUBLIC) },
+                enabled = enabled,
+                label = { Text("Public") },
+                leadingIcon = {
+                    Icon(Icons.Filled.Public, contentDescription = null, modifier = Modifier.size(16.dp))
+                },
+                modifier = Modifier.testTag(MessagesFeedTags.VISIBILITY_PUBLIC),
+            )
+            FilterChip(
+                selected = visibility == MessageVisibility.PRIVATE,
+                onClick = { onVisibilityChange(MessageVisibility.PRIVATE) },
+                enabled = enabled,
+                label = { Text("Private") },
+                leadingIcon = {
+                    Icon(Icons.Filled.Lock, contentDescription = null, modifier = Modifier.size(16.dp))
+                },
+                modifier = Modifier.testTag(MessagesFeedTags.VISIBILITY_PRIVATE),
+            )
+        }
+        if (visibility == MessageVisibility.PRIVATE) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "Only you will see this message.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.testTag(MessagesFeedTags.VISIBILITY_HINT),
             )
         }
     }

@@ -3,8 +3,10 @@ package com.interlinedlist.android.feature.messages.data
 import com.google.common.truth.Truth.assertThat
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
+import com.interlinedlist.android.core.network.api.InterlinedListApi
 import com.interlinedlist.android.feature.messages.data.remote.MessagesApi
 import com.interlinedlist.android.feature.messages.domain.CrossPostSelection
+import com.interlinedlist.android.feature.messages.domain.MessageVisibility
 import com.interlinedlist.android.feature.messages.domain.NetworkProvider
 import com.interlinedlist.android.feature.messages.domain.ReportReason
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
@@ -35,6 +37,7 @@ class DefaultMessagesRepositoryTest {
 
     private lateinit var server: MockWebServer
     private lateinit var api: MessagesApi
+    private lateinit var userApi: InterlinedListApi
     private lateinit var dao: FakeMessageDao
 
     @Before
@@ -42,11 +45,12 @@ class DefaultMessagesRepositoryTest {
         server = MockWebServer()
         server.start()
         val contentType = "application/json".toMediaType()
-        api = Retrofit.Builder()
+        val retrofit = Retrofit.Builder()
             .baseUrl(server.url("/"))
             .addConverterFactory(json.asConverterFactory(contentType))
             .build()
-            .create(MessagesApi::class.java)
+        api = retrofit.create(MessagesApi::class.java)
+        userApi = retrofit.create(InterlinedListApi::class.java)
         dao = FakeMessageDao()
     }
 
@@ -55,6 +59,7 @@ class DefaultMessagesRepositoryTest {
 
     private fun repository(currentUserId: String? = "me") = DefaultMessagesRepository(
         api = api,
+        userApi = userApi,
         messageDao = dao,
         sessionStore = fakeSessionStore(currentUserId),
         json = json,
@@ -667,5 +672,94 @@ class DefaultMessagesRepositoryTest {
         assertThat(result).isInstanceOf(ApiResult.Success::class.java)
         val cached = repo.observeMessage("m1").first()
         assertThat(cached?.linkPreview?.title).isEqualTo("Example")
+    }
+
+    // --- visibility (publiclyVisible) --------------------------------------
+
+    @Test
+    fun `createMessage sends publiclyVisible true for a public post`() = runTest(dispatcher) {
+        enqueueJson(
+            201,
+            """{ "message": "Message created successfully",
+                "data": { "id": "v1", "content": "public post", "publiclyVisible": true } }""",
+        )
+        val repo = repository()
+
+        val result = repo.createMessage(content = "public post", visibility = MessageVisibility.PUBLIC)
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        assertThat((result as ApiResult.Success).data.message.publiclyVisible).isTrue()
+        val body = server.takeRequest().body.readUtf8()
+        assertThat(body).contains("\"publiclyVisible\":true")
+    }
+
+    @Test
+    fun `createMessage sends publiclyVisible false for a private post`() = runTest(dispatcher) {
+        enqueueJson(
+            201,
+            """{ "message": "Message created successfully",
+                "data": { "id": "v2", "content": "just for me", "publiclyVisible": false } }""",
+        )
+        val repo = repository()
+
+        val result = repo.createMessage(content = "just for me", visibility = MessageVisibility.PRIVATE)
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        val created = (result as ApiResult.Success).data.message
+        assertThat(created.publiclyVisible).isFalse()
+        assertThat(created.visibility).isEqualTo(MessageVisibility.PRIVATE)
+        val body = server.takeRequest().body.readUtf8()
+        assertThat(body).contains("\"publiclyVisible\":false")
+    }
+
+    @Test
+    fun `getDefaultVisibility reads defaultPubliclyVisible from the current user`() = runTest(dispatcher) {
+        enqueueJson(
+            200,
+            """{ "user": { "id": "me", "username": "me", "defaultPubliclyVisible": false } }""",
+        )
+        val repo = repository()
+
+        val result = repo.getDefaultVisibility()
+
+        assertThat((result as ApiResult.Success).data).isEqualTo(MessageVisibility.PRIVATE)
+        assertThat(server.takeRequest().path).contains("api/user")
+    }
+
+    @Test
+    fun `getDefaultVisibility falls back to public when the preference is absent`() = runTest(dispatcher) {
+        enqueueJson(200, """{ "user": { "id": "me", "username": "me" } }""")
+        val repo = repository()
+
+        val result = repo.getDefaultVisibility()
+
+        assertThat((result as ApiResult.Success).data).isEqualTo(MessageVisibility.PUBLIC)
+    }
+
+    @Test
+    fun `refreshFeed caches each message's visibility`() = runTest(dispatcher) {
+        enqueueJson(
+            200,
+            """
+            {
+              "data": [
+                { "id": "1", "content": "private one", "publiclyVisible": false,
+                  "author": { "id": "me", "username": "me" } },
+                { "id": "2", "content": "public one", "publiclyVisible": true,
+                  "author": { "id": "me", "username": "me" } }
+              ],
+              "pagination": { "hasMore": false }
+            }
+            """.trimIndent(),
+        )
+        val repo = repository()
+
+        repo.refreshFeed()
+
+        val cached = repo.observeFeed().first()
+        val private = cached.first { it.id == "1" }
+        assertThat(private.publiclyVisible).isFalse()
+        assertThat(private.showsPrivateBadge).isTrue()
+        assertThat(cached.first { it.id == "2" }.showsPrivateBadge).isFalse()
     }
 }

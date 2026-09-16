@@ -36,6 +36,8 @@ data class MessageEntity(
     val scheduledAt: String? = null,
     /** Last-edited instant; null when the message has not been edited. */
     val editedAt: String? = null,
+    /** False when the message is private (visible only to its author). */
+    val publiclyVisible: Boolean = true,
 )
 
 fun MessageEntity.toDomain(): Message = Message(
@@ -56,6 +58,7 @@ fun MessageEntity.toDomain(): Message = Message(
     linkPreview = linkPreview,
     scheduledAt = scheduledAt,
     editedAt = editedAt,
+    publiclyVisible = publiclyVisible,
 )
 
 fun Message.toEntity(feedOrder: Long): MessageEntity = MessageEntity(
@@ -77,4 +80,5 @@ fun Message.toEntity(feedOrder: Long): MessageEntity = MessageEntity(
     linkPreview = linkPreview,
     scheduledAt = scheduledAt,
     editedAt = editedAt,
+    publiclyVisible = publiclyVisible,
 )
