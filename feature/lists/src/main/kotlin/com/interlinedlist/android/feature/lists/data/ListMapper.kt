@@ -21,6 +21,7 @@ object ListMapper {
         folderId = dto.folderId,
         isPublic = dto.isPublic,
         updatedAt = dto.updatedAt,
+        parentId = dto.parentId ?: dto.parent?.id,
     )
 
     fun summaryToEntity(summary: ListSummary): CachedListEntity = CachedListEntity(
@@ -31,6 +32,7 @@ object ListMapper {
         folderId = summary.folderId,
         isPublic = summary.isPublic,
         updatedAt = summary.updatedAt,
+        parentId = summary.parentId,
     )
 
     fun summaryFromEntity(entity: CachedListEntity): ListSummary = ListSummary(
@@ -41,6 +43,7 @@ object ListMapper {
         folderId = entity.folderId,
         isPublic = entity.isPublic,
         updatedAt = entity.updatedAt,
+        parentId = entity.parentId,
     )
 
     fun folderFromDto(dto: FolderDto): ListFolder = ListFolder(

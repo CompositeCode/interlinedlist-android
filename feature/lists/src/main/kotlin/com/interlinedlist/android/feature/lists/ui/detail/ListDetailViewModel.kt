@@ -31,6 +31,8 @@ data class ListDetailUiState(
     val isRefreshing: Boolean = false,
     val refreshMessage: String? = null,
     val isEditingMetadata: Boolean = false,
+    /** Ancestors of this list, root first — empty for a root list. */
+    val breadcrumb: List<ListSummary> = emptyList(),
 ) {
     val title: String get() = summary?.title.orEmpty()
     val isEmpty: Boolean get() = rows.isEmpty() && !isLoading && errorMessage == null
@@ -60,13 +62,16 @@ class ListDetailViewModel @Inject constructor(
         _uiState.update { it.copy(isLoading = true, errorMessage = null, subscriptionRequired = false) }
         viewModelScope.launch {
             when (val result = repository.getListDetail(listId)) {
-                is ApiResult.Success -> _uiState.update {
-                    it.copy(
-                        summary = result.data.summary,
-                        schema = result.data.schema,
-                        rows = result.data.rows,
-                        isLoading = false,
-                    )
+                is ApiResult.Success -> {
+                    _uiState.update {
+                        it.copy(
+                            summary = result.data.summary,
+                            schema = result.data.schema,
+                            rows = result.data.rows,
+                            isLoading = false,
+                        )
+                    }
+                    loadBreadcrumb(result.data.summary)
                 }
                 is ApiResult.Failure -> _uiState.update {
                     it.copy(
@@ -176,14 +181,62 @@ class ListDetailViewModel @Inject constructor(
     private fun reload() {
         viewModelScope.launch {
             when (val result = repository.getListDetail(listId)) {
-                is ApiResult.Success -> _uiState.update {
-                    it.copy(
-                        summary = result.data.summary,
-                        schema = result.data.schema,
-                        rows = result.data.rows,
-                    )
+                is ApiResult.Success -> {
+                    _uiState.update {
+                        it.copy(
+                            summary = result.data.summary,
+                            schema = result.data.schema,
+                            rows = result.data.rows,
+                        )
+                    }
+                    loadBreadcrumb(result.data.summary)
                 }
                 is ApiResult.Failure -> Unit // Keep the existing rows; refresh already succeeded.
+            }
+        }
+    }
+
+    /**
+     * Walks the list's parent chain so the screen can show where it sits in the
+     * tree. Purely navigational: a failure leaves the breadcrumb empty rather than
+     * putting an error in front of a list that loaded fine.
+     */
+    private fun loadBreadcrumb(summary: ListSummary) {
+        val parentId = summary.parentId
+        if (parentId == null) {
+            _uiState.update { it.copy(breadcrumb = emptyList()) }
+            return
+        }
+        viewModelScope.launch {
+            when (val result = repository.getParentChain(parentId)) {
+                is ApiResult.Success -> _uiState.update { it.copy(breadcrumb = result.data) }
+                is ApiResult.Failure -> _uiState.update { it.copy(breadcrumb = emptyList()) }
+            }
+        }
+    }
+
+    /**
+     * Creates a new list nested under this one and hands its id back so the caller
+     * can open it. The child starts with the same placeholder title the index uses;
+     * it is renamed from the detail screen like any other list.
+     */
+    fun createChildList(onCreated: (String) -> Unit = {}) {
+        val parent = _uiState.value.summary ?: return
+        if (_uiState.value.isSaving) return
+        _uiState.update { it.copy(isSaving = true) }
+        viewModelScope.launch {
+            when (val result = repository.createList(title = NEW_CHILD_TITLE, parentId = parent.id)) {
+                is ApiResult.Success -> {
+                    _uiState.update { it.copy(isSaving = false) }
+                    onCreated(result.data.id)
+                }
+                is ApiResult.Failure -> _uiState.update {
+                    it.copy(
+                        isSaving = false,
+                        errorMessage = result.error.toUserMessage(),
+                        subscriptionRequired = result.error.isSubscriptionGate,
+                    )
+                }
             }
         }
     }
@@ -249,4 +302,8 @@ class ListDetailViewModel @Inject constructor(
     }
 
     fun clearError() = _uiState.update { it.copy(errorMessage = null) }
+
+    private companion object {
+        const val NEW_CHILD_TITLE = "New list"
+    }
 }

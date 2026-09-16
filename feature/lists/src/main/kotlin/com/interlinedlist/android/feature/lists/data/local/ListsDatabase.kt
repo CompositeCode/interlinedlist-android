@@ -10,7 +10,8 @@ import androidx.room.RoomDatabase
  */
 @Database(
     entities = [CachedListEntity::class],
-    version = 1,
+    // v2 adds CachedListEntity.parentId (list tree / breadcrumb).
+    version = 2,
     exportSchema = false,
 )
 abstract class ListsDatabase : RoomDatabase() {

@@ -9,6 +9,7 @@ import com.interlinedlist.android.feature.lists.domain.ListDetail
 import com.interlinedlist.android.feature.lists.domain.ListFolder
 import com.interlinedlist.android.feature.lists.domain.ListRow
 import com.interlinedlist.android.feature.lists.domain.ListSchema
+import com.interlinedlist.android.feature.lists.domain.ListSource
 import com.interlinedlist.android.feature.lists.domain.ListSummary
 import com.interlinedlist.android.feature.lists.domain.Paged
 import com.interlinedlist.android.feature.lists.domain.RefreshResult
@@ -21,6 +22,7 @@ import com.interlinedlist.android.feature.lists.domain.WatcherCandidate
 import com.interlinedlist.android.feature.lists.domain.WatcherRole
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.serialization.json.JsonObject
 
 /**
  * In-memory [ListsRepository] for ViewModel tests. The cache is a StateFlow so
@@ -36,6 +38,7 @@ class FakeListsRepository : ListsRepository {
     var loadMoreResult: ApiResult<Paged<ListSummary>> = refreshResult
     var searchResult: ApiResult<List<ListSummary>> = ApiResult.Success(emptyList())
     var createResult: ApiResult<ListSummary>? = null
+    var parentChainResult: ApiResult<List<ListSummary>> = ApiResult.Success(emptyList())
     var updateListResult: ApiResult<ListSummary>? = null
     var deleteResult: ApiResult<Unit> = ApiResult.Success(Unit)
     var detailResult: ApiResult<ListDetail>? = null
@@ -74,6 +77,14 @@ class FakeListsRepository : ListsRepository {
 
     var refreshCount = 0
     var loadMoreCount = 0
+    var parentChainCount = 0
+    var lastParentChainId: String? = null
+    var lastCreateParentId: String? = null
+    var lastCreateFolderId: String? = null
+    var lastCreateMessageId: String? = null
+    var lastCreateInitialRows: List<Map<String, String>>? = null
+    var lastCreateMetadata: JsonObject? = null
+    var lastCreateSource: ListSource? = null
     var updateListCount = 0
     var updateFolderCount = 0
     var deleteFolderCount = 0
@@ -113,10 +124,39 @@ class FakeListsRepository : ListsRepository {
 
     override suspend fun searchLists(query: String, limit: Int): ApiResult<List<ListSummary>> = searchResult
 
-    override suspend fun createList(title: String, description: String?, isPublic: Boolean): ApiResult<ListSummary> =
-        createResult ?: ApiResult.Success(
-            ListSummary("new", title, description, 0, null, isPublic, null),
+    override suspend fun createList(
+        title: String,
+        description: String?,
+        isPublic: Boolean,
+        parentId: String?,
+        folderId: String?,
+        messageId: String?,
+        initialRows: List<Map<String, String>>?,
+        metadata: JsonObject?,
+        source: ListSource?,
+    ): ApiResult<ListSummary> {
+        lastCreateParentId = parentId
+        lastCreateFolderId = folderId
+        lastCreateMessageId = messageId
+        lastCreateInitialRows = initialRows
+        lastCreateMetadata = metadata
+        lastCreateSource = source
+        return createResult ?: ApiResult.Success(
+            ListSummary("new", title, description, 0, folderId, isPublic, null, parentId),
         )
+    }
+
+    override suspend fun createListFromMessage(
+        messageId: String,
+        title: String,
+        description: String?,
+    ): ApiResult<ListSummary> = createList(title = title, description = description, messageId = messageId)
+
+    override suspend fun getParentChain(parentId: String): ApiResult<List<ListSummary>> {
+        parentChainCount++
+        lastParentChainId = parentId
+        return parentChainResult
+    }
 
     override suspend fun updateList(
         id: String,

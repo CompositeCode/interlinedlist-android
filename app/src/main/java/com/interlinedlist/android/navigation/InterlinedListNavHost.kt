@@ -351,6 +351,8 @@ private fun MainShell(
                     onEditSchema = { tabNav.navigate(Routes.listSchema(listId)) },
                     onOpenWatchers = { tabNav.navigate(Routes.listWatchers(listId)) },
                     onOpenShare = { tabNav.navigate(Routes.listShare(listId)) },
+                    // Breadcrumb hops and newly created child lists open a detail route.
+                    onOpenList = { id -> tabNav.navigate(Routes.listDetail(id)) },
                 )
             }
             composable(
