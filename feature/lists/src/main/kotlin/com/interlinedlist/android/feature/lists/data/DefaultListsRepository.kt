@@ -2,6 +2,7 @@ package com.interlinedlist.android.feature.lists.data
 
 import com.interlinedlist.android.core.common.dispatcher.DispatcherProvider
 import com.interlinedlist.android.core.common.result.ApiResult
+import com.interlinedlist.android.core.common.result.AppError
 import com.interlinedlist.android.core.common.result.map
 import com.interlinedlist.android.core.network.error.safeApiCall
 import com.interlinedlist.android.feature.lists.data.local.ListDao
@@ -11,12 +12,15 @@ import com.interlinedlist.android.feature.lists.data.remote.dto.CreateConnection
 import com.interlinedlist.android.feature.lists.data.remote.dto.CreateFolderRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.CreateListRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.CreateShareLinkRequest
+import com.interlinedlist.android.feature.lists.data.remote.dto.CreateViewRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.ListDto
+import com.interlinedlist.android.feature.lists.data.remote.dto.ListViewEnvelope
 import com.interlinedlist.android.feature.lists.data.remote.dto.RowDto
 import com.interlinedlist.android.feature.lists.data.remote.dto.RowWriteRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.UpdateFolderRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.UpdateListRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.UpdateSchemaRequest
+import com.interlinedlist.android.feature.lists.data.remote.dto.UpdateViewRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.UpdateWatcherRoleRequest
 import com.interlinedlist.android.feature.lists.domain.Contributor
 import com.interlinedlist.android.feature.lists.domain.ListConnection
@@ -26,6 +30,9 @@ import com.interlinedlist.android.feature.lists.domain.ListRow
 import com.interlinedlist.android.feature.lists.domain.ListSchema
 import com.interlinedlist.android.feature.lists.domain.ListSource
 import com.interlinedlist.android.feature.lists.domain.ListSummary
+import com.interlinedlist.android.feature.lists.domain.ListView
+import com.interlinedlist.android.feature.lists.domain.ListViewConfig
+import com.interlinedlist.android.feature.lists.domain.ListViewScope
 import com.interlinedlist.android.feature.lists.domain.Paged
 import com.interlinedlist.android.feature.lists.domain.RefreshResult
 import com.interlinedlist.android.feature.lists.domain.ShareLink
@@ -420,6 +427,79 @@ class DefaultListsRepository @Inject constructor(
             safeApiCall(json) { api.deleteConnection(id) }.map { }
         }
 
+    override suspend fun getViews(listId: String): ApiResult<List<ListView>> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.getViews(listId) }
+                .map { response -> response.items.map { ListViewMapper.fromDto(it, listId) } }
+        }
+
+    override suspend fun createView(
+        listId: String,
+        name: String,
+        scope: ListViewScope?,
+        config: ListViewConfig?,
+        isDefault: Boolean,
+    ): ApiResult<ListView> {
+        val trimmedName = name.trim()
+        if (trimmedName.isEmpty()) return ApiResult.Failure(AppError.Unknown(MISSING_VIEW_NAME))
+        // The API 400s on a missing/unknown scope, so don't spend a request on one.
+        val resolvedScope = scope ?: return ApiResult.Failure(AppError.Unknown(MISSING_VIEW_SCOPE))
+        return withContext(dispatchers.io) {
+            val body = CreateViewRequest(
+                name = trimmedName,
+                scope = resolvedScope.apiValue,
+                config = config?.raw,
+                isDefault = isDefault.takeIf { it },
+            )
+            safeApiCall(json) { api.createView(listId, body) }.requireView(listId)
+        }
+    }
+
+    override suspend fun updateView(
+        listId: String,
+        viewId: String,
+        name: String?,
+        config: ListViewConfig?,
+        isDefault: Boolean?,
+    ): ApiResult<ListView> {
+        val trimmedName = name?.trim()
+        if (trimmedName != null && trimmedName.isEmpty()) {
+            return ApiResult.Failure(AppError.Unknown(MISSING_VIEW_NAME))
+        }
+        return withContext(dispatchers.io) {
+            val body = UpdateViewRequest(
+                name = trimmedName,
+                config = config?.raw,
+                isDefault = isDefault,
+            )
+            safeApiCall(json) { api.updateView(listId, viewId, body) }.requireView(listId)
+        }
+    }
+
+    override suspend fun forkView(listId: String, viewId: String): ApiResult<ListView> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.forkView(listId, viewId) }.requireView(listId)
+        }
+
+    override suspend fun deleteView(listId: String, viewId: String): ApiResult<Unit> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.deleteView(listId, viewId) }.map { }
+        }
+
+    /**
+     * Unwraps a create/update/fork response into the server's own copy of the
+     * view. That copy is authoritative: unrecognised `config` values are dropped
+     * server-side without complaint, so callers must render what came back
+     * rather than what they sent.
+     */
+    private fun ApiResult<ListViewEnvelope>.requireView(listId: String): ApiResult<ListView> =
+        when (this) {
+            is ApiResult.Success -> data.viewOrSelf
+                ?.let { ApiResult.Success(ListViewMapper.fromDto(it, listId)) }
+                ?: ApiResult.Failure(AppError.Unknown(VIEW_NOT_RETURNED))
+            is ApiResult.Failure -> this
+        }
+
     override suspend fun getShareLinks(listId: String): ApiResult<List<ShareLink>> =
         withContext(dispatchers.io) {
             safeApiCall(json) { api.getShareLinks(listId) }
@@ -474,6 +554,10 @@ class DefaultListsRepository @Inject constructor(
     private companion object {
         /** Safety net for a breadcrumb walk: deep nesting is not worth the requests. */
         const val MAX_PARENT_CHAIN = 10
+
+        const val MISSING_VIEW_NAME = "A view needs a name."
+        const val MISSING_VIEW_SCOPE = "Choose whether the view is shared or personal."
+        const val VIEW_NOT_RETURNED = "The view was saved but the server did not return it."
     }
 }
 

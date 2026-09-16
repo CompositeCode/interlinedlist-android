@@ -7,10 +7,14 @@ import com.interlinedlist.android.feature.lists.data.remote.dto.ContributorsResp
 import com.interlinedlist.android.feature.lists.data.remote.dto.CreateConnectionRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.CreateFolderRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.CreateListRequest
+import com.interlinedlist.android.feature.lists.data.remote.dto.CreateViewRequest
+import com.interlinedlist.android.feature.lists.data.remote.dto.DeleteViewResponse
 import com.interlinedlist.android.feature.lists.data.remote.dto.FolderDto
 import com.interlinedlist.android.feature.lists.data.remote.dto.FolderEnvelope
 import com.interlinedlist.android.feature.lists.data.remote.dto.FoldersResponse
 import com.interlinedlist.android.feature.lists.data.remote.dto.ListEnvelope
+import com.interlinedlist.android.feature.lists.data.remote.dto.ListViewEnvelope
+import com.interlinedlist.android.feature.lists.data.remote.dto.ListViewsResponse
 import com.interlinedlist.android.feature.lists.data.remote.dto.ListsResponse
 import com.interlinedlist.android.feature.lists.data.remote.dto.RefreshResultDto
 import com.interlinedlist.android.feature.lists.data.remote.dto.RowEnvelope
@@ -24,6 +28,7 @@ import com.interlinedlist.android.feature.lists.data.remote.dto.SharedListRespon
 import com.interlinedlist.android.feature.lists.data.remote.dto.UpdateFolderRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.UpdateListRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.UpdateSchemaRequest
+import com.interlinedlist.android.feature.lists.data.remote.dto.UpdateViewRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.UpdateWatcherRoleRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.WatchingResponse
 import com.interlinedlist.android.feature.lists.data.remote.dto.WatcherUsersResponse
@@ -172,6 +177,43 @@ interface ListsApi {
         @Path("id") id: String,
         @Path("rowId") rowId: String,
     )
+
+    // --- Saved views -------------------------------------------------------
+
+    /** Every shared view on the list plus the caller's own personal views. */
+    @GET("api/lists/{id}/views")
+    suspend fun getViews(@Path("id") id: String): ListViewsResponse
+
+    /** Creates a view; `name` and `scope` are both required by the server. */
+    @POST("api/lists/{id}/views")
+    suspend fun createView(
+        @Path("id") id: String,
+        @Body body: CreateViewRequest,
+    ): ListViewEnvelope
+
+    /** Updates a view (rename / re-configure / set as default). */
+    @PUT("api/lists/{id}/views/{viewId}")
+    suspend fun updateView(
+        @Path("id") id: String,
+        @Path("viewId") viewId: String,
+        @Body body: UpdateViewRequest,
+    ): ListViewEnvelope
+
+    /**
+     * Forks a view into a personal copy named `"<name> (copy)"` — the escape
+     * hatch when somebody else's shared view does not suit. Takes no body.
+     */
+    @POST("api/lists/{id}/views/{viewId}")
+    suspend fun forkView(
+        @Path("id") id: String,
+        @Path("viewId") viewId: String,
+    ): ListViewEnvelope
+
+    @DELETE("api/lists/{id}/views/{viewId}")
+    suspend fun deleteView(
+        @Path("id") id: String,
+        @Path("viewId") viewId: String,
+    ): DeleteViewResponse
 
     @GET("api/folders")
     suspend fun getFolders(): FoldersResponse

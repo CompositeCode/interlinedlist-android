@@ -58,6 +58,7 @@ import com.interlinedlist.android.feature.lists.domain.ListRow
 import com.interlinedlist.android.feature.lists.domain.ListSchema
 import com.interlinedlist.android.feature.lists.domain.ListSummary
 import com.interlinedlist.android.feature.lists.domain.SchemaField
+import com.interlinedlist.android.feature.lists.ui.views.ListViewSwitcher
 
 /** Stable test tags for the list detail screen. */
 object ListDetailTestTags {
@@ -131,6 +132,9 @@ fun ListDetailRoute(
         onOpenList = onOpenList,
         onNewChildList = { viewModel.createChildList(onOpenList) },
         snackbarHostState = snackbarHostState,
+        // Saved views have their own ViewModel on the same nav entry, so the
+        // detail screen stays unaware of them beyond giving them a slot.
+        viewSwitcher = { ListViewSwitcher() },
         modifier = modifier,
     )
 
@@ -179,7 +183,12 @@ private sealed interface EditorTarget {
     data class Existing(val row: ListRow) : EditorTarget
 }
 
-/** Stateless list detail — schema-driven table with loading / empty / error states. */
+/**
+ * Stateless list detail — schema-driven table with loading / empty / error states.
+ *
+ * [viewSwitcher] is a slot for the saved-view switcher, which owns its own state;
+ * keeping it a slot means this screen (and its tests) stay independent of it.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ListDetailScreen(
@@ -198,6 +207,7 @@ fun ListDetailScreen(
     onOpenList: (String) -> Unit = {},
     onNewChildList: () -> Unit = {},
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
+    viewSwitcher: @Composable () -> Unit = {},
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     Scaffold(
@@ -289,6 +299,7 @@ fun ListDetailScreen(
 
             else -> Column(Modifier.padding(padding)) {
                 Breadcrumb(ancestors = state.breadcrumb, onOpenList = onOpenList)
+                viewSwitcher()
                 if (!state.summary?.description.isNullOrBlank()) {
                     Text(
                         text = state.summary!!.description!!,
