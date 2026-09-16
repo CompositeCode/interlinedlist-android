@@ -32,6 +32,10 @@ include(":core:designsystem")
 include(":core:network")
 include(":core:database")
 include(":core:datastore")
+// Shared cross-feature capability: "Create from…" (POST /api/materialize) is
+// invoked from :feature:messages, :feature:lists and :feature:documents, so it
+// cannot live inside any one of them.
+include(":core:materialize")
 
 // Feature modules (added per roadmap phase)
 include(":feature:auth")
