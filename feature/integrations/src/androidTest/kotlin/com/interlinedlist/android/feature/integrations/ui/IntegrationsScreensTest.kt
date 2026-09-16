@@ -1,6 +1,7 @@
 package com.interlinedlist.android.feature.integrations.ui
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
@@ -96,6 +97,121 @@ class IntegrationsScreensTest {
             .assertIsDisplayed()
         composeRule.onNodeWithTag(ConnectedAccountsTestTags.status(ConnectedAccount.Provider.BLUESKY))
             .assertIsDisplayed()
+    }
+
+    @Test
+    fun accounts_staleConnection_showsBadgeAndActions() {
+        val stale = ConnectedAccount(
+            provider = ConnectedAccount.Provider.LINKEDIN,
+            isConnected = true,
+            handle = "Adron Hall",
+            identityProvider = "linkedin",
+            connectedAt = "2020-01-01T00:00:00Z",
+            lastVerifiedAt = "2020-02-01T00:00:00Z",
+        )
+        composeRule.setContent {
+            InterlinedListTheme {
+                ConnectedAccountsScreen(
+                    state = ConnectedAccountsUiState(isLoading = false, accounts = listOf(stale)),
+                    onBack = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag(ConnectedAccountsTestTags.badge("linkedin")).assertIsDisplayed()
+        composeRule.onNodeWithTag(ConnectedAccountsTestTags.health("linkedin")).assertIsDisplayed()
+        composeRule.onNodeWithTag(ConnectedAccountsTestTags.verify("linkedin")).assertIsDisplayed()
+        composeRule.onNodeWithTag(ConnectedAccountsTestTags.unlink("linkedin")).assertIsDisplayed()
+    }
+
+    @Test
+    fun accounts_unlink_asksForConfirmationStatingTheConsequence() {
+        val linked = ConnectedAccount(
+            provider = ConnectedAccount.Provider.LINKEDIN,
+            isConnected = true,
+            handle = "Adron Hall",
+            identityProvider = "linkedin",
+            lastVerifiedAt = "2020-02-01T00:00:00Z",
+        )
+        var requested: ConnectedAccount? = null
+        var confirmed = false
+        composeRule.setContent {
+            InterlinedListTheme {
+                ConnectedAccountsScreen(
+                    state = ConnectedAccountsUiState(
+                        isLoading = false,
+                        accounts = listOf(linked),
+                        unlinkCandidate = null,
+                    ),
+                    onBack = {},
+                    onRequestUnlink = { requested = it },
+                    onConfirmUnlink = { confirmed = true },
+                )
+            }
+        }
+
+        // Tapping Unlink only asks; nothing is unlinked yet.
+        composeRule.onNodeWithTag(ConnectedAccountsTestTags.unlink("linkedin")).performClick()
+        assert(requested == linked)
+        assert(!confirmed)
+        composeRule.onNodeWithTag(ConnectedAccountsTestTags.UNLINK_DIALOG).assertDoesNotExist()
+    }
+
+    @Test
+    fun accounts_unlinkDialog_statesTheCrossPostConsequenceAndConfirms() {
+        val linked = ConnectedAccount(
+            provider = ConnectedAccount.Provider.LINKEDIN,
+            isConnected = true,
+            identityProvider = "linkedin",
+            lastVerifiedAt = "2020-02-01T00:00:00Z",
+        )
+        var confirmed = false
+        composeRule.setContent {
+            InterlinedListTheme {
+                ConnectedAccountsScreen(
+                    state = ConnectedAccountsUiState(
+                        isLoading = false,
+                        accounts = listOf(linked),
+                        unlinkCandidate = linked,
+                    ),
+                    onBack = {},
+                    onConfirmUnlink = { confirmed = true },
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Unlink LinkedIn?").assertIsDisplayed()
+        composeRule.onNodeWithText(
+            "This stops cross-posting to LinkedIn.",
+            substring = true,
+        ).assertIsDisplayed()
+
+        composeRule.onNodeWithTag(ConnectedAccountsTestTags.UNLINK_CONFIRM).performClick()
+        assert(confirmed)
+    }
+
+    @Test
+    fun accounts_verify_invokesTheAction() {
+        val linked = ConnectedAccount(
+            provider = ConnectedAccount.Provider.BLUESKY,
+            isConnected = true,
+            identityProvider = "bluesky",
+            lastVerifiedAt = "2020-02-01T00:00:00Z",
+        )
+        var verified: ConnectedAccount? = null
+        composeRule.setContent {
+            InterlinedListTheme {
+                ConnectedAccountsScreen(
+                    state = ConnectedAccountsUiState(isLoading = false, accounts = listOf(linked)),
+                    onBack = {},
+                    onVerify = { verified = it },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag(ConnectedAccountsTestTags.verify("bluesky")).performClick()
+
+        assert(verified == linked)
     }
 
     @Test

@@ -7,9 +7,12 @@ import com.interlinedlist.android.feature.integrations.data.remote.dto.GitHubAss
 import com.interlinedlist.android.feature.integrations.data.remote.dto.GitHubIssueDto
 import com.interlinedlist.android.feature.integrations.data.remote.dto.GitHubLabelDto
 import com.interlinedlist.android.feature.integrations.data.remote.dto.GitHubRepoDto
+import com.interlinedlist.android.feature.integrations.data.remote.dto.IdentitiesResponse
 import com.interlinedlist.android.feature.integrations.data.remote.dto.LimitsDto
+import com.interlinedlist.android.feature.integrations.data.remote.dto.VerifyIdentityRequest
 import okhttp3.ResponseBody
 import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.Path
@@ -41,6 +44,33 @@ interface IntegrationsApi {
     /** Plan limits/usage for the current user. */
     @GET("api/limits")
     suspend fun getLimits(): LimitsDto
+
+    // --- Linked identities ---
+    //
+    // Linking is a browser OAuth redirect and stays on the web; these three are the
+    // parts a native client can do. Both mutations key on the identity's raw
+    // `provider` string — DELETE takes it as a QUERY PARAMETER (confirmed in the
+    // OpenAPI spec: `provider`, `in: query`) while verify takes it in a JSON BODY
+    // (its requestBody schema has a single `provider` property).
+
+    /** The current user's linked social identities, with connectedAt/lastVerifiedAt. */
+    @GET("api/user/identities")
+    suspend fun getIdentities(): IdentitiesResponse
+
+    /**
+     * Unlinks one identity. Returns a raw [ResponseBody] because the success body is
+     * unspecified — the caller re-reads the list rather than trusting it.
+     */
+    @DELETE("api/user/identities")
+    suspend fun unlinkIdentity(@Query("provider") provider: String): ResponseBody
+
+    /**
+     * Re-checks that a linked identity's authorization still works, refreshing its
+     * `lastVerifiedAt`. The response body is unspecified (201 + bare `object`), so it
+     * is read as a raw [ResponseBody] and discarded; the refreshed list is the truth.
+     */
+    @POST("api/user/identities/verify")
+    suspend fun verifyIdentity(@Body request: VerifyIdentityRequest): ResponseBody
 
     // --- GitHub ---
     //

@@ -4,12 +4,14 @@ import com.interlinedlist.android.core.common.dispatcher.DispatcherProvider
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.map
 import com.interlinedlist.android.core.network.error.safeApiCall
+import com.interlinedlist.android.feature.integrations.data.mapper.toAccounts
 import com.interlinedlist.android.feature.integrations.data.mapper.toDomain
 import com.interlinedlist.android.feature.integrations.data.mapper.toDomainOrNull
 import com.interlinedlist.android.feature.integrations.data.remote.IntegrationsApi
 import com.interlinedlist.android.feature.integrations.data.remote.dto.CreateCommentRequest
 import com.interlinedlist.android.feature.integrations.data.remote.dto.CreateIssueRequest
 import com.interlinedlist.android.feature.integrations.data.remote.dto.GitHubIssueDto
+import com.interlinedlist.android.feature.integrations.data.remote.dto.VerifyIdentityRequest
 import com.interlinedlist.android.feature.integrations.domain.ConnectedAccount
 import com.interlinedlist.android.feature.integrations.domain.ExportType
 import com.interlinedlist.android.feature.integrations.domain.GitHubAssignee
@@ -46,21 +48,35 @@ class DefaultIntegrationsRepository @Inject constructor(
 
     override suspend fun getConnectedAccounts(): List<ConnectedAccount> =
         withContext(dispatchers.io) {
+            // Identities come first: they carry the unlink/verify key and the
+            // connected/verified timestamps behind the health badge. If that read
+            // fails the screen degrades to status-only rows rather than going blank.
+            val identities = when (val result = safeApiCall(json) { api.getIdentities() }) {
+                is ApiResult.Success -> result.data.identitiesOrEmpty
+                is ApiResult.Failure -> emptyList()
+            }
             // Statuses are independent; one provider failing shouldn't hide the
             // rest, so a failed lookup is treated as "not connected".
-            ConnectedAccount.Provider.entries.map { provider ->
-                when (val result = safeApiCall(json) { api.getConnectionStatus(provider.statusPath) }) {
-                    is ApiResult.Success -> ConnectedAccount(
-                        provider = provider,
-                        isConnected = result.data.isConnected,
-                        handle = result.data.bestHandle,
-                    )
-                    is ApiResult.Failure -> ConnectedAccount(
-                        provider = provider,
-                        isConnected = false,
-                    )
+            ConnectedAccount.Provider.entries.flatMap { provider ->
+                val status = when (
+                    val result = safeApiCall(json) { api.getConnectionStatus(provider.statusPath) }
+                ) {
+                    is ApiResult.Success -> result.data
+                    is ApiResult.Failure -> null
                 }
+                provider.toAccounts(status, identities)
             }
+        }
+
+    override suspend fun unlinkIdentity(identityProvider: String): ApiResult<Unit> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.unlinkIdentity(identityProvider) }.map { it.close() }
+        }
+
+    override suspend fun verifyIdentity(identityProvider: String): ApiResult<Unit> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { api.verifyIdentity(VerifyIdentityRequest(identityProvider)) }
+                .map { it.close() }
         }
 
     override suspend fun getLimits(): ApiResult<PlanLimits> =
