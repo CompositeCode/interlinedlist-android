@@ -8,6 +8,11 @@ import com.interlinedlist.android.feature.documents.data.DocumentsRepository
 import com.interlinedlist.android.feature.documents.domain.Collaborator
 import com.interlinedlist.android.feature.documents.domain.CollaboratorCandidate
 import com.interlinedlist.android.feature.documents.domain.CollaboratorRole
+import com.interlinedlist.android.feature.documents.domain.DocumentInvite
+import com.interlinedlist.android.feature.documents.domain.InviteEmail
+import com.interlinedlist.android.feature.documents.domain.InviteRole
+import com.interlinedlist.android.feature.documents.ui.common.isSubscriptionGate
+import com.interlinedlist.android.feature.documents.ui.common.toInviteMessage
 import com.interlinedlist.android.feature.documents.ui.common.toUserMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -29,8 +34,33 @@ data class DocumentCollaboratorsUiState(
     val isLoading: Boolean = true,
     val isSearching: Boolean = false,
     val errorMessage: String? = null,
+    /** The "Invite by email" section, which sits alongside the collaborator roles. */
+    val invites: DocumentInvitesUiState = DocumentInvitesUiState(),
 ) {
     val isEmpty: Boolean get() = collaborators.isEmpty() && !isLoading && errorMessage == null
+}
+
+/**
+ * State of the email-invite section: the entry form plus the pending-invite list.
+ * Kept as its own type so the section stays self-contained (and so the identical
+ * list-invite section can mirror it).
+ */
+data class DocumentInvitesUiState(
+    val invites: List<DocumentInvite> = emptyList(),
+    val email: String = "",
+    val role: InviteRole = InviteRole.VIEWER,
+    val isLoading: Boolean = true,
+    val isSending: Boolean = false,
+    /** Inline validation message for the address field. */
+    val emailError: String? = null,
+    val errorMessage: String? = null,
+    /** True when sending was refused because the account is not a subscriber. */
+    val subscriptionRequired: Boolean = false,
+) {
+    /** True when the entered address is worth sending — drives the Send control. */
+    val canSend: Boolean get() = !isSending && InviteEmail.isValid(email)
+
+    val isEmpty: Boolean get() = invites.isEmpty() && !isLoading
 }
 
 /**
@@ -53,6 +83,7 @@ class DocumentCollaboratorsViewModel @Inject constructor(
 
     init {
         load()
+        loadInvites()
     }
 
     fun load() {
@@ -158,4 +189,83 @@ class DocumentCollaboratorsViewModel @Inject constructor(
     }
 
     fun clearError() = _uiState.update { it.copy(errorMessage = null) }
+
+    // --- Email invites -----------------------------------------------------
+
+    /** Loads the pending invites. Free for any owner, so it is never gated. */
+    fun loadInvites() {
+        updateInvites { it.copy(isLoading = true, errorMessage = null) }
+        viewModelScope.launch {
+            when (val result = repository.getInvites(documentId)) {
+                is ApiResult.Success -> updateInvites {
+                    it.copy(invites = result.data, isLoading = false)
+                }
+                is ApiResult.Failure -> updateInvites {
+                    it.copy(isLoading = false, errorMessage = result.error.toInviteMessage())
+                }
+            }
+        }
+    }
+
+    fun onInviteEmailChange(email: String) =
+        updateInvites { it.copy(email = email, emailError = null, errorMessage = null) }
+
+    fun selectInviteRole(role: InviteRole) = updateInvites { it.copy(role = role) }
+
+    /**
+     * Sends the invite. An address that is not syntactically valid is rejected here,
+     * so no request is made; everything else (ownership, the subscriber gate, an
+     * address that cannot be invited) is reported by the server and surfaced as-is.
+     */
+    fun sendInvite() {
+        val form = _uiState.value.invites
+        if (form.isSending) return
+        if (!InviteEmail.isValid(form.email)) {
+            updateInvites { it.copy(emailError = InviteEmail.INVALID_MESSAGE) }
+            return
+        }
+        updateInvites {
+            it.copy(isSending = true, emailError = null, errorMessage = null, subscriptionRequired = false)
+        }
+        viewModelScope.launch {
+            when (val result = repository.sendInvite(documentId, form.email, form.role)) {
+                is ApiResult.Success -> updateInvites { state ->
+                    // Re-inviting an address is idempotent server-side (a fresh token
+                    // replaces the old one), so replace any row for the same address.
+                    val sent = result.data
+                    state.copy(
+                        invites = state.invites.filterNot { it.email.equals(sent.email, ignoreCase = true) } + sent,
+                        email = "",
+                        isSending = false,
+                    )
+                }
+                is ApiResult.Failure -> updateInvites {
+                    it.copy(
+                        isSending = false,
+                        errorMessage = result.error.toInviteMessage(),
+                        subscriptionRequired = result.error.isSubscriptionGate,
+                    )
+                }
+            }
+        }
+    }
+
+    /** Optimistically drops the invite row; restores it if the revoke fails. */
+    fun revokeInvite(token: String) {
+        val previous = _uiState.value.invites.invites
+        updateInvites { state ->
+            state.copy(invites = state.invites.filterNot { it.token == token }, errorMessage = null)
+        }
+        viewModelScope.launch {
+            when (val result = repository.revokeInvite(documentId, token)) {
+                is ApiResult.Success -> Unit
+                is ApiResult.Failure -> updateInvites {
+                    it.copy(invites = previous, errorMessage = result.error.toInviteMessage())
+                }
+            }
+        }
+    }
+
+    private fun updateInvites(transform: (DocumentInvitesUiState) -> DocumentInvitesUiState) =
+        _uiState.update { it.copy(invites = transform(it.invites)) }
 }

@@ -9,11 +9,14 @@ import com.interlinedlist.android.feature.documents.domain.CollaboratorCandidate
 import com.interlinedlist.android.feature.documents.domain.CollaboratorRole
 import com.interlinedlist.android.feature.documents.domain.Document
 import com.interlinedlist.android.feature.documents.domain.DocumentFolder
+import com.interlinedlist.android.feature.documents.domain.DocumentInvite
 import com.interlinedlist.android.feature.documents.domain.DocumentTemplate
 import com.interlinedlist.android.feature.documents.domain.FolderContents
 import com.interlinedlist.android.feature.documents.domain.FolderNode
 import com.interlinedlist.android.feature.documents.domain.FolderSummary
 import com.interlinedlist.android.feature.documents.domain.FolderTree
+import com.interlinedlist.android.feature.documents.domain.InviteEmail
+import com.interlinedlist.android.feature.documents.domain.InviteRole
 import com.interlinedlist.android.feature.documents.domain.Presence
 import com.interlinedlist.android.feature.documents.domain.ShareLink
 import com.interlinedlist.android.feature.documents.domain.ShareRole
@@ -65,6 +68,9 @@ class FakeDocumentsRepository : DocumentsRepository {
     var inviteResult: ApiResult<Collaborator>? = null
     var updateRoleResult: ApiResult<Unit> = ApiResult.Success(Unit)
     var removeCollaboratorResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var invitesResult: ApiResult<List<DocumentInvite>> = ApiResult.Success(emptyList())
+    var sendInviteResult: ApiResult<DocumentInvite>? = null
+    var revokeInviteResult: ApiResult<Unit> = ApiResult.Success(Unit)
     var sendPresenceResult: ApiResult<List<Presence>> = ApiResult.Success(emptyList())
     var leavePresenceResult: ApiResult<Unit> = ApiResult.Success(Unit)
 
@@ -73,11 +79,16 @@ class FakeDocumentsRepository : DocumentsRepository {
     var lastRoleChange: RoleChange? = null
     var lastRemovedUserId: String? = null
     var lastSearchUsersQuery: String? = null
+    var sendInviteCount = 0
+    var revokeInviteCount = 0
+    var lastSentInvite: EmailInvite? = null
+    var lastRevokedInviteToken: String? = null
     var sendPresenceCount = 0
     var leavePresenceCount = 0
 
     data class Invite(val documentId: String, val userId: String, val role: CollaboratorRole)
     data class RoleChange(val documentId: String, val userId: String, val role: CollaboratorRole)
+    data class EmailInvite(val documentId: String, val email: String, val role: InviteRole)
 
     var refreshTreeCount = 0
     var seedTemplatesCount = 0
@@ -288,6 +299,27 @@ class FakeDocumentsRepository : DocumentsRepository {
     override suspend fun removeCollaborator(documentId: String, userId: String): ApiResult<Unit> {
         lastRemovedUserId = userId
         return removeCollaboratorResult
+    }
+
+    override suspend fun getInvites(documentId: String): ApiResult<List<DocumentInvite>> = invitesResult
+
+    override suspend fun sendInvite(
+        documentId: String,
+        email: String,
+        role: InviteRole,
+    ): ApiResult<DocumentInvite> {
+        sendInviteCount++
+        val address = InviteEmail.normalize(email)
+        lastSentInvite = EmailInvite(documentId, address, role)
+        return sendInviteResult ?: ApiResult.Success(
+            DocumentInvite(address, "token-$address", role, null, null, false, null, null),
+        )
+    }
+
+    override suspend fun revokeInvite(documentId: String, token: String): ApiResult<Unit> {
+        revokeInviteCount++
+        lastRevokedInviteToken = token
+        return revokeInviteResult
     }
 
     override suspend fun sendPresence(documentId: String): ApiResult<List<Presence>> {

@@ -6,8 +6,11 @@ import com.interlinedlist.android.feature.documents.data.remote.dto.Collaborator
 import com.interlinedlist.android.feature.documents.data.remote.dto.CreateDocumentRequest
 import com.interlinedlist.android.feature.documents.data.remote.dto.CreateFolderDocumentRequest
 import com.interlinedlist.android.feature.documents.data.remote.dto.CreateFolderRequest
+import com.interlinedlist.android.feature.documents.data.remote.dto.CreateInviteRequest
 import com.interlinedlist.android.feature.documents.data.remote.dto.CreateShareLinkRequest
 import com.interlinedlist.android.feature.documents.data.remote.dto.DocumentListResponse
+import com.interlinedlist.android.feature.documents.data.remote.dto.DocumentInviteEnvelope
+import com.interlinedlist.android.feature.documents.data.remote.dto.DocumentInvitesResponse
 import com.interlinedlist.android.feature.documents.data.remote.dto.DocumentResponse
 import com.interlinedlist.android.feature.documents.data.remote.dto.FolderListResponse
 import com.interlinedlist.android.feature.documents.data.remote.dto.FolderResponse
@@ -164,6 +167,29 @@ interface DocumentsApi {
     /** Claims edit/admin access to a shared document as the logged-in user. */
     @POST("api/documents/shared/{token}")
     suspend fun claimSharedDocument(@Path("token") token: String)
+
+    // --- Email invites -----------------------------------------------------
+
+    /** Pending email invites for a document (owner only; free — not subscriber-gated). */
+    @GET("api/documents/{id}/invites")
+    suspend fun getInvites(@Path("id") id: String): DocumentInvitesResponse
+
+    /**
+     * Invites an email address (which need not belong to an account yet) at a role.
+     * Owner **and subscriber** only: a free owner is rejected with 403.
+     */
+    @POST("api/documents/{id}/invites")
+    suspend fun createInvite(
+        @Path("id") id: String,
+        @Body body: CreateInviteRequest,
+    ): DocumentInviteEnvelope
+
+    /** Revokes a pending invite by its token, killing the link immediately. Always free. */
+    @DELETE("api/documents/{id}/invites/{token}")
+    suspend fun revokeInvite(
+        @Path("id") id: String,
+        @Path("token") token: String,
+    )
 
     // --- Delta sync --------------------------------------------------------
 
