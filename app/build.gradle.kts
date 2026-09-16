@@ -46,6 +46,10 @@ dependencies {
     implementation(project(":core:network"))
     implementation(project(":core:database"))
     implementation(project(":core:datastore"))
+    // Depended on so its Hilt modules join the app component. "Create from…" is
+    // opened from the messages, lists and documents surfaces, so it has no
+    // navigation entry of its own here.
+    implementation(project(":core:materialize"))
 
     // Features
     implementation(project(":feature:auth"))
