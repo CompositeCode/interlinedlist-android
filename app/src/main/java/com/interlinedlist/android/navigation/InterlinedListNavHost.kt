@@ -195,6 +195,7 @@ private enum class HomeTab(val route: String, val label: String, val icon: Image
 fun InterlinedListNavHost(
     startLoggedIn: Boolean,
     notificationRoute: String? = null,
+    emailChangeRoute: String? = null,
 ) {
     val navController = rememberNavController()
     NavHost(
@@ -229,6 +230,13 @@ fun InterlinedListNavHost(
                 },
             )
         }
+    }
+
+    // A tapped email-change link resolves to a route in the auth graph, which is
+    // registered above whether or not the app started signed in — so the confirm and
+    // undo screens are reachable straight from the email either way.
+    LaunchedEffect(Unit) {
+        emailChangeRoute?.let { route -> runCatching { navController.navigate(route) } }
     }
 }
 

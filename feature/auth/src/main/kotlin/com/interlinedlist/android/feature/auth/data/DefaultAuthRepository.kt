@@ -14,6 +14,8 @@ import com.interlinedlist.android.feature.auth.data.remote.AuthApi
 import com.interlinedlist.android.feature.auth.data.remote.dto.ForgotPasswordRequest
 import com.interlinedlist.android.feature.auth.data.remote.dto.RegisterRequest
 import com.interlinedlist.android.feature.auth.data.remote.dto.ResetPasswordRequest
+import com.interlinedlist.android.feature.auth.data.remote.dto.UndoEmailChangeRequest
+import com.interlinedlist.android.feature.auth.data.remote.dto.VerifyEmailChangeRequest
 import com.interlinedlist.android.feature.auth.data.remote.dto.VerifyEmailRequest
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -82,6 +84,16 @@ class DefaultAuthRepository @Inject constructor(
     override suspend fun resendVerificationEmail(): ApiResult<Unit> =
         withContext(dispatchers.io) {
             safeApiCall(json) { authApi.sendVerificationEmail() }
+        }
+
+    override suspend fun verifyEmailChange(token: String): ApiResult<Unit> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { authApi.verifyEmailChange(VerifyEmailChangeRequest(token)) }
+        }
+
+    override suspend fun undoEmailChange(token: String): ApiResult<Unit> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) { authApi.undoEmailChange(UndoEmailChangeRequest(token)) }
         }
 
     override suspend fun logout() = withContext(dispatchers.io) {

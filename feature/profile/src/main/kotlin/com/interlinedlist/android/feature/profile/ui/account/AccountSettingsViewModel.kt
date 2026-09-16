@@ -20,7 +20,9 @@ import javax.inject.Inject
  * UI state for the Account settings screen (change email + delete account).
  *
  * [username] is seeded from the current user's cache and is the value the
- * type-to-confirm delete guard checks against.
+ * type-to-confirm delete guard checks against. [pendingEmail] mirrors the server's
+ * `pendingEmail` field: non-null while an email change is awaiting confirmation from
+ * the link mailed to that address, and null again once it is confirmed or undone.
  */
 data class AccountSettingsUiState(
     val username: String = "",
@@ -28,6 +30,11 @@ data class AccountSettingsUiState(
     val isDeletingAccount: Boolean = false,
     // A one-shot confirmation to show after a successful email-change request.
     val emailChangeRequested: Boolean = false,
+    /** The address an email change is waiting on, or null when none is in flight. */
+    val pendingEmail: String? = null,
+    val isResendingEmailChange: Boolean = false,
+    /** A one-shot confirmation to show after the verification email is re-sent. */
+    val emailChangeResent: Boolean = false,
     val errorMessage: String? = null,
 )
 
@@ -43,6 +50,10 @@ sealed interface AccountSettingsEffect {
  * `POST /api/user/delete`. On a successful delete it emits [AccountSettingsEffect.SignedOut]
  * so the app can clear the session and navigate away (the profile module does not own
  * session state).
+ *
+ * The pending-change banner is re-read from the server on every entry rather than
+ * cached, so it disappears as soon as the change is confirmed (or undone) from the
+ * emailed link — which happens outside this screen, and possibly on another device.
  */
 @HiltViewModel
 class AccountSettingsViewModel @Inject constructor(
@@ -57,6 +68,22 @@ class AccountSettingsViewModel @Inject constructor(
 
     init {
         seedFromCache()
+        refreshPendingEmailChange()
+    }
+
+    /**
+     * Re-reads `pendingEmail` from `GET /api/user`. Called on entry and after a
+     * request/resend so the banner reflects the server, not a local guess.
+     */
+    fun refreshPendingEmailChange() {
+        viewModelScope.launch {
+            when (val result = repository.getPendingEmailChange()) {
+                is ApiResult.Success -> _uiState.update { it.copy(pendingEmail = result.data) }
+                // A failed read is not worth an error banner on a settings screen:
+                // leave whatever is on screen alone and try again next entry.
+                is ApiResult.Failure -> Unit
+            }
+        }
     }
 
     /** Seeds [AccountSettingsUiState.username] from the cached current user. */
@@ -77,11 +104,43 @@ class AccountSettingsViewModel @Inject constructor(
         _uiState.update { it.copy(isChangingEmail = true, emailChangeRequested = false, errorMessage = null) }
         viewModelScope.launch {
             when (val result = repository.requestEmailChange(email)) {
-                is ApiResult.Success -> _uiState.update {
-                    it.copy(isChangingEmail = false, emailChangeRequested = true)
+                is ApiResult.Success -> {
+                    _uiState.update {
+                        it.copy(
+                            isChangingEmail = false,
+                            emailChangeRequested = true,
+                            pendingEmail = email,
+                        )
+                    }
+                    refreshPendingEmailChange()
                 }
                 is ApiResult.Failure -> _uiState.update {
                     it.copy(isChangingEmail = false, errorMessage = result.error.toUserMessage())
+                }
+            }
+        }
+    }
+
+    /**
+     * Re-sends the confirmation email for the change already in flight, by re-issuing
+     * the same `POST /api/user/change-email/request` for the pending address.
+     */
+    fun resendEmailChange() {
+        val pending = _uiState.value.pendingEmail
+        if (pending.isNullOrBlank() || _uiState.value.isResendingEmailChange) return
+        _uiState.update {
+            it.copy(isResendingEmailChange = true, emailChangeResent = false, errorMessage = null)
+        }
+        viewModelScope.launch {
+            when (val result = repository.requestEmailChange(pending)) {
+                is ApiResult.Success -> _uiState.update {
+                    it.copy(isResendingEmailChange = false, emailChangeResent = true)
+                }
+                is ApiResult.Failure -> _uiState.update {
+                    it.copy(
+                        isResendingEmailChange = false,
+                        errorMessage = result.error.toUserMessage(),
+                    )
                 }
             }
         }
@@ -112,4 +171,6 @@ class AccountSettingsViewModel @Inject constructor(
     fun clearError() = _uiState.update { it.copy(errorMessage = null) }
 
     fun acknowledgeEmailChange() = _uiState.update { it.copy(emailChangeRequested = false) }
+
+    fun acknowledgeEmailChangeResent() = _uiState.update { it.copy(emailChangeResent = false) }
 }

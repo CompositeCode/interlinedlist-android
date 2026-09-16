@@ -200,4 +200,66 @@ class DefaultAuthRepositoryTest {
         assertThat(result).isInstanceOf(ApiResult.Success::class.java)
         assertThat(server.takeRequest().path).contains("api/auth/send-verification-email")
     }
+
+    // ---- email change: verify / undo ---------------------------------------
+
+    @Test
+    fun `verifyEmailChange posts the token to the verify-email-change endpoint`() = runTest(dispatcher) {
+        enqueue(201)
+
+        val result = repository().verifyEmailChange("change-tok")
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        val request = server.takeRequest()
+        assertThat(request.path).contains("api/auth/verify-email-change")
+        assertThat(request.body.readUtf8()).isEqualTo("{\"token\":\"change-tok\"}")
+    }
+
+    @Test
+    fun `verifyEmailChange surfaces the server message on a conflict`() = runTest(dispatcher) {
+        enqueue(409, """{ "error": "That email is already in use", "code": "conflict" }""")
+
+        val result = repository().verifyEmailChange("taken")
+
+        assertThat(result).isInstanceOf(ApiResult.Failure::class.java)
+        val error = (result as ApiResult.Failure).error
+        assertThat(error).isInstanceOf(AppError.Conflict::class.java)
+        assertThat(error.message).isEqualTo("That email is already in use")
+    }
+
+    @Test
+    fun `undoEmailChange posts the token to the undo-email-change endpoint`() = runTest(dispatcher) {
+        enqueue(201)
+
+        val result = repository().undoEmailChange("undo-tok")
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        val request = server.takeRequest()
+        assertThat(request.path).contains("api/auth/undo-email-change")
+        assertThat(request.body.readUtf8()).isEqualTo("{\"token\":\"undo-tok\"}")
+    }
+
+    @Test
+    fun `undoEmailChange works with no session at all`() = runTest(dispatcher) {
+        // The emailed undo link has to work for someone who cannot sign in any more,
+        // so the repository must not gate the call on a stored token.
+        session.clear()
+        enqueue(201)
+
+        val result = repository().undoEmailChange("undo-tok")
+
+        assertThat(session.isLoggedIn).isFalse()
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        assertThat(server.takeRequest().path).contains("api/auth/undo-email-change")
+    }
+
+    @Test
+    fun `undoEmailChange surfaces an expired-link message`() = runTest(dispatcher) {
+        enqueue(400, """{ "error": "Undo link has expired", "code": "bad_request" }""")
+
+        val result = repository().undoEmailChange("stale")
+
+        assertThat(result).isInstanceOf(ApiResult.Failure::class.java)
+        assertThat((result as ApiResult.Failure).error.message).isEqualTo("Undo link has expired")
+    }
 }

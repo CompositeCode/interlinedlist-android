@@ -821,6 +821,36 @@ class DefaultProfileRepositoryTest {
     }
 
     @Test
+    fun `getPendingEmailChange reads pendingEmail off the current user`() = runTest(testDispatcher) {
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{ "user": { "id": "u1", "username": "adron", "email": "old@example.com",
+                   "pendingEmail": "new@example.com" } }""",
+            ),
+        )
+
+        val result = repository.getPendingEmailChange()
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        assertThat((result as ApiResult.Success).data).isEqualTo("new@example.com")
+        assertThat(server.takeRequest().path).isEqualTo("/api/user")
+    }
+
+    @Test
+    fun `getPendingEmailChange is null when no change is in flight`() = runTest(testDispatcher) {
+        // The live API sends an explicit null rather than omitting the key.
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{ "user": { "id": "u1", "username": "adron", "pendingEmail": null } }""",
+            ),
+        )
+
+        val result = repository.getPendingEmailChange()
+
+        assertThat((result as ApiResult.Success).data).isNull()
+    }
+
+    @Test
     fun `requestEmailChange maps a 400 to a failure`() = runTest(testDispatcher) {
         server.enqueue(MockResponse().setResponseCode(400).setBody("""{ "error": "Email already in use." }"""))
 

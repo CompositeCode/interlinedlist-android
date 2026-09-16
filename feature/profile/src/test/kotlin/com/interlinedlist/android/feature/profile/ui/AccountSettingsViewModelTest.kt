@@ -69,6 +69,102 @@ class AccountSettingsViewModelTest {
         assertThat(vm.uiState.value.errorMessage).isNotNull()
     }
 
+    // ---- pending email change ---------------------------------------------
+
+    @Test
+    fun `the pending change renders from the server's pendingEmail`() = runTest(dispatcher) {
+        repo.pendingEmailChangeResult = ApiResult.Success("new@example.com")
+
+        val vm = AccountSettingsViewModel(repo)
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.pendingEmail).isEqualTo("new@example.com")
+    }
+
+    @Test
+    fun `no pending change means no banner`() = runTest(dispatcher) {
+        repo.pendingEmailChangeResult = ApiResult.Success(null)
+
+        val vm = AccountSettingsViewModel(repo)
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.pendingEmail).isNull()
+    }
+
+    @Test
+    fun `the pending change clears once the server reports it verified`() = runTest(dispatcher) {
+        // First read: still awaiting confirmation. Second read (after the user opened
+        // the emailed link): the server has cleared pendingEmail.
+        repo.pendingEmailChangeResults = ArrayDeque(
+            listOf(ApiResult.Success("new@example.com"), ApiResult.Success(null)),
+        )
+
+        val vm = AccountSettingsViewModel(repo)
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.pendingEmail).isEqualTo("new@example.com")
+
+        vm.refreshPendingEmailChange()
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.pendingEmail).isNull()
+    }
+
+    @Test
+    fun `a successful request puts the screen straight into the pending state`() = runTest(dispatcher) {
+        repo.pendingEmailChangeResult = ApiResult.Success(null)
+        repo.requestEmailChangeResult = ApiResult.Success(Unit)
+        val vm = AccountSettingsViewModel(repo)
+        advanceUntilIdle()
+
+        repo.pendingEmailChangeResult = ApiResult.Success("new@example.com")
+        vm.requestEmailChange("new@example.com")
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.pendingEmail).isEqualTo("new@example.com")
+    }
+
+    @Test
+    fun `resend re-requests the change for the pending address`() = runTest(dispatcher) {
+        repo.pendingEmailChangeResult = ApiResult.Success("new@example.com")
+        repo.requestEmailChangeResult = ApiResult.Success(Unit)
+        val vm = AccountSettingsViewModel(repo)
+        advanceUntilIdle()
+
+        vm.resendEmailChange()
+        advanceUntilIdle()
+
+        assertThat(repo.requestedEmails).containsExactly("new@example.com")
+        assertThat(vm.uiState.value.emailChangeResent).isTrue()
+        assertThat(vm.uiState.value.isResendingEmailChange).isFalse()
+    }
+
+    @Test
+    fun `resend surfaces the server's message on failure`() = runTest(dispatcher) {
+        repo.pendingEmailChangeResult = ApiResult.Success("new@example.com")
+        repo.requestEmailChangeResult =
+            ApiResult.Failure(AppError.Conflict("That email is already in use"))
+        val vm = AccountSettingsViewModel(repo)
+        advanceUntilIdle()
+
+        vm.resendEmailChange()
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.emailChangeResent).isFalse()
+        assertThat(vm.uiState.value.errorMessage).isEqualTo("That email is already in use")
+    }
+
+    @Test
+    fun `resend does nothing when no change is pending`() = runTest(dispatcher) {
+        repo.pendingEmailChangeResult = ApiResult.Success(null)
+        val vm = AccountSettingsViewModel(repo)
+        advanceUntilIdle()
+
+        vm.resendEmailChange()
+        advanceUntilIdle()
+
+        assertThat(repo.requestedEmails).isEmpty()
+    }
+
     @Test
     fun `deleteAccount confirms with the seeded username and emits a signed-out effect`() = runTest(dispatcher) {
         repo.currentUserFlow.value = testUser(username = "adron")

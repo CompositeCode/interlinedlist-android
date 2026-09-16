@@ -3,6 +3,8 @@ package com.interlinedlist.android.feature.auth.data.remote
 import com.interlinedlist.android.feature.auth.data.remote.dto.ForgotPasswordRequest
 import com.interlinedlist.android.feature.auth.data.remote.dto.RegisterRequest
 import com.interlinedlist.android.feature.auth.data.remote.dto.ResetPasswordRequest
+import com.interlinedlist.android.feature.auth.data.remote.dto.UndoEmailChangeRequest
+import com.interlinedlist.android.feature.auth.data.remote.dto.VerifyEmailChangeRequest
 import com.interlinedlist.android.feature.auth.data.remote.dto.VerifyEmailRequest
 import retrofit2.http.Body
 import retrofit2.http.POST
@@ -38,4 +40,19 @@ interface AuthApi {
     /** Resends the verification email to the signed-in (unverified) user. */
     @POST("api/auth/send-verification-email")
     suspend fun sendVerificationEmail()
+
+    /**
+     * Completes a pending email change with the token from the link mailed to the
+     * new address. Unauthenticated, so it also works from a signed-out app.
+     */
+    @POST("api/auth/verify-email-change")
+    suspend fun verifyEmailChange(@Body body: VerifyEmailChangeRequest)
+
+    /**
+     * Reverts an email change with the token from the link mailed to the previous
+     * address. Unauthenticated by design — the account owner may have already lost
+     * access when they reach for it.
+     */
+    @POST("api/auth/undo-email-change")
+    suspend fun undoEmailChange(@Body body: UndoEmailChangeRequest)
 }

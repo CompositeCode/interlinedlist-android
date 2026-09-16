@@ -27,7 +27,8 @@
             <!--
                 App Links: verified https:// deep links routed to the in-app nav
                 destinations (shared list/document tokens, password reset, email
-                verification). autoVerify enables Android App Links verification.
+                verification, and the confirm/undo halves of an email change).
+                autoVerify enables Android App Links verification.
             -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
@@ -38,6 +39,8 @@
                 <data android:pathPrefix="/documents/shared/" />
                 <data android:path="/reset-password" />
                 <data android:path="/verify-email" />
+                <data android:path="/verify-email-change" />
+                <data android:path="/undo-email-change" />
             </intent-filter>
 
             <!-- Custom-scheme equivalents for the same in-app deep-link routes. -->
@@ -49,6 +52,8 @@
                 <data android:scheme="interlinedlist" android:host="documents" />
                 <data android:scheme="interlinedlist" android:host="reset-password" />
                 <data android:scheme="interlinedlist" android:host="verify-email" />
+                <data android:scheme="interlinedlist" android:host="verify-email-change" />
+                <data android:scheme="interlinedlist" android:host="undo-email-change" />
             </intent-filter>
         </activity>
 

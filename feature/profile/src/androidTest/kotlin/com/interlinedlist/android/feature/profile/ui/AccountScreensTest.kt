@@ -3,10 +3,14 @@ package com.interlinedlist.android.feature.profile.ui
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.interlinedlist.android.core.designsystem.theme.InterlinedListTheme
 import com.interlinedlist.android.feature.profile.domain.LoginSession
+import com.interlinedlist.android.feature.profile.ui.account.AccountSettingsScreen
+import com.interlinedlist.android.feature.profile.ui.account.AccountSettingsTestTags
+import com.interlinedlist.android.feature.profile.ui.account.AccountSettingsUiState
 import com.interlinedlist.android.feature.profile.ui.account.SessionsScreen
 import com.interlinedlist.android.feature.profile.ui.account.SessionsTestTags
 import com.interlinedlist.android.feature.profile.ui.account.SessionsUiState
@@ -66,5 +70,51 @@ class AccountScreensTest {
         // Confirming revokes that session.
         composeRule.onNodeWithTag(SessionsTestTags.CONFIRM_REVOKE).performClick()
         assert(revoked == "s2")
+    }
+
+    // ---- pending email change ---------------------------------------------
+
+    @Test
+    fun accountSettings_pendingEmailChangeShowsAddressAndResends() {
+        var resent = 0
+        composeRule.setContent {
+            InterlinedListTheme {
+                AccountSettingsScreen(
+                    state = AccountSettingsUiState(
+                        username = "adron",
+                        pendingEmail = "new@example.com",
+                    ),
+                    onChangeEmail = {},
+                    onAcknowledgeEmailChange = {},
+                    onResendEmailChange = { resent++ },
+                    onDeleteAccount = {},
+                    onBack = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag(AccountSettingsTestTags.PENDING_EMAIL).assertIsDisplayed()
+        composeRule.onNodeWithText("new@example.com").assertIsDisplayed()
+
+        composeRule.onNodeWithTag(AccountSettingsTestTags.PENDING_RESEND).performClick()
+        assert(resent == 1)
+    }
+
+    @Test
+    fun accountSettings_noPendingEmailChangeHidesTheBanner() {
+        composeRule.setContent {
+            InterlinedListTheme {
+                AccountSettingsScreen(
+                    state = AccountSettingsUiState(username = "adron", pendingEmail = null),
+                    onChangeEmail = {},
+                    onAcknowledgeEmailChange = {},
+                    onResendEmailChange = {},
+                    onDeleteAccount = {},
+                    onBack = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag(AccountSettingsTestTags.PENDING_EMAIL).assertDoesNotExist()
     }
 }

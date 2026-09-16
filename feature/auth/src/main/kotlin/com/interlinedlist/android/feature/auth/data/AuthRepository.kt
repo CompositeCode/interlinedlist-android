@@ -40,6 +40,19 @@ interface AuthRepository {
     /** Resends the verification email to the signed-in (unverified) user. */
     suspend fun resendVerificationEmail(): ApiResult<Unit>
 
+    /**
+     * Completes a pending email change with the token from the link mailed to the
+     * new address (`POST /api/auth/verify-email-change`). Needs no session.
+     */
+    suspend fun verifyEmailChange(token: String): ApiResult<Unit>
+
+    /**
+     * Reverts an email change with the token from the link mailed to the previous
+     * address (`POST /api/auth/undo-email-change`). Needs no session, by design:
+     * the person reaching for it may no longer be able to sign in.
+     */
+    suspend fun undoEmailChange(token: String): ApiResult<Unit>
+
     /** Clears the persisted session and cached user. */
     suspend fun logout()
 }
