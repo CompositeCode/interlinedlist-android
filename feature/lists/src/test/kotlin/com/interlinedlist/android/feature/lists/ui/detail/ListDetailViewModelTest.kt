@@ -235,4 +235,93 @@ class ListDetailViewModelTest {
         assertThat(vm.uiState.value.errorMessage).isNotNull()
         assertThat(vm.uiState.value.refreshMessage).isNull()
     }
+
+    // --- Parent chain (breadcrumb) + child lists -----------------------------
+
+    private fun child(parentId: String?) = ListDetail(
+        summary = ListSummary("L1", "Reading", "Books", 0, null, false, null, parentId),
+        schema = schema,
+        rows = emptyList(),
+    )
+
+    @Test
+    fun `resolves the breadcrumb for a child list, root first`() = runTest(dispatcher) {
+        val repo = FakeListsRepository().apply {
+            detailResult = ApiResult.Success(child(parentId = "P1"))
+            parentChainResult = ApiResult.Success(
+                listOf(
+                    ListSummary("ROOT", "Root", null, 0, null, false, null, null),
+                    ListSummary("P1", "Parent", null, 0, null, false, null, "ROOT"),
+                ),
+            )
+        }
+        val vm = viewModel(repo)
+        advanceUntilIdle()
+
+        assertThat(repo.lastParentChainId).isEqualTo("P1")
+        assertThat(vm.uiState.value.breadcrumb.map { it.id }).containsExactly("ROOT", "P1").inOrder()
+    }
+
+    @Test
+    fun `does not resolve a breadcrumb for a root list`() = runTest(dispatcher) {
+        val repo = FakeListsRepository().apply { detailResult = ApiResult.Success(child(parentId = null)) }
+        val vm = viewModel(repo)
+        advanceUntilIdle()
+
+        assertThat(repo.parentChainCount).isEqualTo(0)
+        assertThat(vm.uiState.value.breadcrumb).isEmpty()
+    }
+
+    @Test
+    fun `a failed breadcrumb leaves the list usable`() = runTest(dispatcher) {
+        val repo = FakeListsRepository().apply {
+            detailResult = ApiResult.Success(child(parentId = "P1"))
+            parentChainResult = FakeListsRepository.subscriptionFailure()
+        }
+        val vm = viewModel(repo)
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.breadcrumb).isEmpty()
+        assertThat(vm.uiState.value.errorMessage).isNull()
+        assertThat(vm.uiState.value.summary).isNotNull()
+    }
+
+    @Test
+    fun `createChildList creates the new list under the current one`() = runTest(dispatcher) {
+        val repo = FakeListsRepository().apply {
+            detailResult = ApiResult.Success(child(parentId = null))
+            createResult = ApiResult.Success(
+                ListSummary("L2", "New list", null, 0, null, false, null, "L1"),
+            )
+        }
+        val vm = viewModel(repo)
+        advanceUntilIdle()
+
+        var opened: String? = null
+        vm.createChildList { opened = it }
+        advanceUntilIdle()
+
+        assertThat(repo.lastCreateParentId).isEqualTo("L1")
+        assertThat(opened).isEqualTo("L2")
+        assertThat(vm.uiState.value.isSaving).isFalse()
+    }
+
+    @Test
+    fun `createChildList surfaces a failure without navigating`() = runTest(dispatcher) {
+        val repo = FakeListsRepository().apply {
+            detailResult = ApiResult.Success(child(parentId = null))
+            createResult = FakeListsRepository.subscriptionFailure()
+        }
+        val vm = viewModel(repo)
+        advanceUntilIdle()
+
+        var opened: String? = null
+        vm.createChildList { opened = it }
+        advanceUntilIdle()
+
+        assertThat(opened).isNull()
+        assertThat(vm.uiState.value.errorMessage).isNotNull()
+        assertThat(vm.uiState.value.subscriptionRequired).isTrue()
+        assertThat(vm.uiState.value.isSaving).isFalse()
+    }
 }

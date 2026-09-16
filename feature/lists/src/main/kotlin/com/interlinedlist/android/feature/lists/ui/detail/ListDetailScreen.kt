@@ -1,5 +1,6 @@
 package com.interlinedlist.android.feature.lists.ui.detail
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -73,7 +74,10 @@ object ListDetailTestTags {
     const val EDIT_SCHEMA = "listDetailEditSchema"
     const val WATCHERS = "listDetailWatchers"
     const val SHARE = "listDetailShare"
+    const val NEW_CHILD = "listDetailNewChild"
+    const val BREADCRUMB = "listDetailBreadcrumb"
     fun row(id: String) = "listDetailRow_$id"
+    fun crumb(id: String) = "listDetailCrumb_$id"
 }
 
 /**
@@ -91,6 +95,7 @@ fun ListDetailRoute(
     onOpenWatchers: () -> Unit,
     modifier: Modifier = Modifier,
     onOpenShare: () -> Unit = {},
+    onOpenList: (String) -> Unit = {},
     viewModel: ListDetailViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -123,6 +128,8 @@ fun ListDetailRoute(
         onEditSchema = onEditSchema,
         onOpenWatchers = onOpenWatchers,
         onOpenShare = onOpenShare,
+        onOpenList = onOpenList,
+        onNewChildList = { viewModel.createChildList(onOpenList) },
         snackbarHostState = snackbarHostState,
         modifier = modifier,
     )
@@ -188,6 +195,8 @@ fun ListDetailScreen(
     onEditSchema: () -> Unit = {},
     onOpenWatchers: () -> Unit = {},
     onOpenShare: () -> Unit = {},
+    onOpenList: (String) -> Unit = {},
+    onNewChildList: () -> Unit = {},
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
 ) {
     var menuOpen by remember { mutableStateOf(false) }
@@ -229,6 +238,11 @@ fun ListDetailScreen(
                             text = { Text("Edit columns") },
                             onClick = { menuOpen = false; onEditSchema() },
                             modifier = Modifier.testTag(ListDetailTestTags.EDIT_SCHEMA),
+                        )
+                        DropdownMenuItem(
+                            text = { Text("New child list") },
+                            onClick = { menuOpen = false; onNewChildList() },
+                            modifier = Modifier.testTag(ListDetailTestTags.NEW_CHILD),
                         )
                         DropdownMenuItem(
                             text = { Text("Watchers") },
@@ -274,6 +288,7 @@ fun ListDetailScreen(
             ) { Text(state.errorMessage) }
 
             else -> Column(Modifier.padding(padding)) {
+                Breadcrumb(ancestors = state.breadcrumb, onOpenList = onOpenList)
                 if (!state.summary?.description.isNullOrBlank()) {
                     Text(
                         text = state.summary!!.description!!,
@@ -291,6 +306,49 @@ fun ListDetailScreen(
                 )
             }
         }
+    }
+}
+
+/**
+ * Where this list sits in the list tree: its ancestors, root first, each one a tap
+ * away. Nothing is drawn for a root list.
+ */
+@Composable
+private fun Breadcrumb(ancestors: List<ListSummary>, onOpenList: (String) -> Unit) {
+    if (ancestors.isEmpty()) return
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .testTag(ListDetailTestTags.BREADCRUMB),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        ancestors.forEachIndexed { index, ancestor ->
+            if (index > 0) {
+                Text(
+                    text = "/",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(
+                text = ancestor.title.ifBlank { "Untitled list" },
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .clickable { onOpenList(ancestor.id) }
+                    .testTag(ListDetailTestTags.crumb(ancestor.id)),
+            )
+        }
+        Text(
+            text = "/",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

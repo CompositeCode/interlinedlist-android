@@ -16,4 +16,6 @@ data class CachedListEntity(
     val folderId: String?,
     val isPublic: Boolean,
     val updatedAt: String?,
+    /** Parent list id — kept so a cached list still knows where it sits in the tree. */
+    val parentId: String? = null,
 )

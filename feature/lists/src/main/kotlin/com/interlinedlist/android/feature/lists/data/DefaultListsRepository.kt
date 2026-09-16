@@ -24,6 +24,7 @@ import com.interlinedlist.android.feature.lists.domain.ListDetail
 import com.interlinedlist.android.feature.lists.domain.ListFolder
 import com.interlinedlist.android.feature.lists.domain.ListRow
 import com.interlinedlist.android.feature.lists.domain.ListSchema
+import com.interlinedlist.android.feature.lists.domain.ListSource
 import com.interlinedlist.android.feature.lists.domain.ListSummary
 import com.interlinedlist.android.feature.lists.domain.Paged
 import com.interlinedlist.android.feature.lists.domain.RefreshResult
@@ -38,6 +39,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import javax.inject.Inject
 
@@ -92,15 +94,33 @@ class DefaultListsRepository @Inject constructor(
         title: String,
         description: String?,
         isPublic: Boolean,
+        parentId: String?,
+        folderId: String?,
+        messageId: String?,
+        initialRows: List<Map<String, String>>?,
+        metadata: JsonObject?,
+        source: ListSource?,
     ): ApiResult<ListSummary> = withContext(dispatchers.io) {
-        val body = CreateListRequest(title = title, description = description, isPublic = isPublic)
+        val body = CreateListRequest(
+            title = title,
+            description = description,
+            isPublic = isPublic,
+            parentId = parentId,
+            folderId = folderId,
+            messageId = messageId,
+            // Starter rows go out in the same shape a row write uses.
+            initialRows = initialRows?.map { JsonObject(it.toJsonData()) },
+            metadata = metadata,
+            source = source?.wire,
+        )
         when (val result = safeApiCall(json) { api.createList(body) }) {
             is ApiResult.Success -> {
                 val dto = result.data.list ?: result.data.data
                     ?: return@withContext ApiResult.Success(
                         ListSummary(
                             id = "", title = title, description = description,
-                            itemCount = 0, folderId = null, isPublic = isPublic, updatedAt = null,
+                            itemCount = 0, folderId = folderId, isPublic = isPublic,
+                            updatedAt = null, parentId = parentId,
                         ),
                     )
                 val summary = ListMapper.summaryFromDto(dto)
@@ -110,6 +130,45 @@ class DefaultListsRepository @Inject constructor(
             is ApiResult.Failure -> result
         }
     }
+
+    override suspend fun createListFromMessage(
+        messageId: String,
+        title: String,
+        description: String?,
+    ): ApiResult<ListSummary> =
+        createList(title = title, description = description, messageId = messageId)
+
+    override suspend fun getParentChain(parentId: String): ApiResult<List<ListSummary>> =
+        withContext(dispatchers.io) {
+            val ancestors = mutableListOf<ListSummary>() // nearest parent first
+            val visited = mutableSetOf<String>()
+            // The server may inline the next level under `parent`; when it does,
+            // that level costs no request.
+            var inlined: ListDto? = null
+            var nextId: String? = parentId
+
+            while (ancestors.size < MAX_PARENT_CHAIN) {
+                // A level already seen means the tree loops: stop before spending
+                // another request on it.
+                val dto = inlined?.takeIf { visited.add(it.id) }
+                    ?: nextId?.takeIf { visited.add(it) }?.let { id ->
+                        when (val result = safeApiCall(json) { api.getList(id) }) {
+                            is ApiResult.Success -> result.data.list ?: result.data.data
+                            // A level we cannot fetch truncates the breadcrumb; only a
+                            // chain that resolved nothing at all is reported as a failure.
+                            is ApiResult.Failure ->
+                                if (ancestors.isEmpty()) return@withContext result else null
+                        }
+                    } ?: break
+
+                ancestors += ListMapper.summaryFromDto(dto)
+                inlined = dto.parent
+                nextId = dto.parentId
+            }
+
+            listDao.upsertAll(ancestors.map(ListMapper::summaryToEntity))
+            ApiResult.Success(ancestors.reversed()) // root → immediate parent
+        }
 
     override suspend fun updateList(
         id: String,
@@ -411,6 +470,11 @@ class DefaultListsRepository @Inject constructor(
     private fun Map<String, String>.toJsonData(): Map<String, JsonElement> =
         filterValues { it.isNotBlank() }
             .mapValues { (_, value) -> JsonPrimitive(value) as JsonElement }
+
+    private companion object {
+        /** Safety net for a breadcrumb walk: deep nesting is not worth the requests. */
+        const val MAX_PARENT_CHAIN = 10
+    }
 }
 
 /** Builds a [Paged] from the response's pagination block, tolerating its absence. */

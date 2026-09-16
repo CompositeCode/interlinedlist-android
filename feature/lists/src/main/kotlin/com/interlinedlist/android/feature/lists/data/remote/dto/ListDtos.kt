@@ -2,6 +2,7 @@ package com.interlinedlist.android.feature.lists.data.remote.dto
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 
 /**
  * Wire models for the Lists API. Field names follow the InterlinedList REST
@@ -16,7 +17,14 @@ import kotlinx.serialization.json.JsonElement
  * @Serializable shapes.
  */
 
-/** A list envelope as returned by index and detail endpoints. */
+/**
+ * A list envelope as returned by index and detail endpoints.
+ *
+ * `GET /api/lists` returns each row with its tree links: `parentId` plus a nested
+ * `parent` object (null at the root) and a `children` array. The nested [parent]
+ * is modelled recursively so the breadcrumb can consume whatever depth the server
+ * chooses to send and only fetch the levels it did not.
+ */
 @Serializable
 data class ListDto(
     val id: String,
@@ -28,6 +36,18 @@ data class ListDto(
     val folderId: String? = null,
     val isPublic: Boolean = false,
     val updatedAt: String? = null,
+    /** The list this one hangs under; `null` for a root list. */
+    val parentId: String? = null,
+    /** The parent as an object, when the server inlines it. */
+    val parent: ListDto? = null,
+    /** Direct children, when the server inlines them. */
+    val children: List<ListDto>? = null,
+    /** The message this list was created from, if any. */
+    val messageId: String? = null,
+    /** Free-form pass-through object; kept raw so no keys are lost. */
+    val metadata: JsonElement? = null,
+    /** Where the rows come from — `"local"`, `"github"`, … (see `ListSource`). */
+    val source: String? = null,
     // Detail responses may inline the schema; the mapper handles either shape.
     val schema: JsonElement? = null,
 )
@@ -62,13 +82,41 @@ data class ListEnvelope(
     val data: ListDto? = null,
 )
 
-/** Body for `POST /api/lists`. `schema` is a serialised DSL string per the API. */
+/**
+ * Body for `POST /api/lists`.
+ *
+ * Every field beyond [title] is optional and defaults to `null` so it is
+ * **omitted** from the JSON rather than sent as an explicit `null` — a caller
+ * that only wants a title still produces `{"title":"…"}`.
+ *
+ * - [schema] is the List Schema DSL **object** (`{ name, description?, fields[] }`),
+ *   per the help centre's Lists API reference — not a serialised string (that form
+ *   belongs to `PUT /api/lists/{id}/schema`).
+ * - [initialRows] are starter rows; each is the same flat, column-keyed object
+ *   that `POST /api/lists/{id}/data` sends under `data`. The OpenAPI spec types
+ *   this field as a bare `string` and the help centre does not document it at all,
+ *   so the element shape follows the list-data API rather than the generated spec.
+ * - [metadata] is undocumented and free-form, so it is kept as [JsonObject] and
+ *   passed through with every key intact.
+ * - [source] is the low-cardinality list source string — `"local"` or `"github"`
+ *   (see [com.interlinedlist.android.feature.lists.domain.ListSource]).
+ * - [folderId] is a real column on a list, but neither the OpenAPI create schema
+ *   nor the help centre lists it as a *create* field: filing a list into a folder
+ *   is documented on `PUT /api/lists/{id}`. It is sent when supplied; a caller that
+ *   must be certain should follow up with an update.
+ */
 @Serializable
 data class CreateListRequest(
     val title: String,
     val description: String? = null,
-    val schema: String? = null,
+    val schema: JsonObject? = null,
     val isPublic: Boolean = false,
+    val parentId: String? = null,
+    val folderId: String? = null,
+    val messageId: String? = null,
+    val initialRows: List<JsonObject>? = null,
+    val metadata: JsonObject? = null,
+    val source: String? = null,
 )
 
 /** Body for `PUT /api/lists/{id}` — partial metadata updates. */

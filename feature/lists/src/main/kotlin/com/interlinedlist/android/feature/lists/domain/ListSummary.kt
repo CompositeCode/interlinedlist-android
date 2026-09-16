@@ -13,4 +13,10 @@ data class ListSummary(
     val folderId: String?,
     val isPublic: Boolean,
     val updatedAt: String?,
+    /**
+     * The list this one hangs under, if any. Lists form a tree, so the detail
+     * screen walks this up to render a breadcrumb
+     * ([com.interlinedlist.android.feature.lists.data.ListsRepository.getParentChain]).
+     */
+    val parentId: String? = null,
 )

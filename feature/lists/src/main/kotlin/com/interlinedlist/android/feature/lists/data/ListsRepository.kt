@@ -7,6 +7,7 @@ import com.interlinedlist.android.feature.lists.domain.ListDetail
 import com.interlinedlist.android.feature.lists.domain.ListFolder
 import com.interlinedlist.android.feature.lists.domain.ListRow
 import com.interlinedlist.android.feature.lists.domain.ListSchema
+import com.interlinedlist.android.feature.lists.domain.ListSource
 import com.interlinedlist.android.feature.lists.domain.ListSummary
 import com.interlinedlist.android.feature.lists.domain.Paged
 import com.interlinedlist.android.feature.lists.domain.RefreshResult
@@ -18,6 +19,7 @@ import com.interlinedlist.android.feature.lists.domain.Watcher
 import com.interlinedlist.android.feature.lists.domain.WatcherCandidate
 import com.interlinedlist.android.feature.lists.domain.WatcherRole
 import kotlinx.coroutines.flow.Flow
+import kotlinx.serialization.json.JsonObject
 
 /**
  * Offline-first access to the Lists domain. The index streams from Room (the
@@ -38,8 +40,54 @@ interface ListsRepository {
     /** Server-side search (not cached) by title/description. */
     suspend fun searchLists(query: String, limit: Int = DEFAULT_PAGE_SIZE): ApiResult<List<ListSummary>>
 
-    /** Creates a list; caches the result and returns its summary. */
-    suspend fun createList(title: String, description: String?, isPublic: Boolean): ApiResult<ListSummary>
+    /**
+     * Creates a list; caches the result and returns its summary.
+     *
+     * Everything past [isPublic] is an optional creation option the API accepts
+     * and is omitted from the request when null, so callers that only need a
+     * title/description send exactly what they always sent:
+     * - [parentId] nests the new list under an existing one (see [getParentChain]).
+     * - [folderId] files it into a folder.
+     * - [messageId] records the message the list was created from.
+     * - [initialRows] seeds starter rows, each a column-key → value map, exactly
+     *   as [addRow] sends a row.
+     * - [metadata] is a free-form JSON object passed through untouched.
+     * - [source] marks where the rows come from (defaults to the server's own).
+     */
+    suspend fun createList(
+        title: String,
+        description: String? = null,
+        isPublic: Boolean = false,
+        parentId: String? = null,
+        folderId: String? = null,
+        messageId: String? = null,
+        initialRows: List<Map<String, String>>? = null,
+        metadata: JsonObject? = null,
+        source: ListSource? = null,
+    ): ApiResult<ListSummary>
+
+    /**
+     * Creates a list from a message: the message becomes the new list's
+     * description and the API keeps the link via `messageId`.
+     *
+     * The entry point that offers this on a message lives in `:feature:messages`
+     * (see the cross-object "create from" work); this is the call it makes.
+     */
+    suspend fun createListFromMessage(
+        messageId: String,
+        title: String,
+        description: String?,
+    ): ApiResult<ListSummary>
+
+    /**
+     * Resolves a list's ancestry for breadcrumb navigation: fetches [parentId]
+     * and keeps walking up, returning the chain ordered root → immediate parent.
+     *
+     * A level the server cannot serve truncates the chain rather than failing,
+     * since a breadcrumb is navigation decoration; a failure is only reported
+     * when nothing at all could be resolved.
+     */
+    suspend fun getParentChain(parentId: String): ApiResult<List<ListSummary>>
 
     /**
      * Updates a list's metadata (title/description/visibility/folder). Only the

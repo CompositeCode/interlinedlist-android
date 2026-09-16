@@ -34,7 +34,12 @@ class ListDetailScreenTest {
         ),
     )
 
-    private fun setScreen(state: ListDetailUiState, onOpenShare: () -> Unit = {}) {
+    private fun setScreen(
+        state: ListDetailUiState,
+        onOpenShare: () -> Unit = {},
+        onOpenList: (String) -> Unit = {},
+        onNewChildList: () -> Unit = {},
+    ) {
         composeRule.setContent {
             InterlinedListTheme {
                 ListDetailScreen(
@@ -45,6 +50,8 @@ class ListDetailScreenTest {
                     onDeleteRow = {},
                     onDeleteList = {},
                     onOpenShare = onOpenShare,
+                    onOpenList = onOpenList,
+                    onNewChildList = onNewChildList,
                 )
             }
         }
@@ -100,5 +107,63 @@ class ListDetailScreenTest {
         composeRule.onNodeWithTag(ListDetailTestTags.OVERFLOW).performClick()
         composeRule.onNodeWithTag(ListDetailTestTags.SHARE).assertIsDisplayed().performClick()
         assert(shared)
+    }
+
+    @Test
+    fun rendersParentBreadcrumb_andOpensAnAncestor() {
+        var opened: String? = null
+        setScreen(
+            ListDetailUiState(
+                summary = ListSummary("L1", "Chapter 3", null, 0, null, false, null, "P1"),
+                schema = schema,
+                rows = emptyList(),
+                isLoading = false,
+                breadcrumb = listOf(
+                    ListSummary("ROOT", "Book", null, 0, null, false, null, null),
+                    ListSummary("P1", "Part 2", null, 0, null, false, null, "ROOT"),
+                ),
+            ),
+            onOpenList = { opened = it },
+        )
+
+        composeRule.onNodeWithTag(ListDetailTestTags.BREADCRUMB).assertIsDisplayed()
+        composeRule.onNodeWithText("Book").assertIsDisplayed()
+        composeRule.onNodeWithText("Part 2").assertIsDisplayed()
+
+        composeRule.onNodeWithTag(ListDetailTestTags.crumb("ROOT")).performClick()
+        assert(opened == "ROOT")
+    }
+
+    @Test
+    fun hidesBreadcrumb_forARootList() {
+        setScreen(
+            ListDetailUiState(
+                summary = ListSummary("L1", "Reading", null, 0, null, false, null),
+                schema = schema,
+                rows = emptyList(),
+                isLoading = false,
+            ),
+        )
+
+        composeRule.onNodeWithTag(ListDetailTestTags.BREADCRUMB).assertDoesNotExist()
+    }
+
+    @Test
+    fun overflowOffersANewChildList() {
+        var requested = false
+        setScreen(
+            ListDetailUiState(
+                summary = ListSummary("L1", "Reading", null, 0, null, false, null),
+                schema = schema,
+                rows = emptyList(),
+                isLoading = false,
+            ),
+            onNewChildList = { requested = true },
+        )
+
+        composeRule.onNodeWithTag(ListDetailTestTags.OVERFLOW).performClick()
+        composeRule.onNodeWithTag(ListDetailTestTags.NEW_CHILD).performClick()
+
+        assert(requested)
     }
 }
