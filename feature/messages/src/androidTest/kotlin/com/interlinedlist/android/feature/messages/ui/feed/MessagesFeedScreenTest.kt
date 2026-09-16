@@ -10,7 +10,9 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.google.common.truth.Truth.assertThat
 import com.interlinedlist.android.core.designsystem.theme.InterlinedListTheme
+import com.interlinedlist.android.core.model.ViewingPreference
 import com.interlinedlist.android.feature.messages.domain.LinkedNetwork
 import com.interlinedlist.android.feature.messages.domain.Message
 import com.interlinedlist.android.feature.messages.domain.MessageVisibility
@@ -52,6 +54,7 @@ class MessagesFeedScreenTest {
         onBlockUser: (Message) -> Unit = {},
         onMuteUser: (Message) -> Unit = {},
         onReportUser: (Message) -> Unit = {},
+        onViewingPreferenceChange: ((ViewingPreference) -> Unit)? = null,
     ) {
         composeRule.setContent {
             var state by mutableStateOf(initial)
@@ -76,6 +79,10 @@ class MessagesFeedScreenTest {
                         state = state.copy(selectedNetworkIds = selected)
                     },
                     onVisibilityChange = { state = state.copy(composeVisibility = it) },
+                    onViewingPreferenceChange = { preference ->
+                        onViewingPreferenceChange?.invoke(preference)
+                            ?: run { state = state.copy(viewingPreference = preference) }
+                    },
                     onReport = onReport,
                     onEdit = onEdit,
                     onBlockUser = onBlockUser,
@@ -300,5 +307,69 @@ class MessagesFeedScreenTest {
         composeRule.onNodeWithTag(MessagesFeedTags.VISIBILITY_PRIVATE).performClick()
         composeRule.onNodeWithTag(MessagesFeedTags.VISIBILITY_PRIVATE).assertIsSelected()
         composeRule.onNodeWithTag(MessagesFeedTags.VISIBILITY_HINT).assertIsDisplayed()
+    }
+
+    @Test
+    fun viewPreferenceSwitcher_isShown_andReflectsTheSavedPreference() {
+        setFeed(
+            MessagesFeedUiState(
+                messages = listOf(message("1", "hello")),
+                viewingPreference = ViewingPreference.FOLLOWING,
+            ),
+        )
+
+        composeRule.onNodeWithTag(MessagesFeedTags.VIEW_PREFERENCES).assertIsDisplayed()
+        composeRule
+            .onNodeWithTag(MessagesFeedTags.viewPreferenceTag(ViewingPreference.FOLLOWING))
+            .assertIsSelected()
+        composeRule.onNodeWithText("All Messages").assertIsDisplayed()
+    }
+
+    @Test
+    fun viewPreferenceSwitcher_reportsTheTappedPreference() {
+        val tapped = mutableListOf<ViewingPreference>()
+        setFeed(
+            MessagesFeedUiState(messages = listOf(message("1", "hello"))),
+            onViewingPreferenceChange = { tapped += it },
+        )
+
+        composeRule
+            .onNodeWithTag(MessagesFeedTags.viewPreferenceTag(ViewingPreference.MINE))
+            .performClick()
+
+        assertThat(tapped).containsExactly(ViewingPreference.MINE)
+    }
+
+    @Test
+    fun viewPreferenceSwitcher_isDisabled_whileTheChoiceIsBeingSaved() {
+        val tapped = mutableListOf<ViewingPreference>()
+        setFeed(
+            MessagesFeedUiState(
+                messages = listOf(message("1", "hello")),
+                isChangingViewingPreference = true,
+            ),
+            onViewingPreferenceChange = { tapped += it },
+        )
+
+        composeRule
+            .onNodeWithTag(MessagesFeedTags.viewPreferenceTag(ViewingPreference.FOLLOWERS))
+            .performClick()
+
+        // No second request while one is in flight.
+        assertThat(tapped).isEmpty()
+    }
+
+    @Test
+    fun viewPreferenceSwitcher_staysAvailable_whenTheFeedIsGated() {
+        setFeed(
+            MessagesFeedUiState(
+                subscriptionRequired = true,
+                errorMessage = "Subscribers only",
+            ),
+        )
+
+        // The user must still be able to switch away from a view they cannot see.
+        composeRule.onNodeWithTag(MessagesFeedTags.VIEW_PREFERENCES).assertIsDisplayed()
+        composeRule.onNodeWithTag(MessagesFeedTags.LOCKED).assertIsDisplayed()
     }
 }

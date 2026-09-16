@@ -4,6 +4,7 @@ import com.google.common.truth.Truth.assertThat
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
 import com.interlinedlist.android.core.network.api.InterlinedListApi
+import com.interlinedlist.android.core.network.preferences.ViewingPreferenceStore
 import com.interlinedlist.android.feature.messages.data.remote.MessagesApi
 import com.interlinedlist.android.feature.messages.domain.CrossPostSelection
 import com.interlinedlist.android.feature.messages.domain.MessageVisibility
@@ -60,6 +61,7 @@ class DefaultMessagesRepositoryTest {
     private fun repository(currentUserId: String? = "me") = DefaultMessagesRepository(
         api = api,
         userApi = userApi,
+        viewingPreferenceStore = ViewingPreferenceStore(userApi, json),
         messageDao = dao,
         sessionStore = fakeSessionStore(currentUserId),
         json = json,

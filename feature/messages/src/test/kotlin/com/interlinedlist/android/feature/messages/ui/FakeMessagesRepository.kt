@@ -2,6 +2,7 @@ package com.interlinedlist.android.feature.messages.ui
 
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
+import com.interlinedlist.android.core.model.ViewingPreference
 import com.interlinedlist.android.feature.messages.data.MessagesRepository
 import com.interlinedlist.android.feature.messages.domain.CreatedMessage
 import com.interlinedlist.android.feature.messages.domain.CrossPostSelection
@@ -52,11 +53,21 @@ class FakeMessagesRepository : MessagesRepository {
     var cancelScheduledResult: ApiResult<Unit> = ApiResult.Success(Unit)
     var reportResult: ApiResult<Unit> = ApiResult.Success(Unit)
     var metadataResult: ApiResult<Message>? = null
+    /** The account's saved feed preference, as read from `GET /api/user`. */
+    var viewingPreferenceResult: ApiResult<ViewingPreference> = ApiResult.Success(ViewingPreference.ALL)
+    /** What the `PATCH /api/user/update` of the preference answers with. */
+    var setViewingPreferenceResult: ApiResult<ViewingPreference>? = null
 
     var refreshCount = 0
     var loadMoreCount = 0
     /** Every cursor handed to [loadMoreFeed], in order. */
     val loadMoreCursors = mutableListOf<String>()
+    /** The preference each [refreshFeed] ran under, in order. */
+    val refreshPreferences = mutableListOf<ViewingPreference>()
+    /** The preference each [loadMoreFeed] ran under, in order. */
+    val loadMorePreferences = mutableListOf<ViewingPreference>()
+    /** Every preference [setViewingPreference] was asked to PATCH, in order. */
+    val savedViewingPreferences = mutableListOf<ViewingPreference>()
     var lastSetDug: Pair<String, Boolean>? = null
     var deletedIds = mutableListOf<String>()
     var lastCreate: CreateArgs? = null
@@ -104,15 +115,26 @@ class FakeMessagesRepository : MessagesRepository {
 
     override fun observeScheduled(): Flow<List<Message>> = scheduled
 
-    override suspend fun refreshFeed(): ApiResult<String?> {
+    override suspend fun refreshFeed(preference: ViewingPreference): ApiResult<String?> {
         refreshCount++
+        refreshPreferences += preference
         return refreshResult
     }
 
-    override suspend fun loadMoreFeed(cursor: String): ApiResult<String?> {
+    override suspend fun loadMoreFeed(cursor: String, preference: ViewingPreference): ApiResult<String?> {
         loadMoreCount++
         loadMoreCursors += cursor
+        loadMorePreferences += preference
         return loadMoreResult
+    }
+
+    override suspend fun getViewingPreference(): ApiResult<ViewingPreference> = viewingPreferenceResult
+
+    override suspend fun setViewingPreference(
+        preference: ViewingPreference,
+    ): ApiResult<ViewingPreference> {
+        savedViewingPreferences += preference
+        return setViewingPreferenceResult ?: ApiResult.Success(preference)
     }
 
     override suspend fun createMessage(

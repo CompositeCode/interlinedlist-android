@@ -3,6 +3,7 @@ package com.interlinedlist.android.feature.messages.data
 import com.google.common.truth.Truth.assertThat
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.network.api.InterlinedListApi
+import com.interlinedlist.android.core.network.preferences.ViewingPreferenceStore
 import com.interlinedlist.android.feature.messages.data.remote.MessagesApi
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -70,6 +71,7 @@ class MessagesFeedCursorPagingTest {
     private fun repository() = DefaultMessagesRepository(
         api = api,
         userApi = userApi,
+        viewingPreferenceStore = ViewingPreferenceStore(userApi, json),
         messageDao = dao,
         sessionStore = fakeSessionStore("me"),
         json = json,

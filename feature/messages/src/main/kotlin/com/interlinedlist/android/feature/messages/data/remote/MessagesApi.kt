@@ -36,11 +36,18 @@ interface MessagesApi {
      * is opaque and must never be constructed, parsed or modified. A null
      * [cursor] loads the first page (Retrofit omits the query parameter). The
      * endpoint has no `offset` parameter.
+     *
+     * [onlyMine] restricts the feed to the caller's own messages. It is the only
+     * feed-scoping parameter the endpoint has (`/help/api/messages` lists `limit`,
+     * `offset`, `onlyMine` and `tag`): there is no following/followers parameter,
+     * because the server scopes the feed by the account's saved
+     * `viewingPreference`. Null omits the parameter.
      */
     @GET("api/messages")
     suspend fun getMessages(
         @Query("limit") limit: Int,
         @Query("cursor") cursor: String? = null,
+        @Query("onlyMine") onlyMine: Boolean? = null,
     ): MessagesResponse
 
     /** Creates a new message (or a reply when `parentId` is set). The created

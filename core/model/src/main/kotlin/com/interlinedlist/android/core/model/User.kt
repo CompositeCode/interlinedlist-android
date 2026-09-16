@@ -21,4 +21,10 @@ data class User(
      * overrides it. Defaults to public, matching the server default.
      */
     val defaultPubliclyVisible: Boolean = true,
+    /**
+     * Which messages the Home feed shows (Settings -> View Preferences on the
+     * web). The server applies it when it builds the feed; the client saves it and
+     * reloads. Defaults to [ViewingPreference.ALL], matching the server default.
+     */
+    val viewingPreference: ViewingPreference = ViewingPreference.DEFAULT,
 )
