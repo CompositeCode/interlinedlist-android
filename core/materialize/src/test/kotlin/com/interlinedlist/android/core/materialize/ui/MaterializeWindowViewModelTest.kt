@@ -253,6 +253,57 @@ class MaterializeWindowViewModelTest {
         }
 
     @Test
+    fun `reopening after a reset starts a clean window`() = runTest(dispatcher) {
+        repository.result = ApiResult.Success(
+            MaterializeOutcome.ListCreated(MaterializedList("lst_new", "Books to Read")),
+        )
+        val vm = viewModel()
+        vm.updateTitle("Edited title")
+        vm.confirm()
+        advanceUntilIdle()
+        assertThat(vm.state.success).isNotNull()
+
+        // The host closed the window: the flow is over.
+        vm.reset()
+        assertThat(vm.uiState.value).isNull()
+
+        // The identical launch must not resurrect the finished one.
+        vm.start(MaterializeLaunch(source, MaterializeTarget.LIST, preview()))
+
+        assertThat(vm.state.success).isNull()
+        assertThat(vm.state.title).isEqualTo("Books to Read")
+    }
+
+    @Test
+    fun `a previewed draft body is shown but never sent`() = runTest(dispatcher) {
+        repository.result = ApiResult.Success(
+            MaterializeOutcome.DraftReady(
+                MessageDraft("Server copy", listOf("Server copy"), isThread = false, charLimit = 300),
+            ),
+        )
+        val vm = MaterializeWindowViewModel(repository).also {
+            it.start(
+                MaterializeLaunch(
+                    source = source,
+                    initialTarget = MaterializeTarget.MESSAGE,
+                    preview = preview().copy(draftBody = "Books to Read\n\nMy reading backlog."),
+                ),
+            )
+        }
+
+        assertThat(vm.state.preview.draftBody).isEqualTo("Books to Read\n\nMy reading backlog.")
+
+        vm.confirm()
+        advanceUntilIdle()
+
+        // The composer must receive the body the server sized, not the one the
+        // entry point guessed, so the guess stays on the device.
+        val request = sentRequest() as MaterializeRequest.ToMessageDraft
+        assertThat(request.messageConfig).isNull()
+        assertThat(vm.state.success?.draft?.content).isEqualTo("Server copy")
+    }
+
+    @Test
     fun `a messages source does not offer the message destination`() = runTest(dispatcher) {
         val vm = viewModel(source = MaterializeSource.Messages(listOf("msg_1")))
 

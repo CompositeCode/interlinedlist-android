@@ -33,18 +33,29 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.interlinedlist.android.core.designsystem.theme.InterlinedListTheme
+import com.interlinedlist.android.core.materialize.domain.MaterializeTarget
+import com.interlinedlist.android.core.materialize.ui.MaterializeWindow
+import com.interlinedlist.android.core.materialize.ui.MaterializeWindowViewModel
 import com.interlinedlist.android.feature.documents.domain.Presence
 import com.interlinedlist.android.feature.documents.ui.common.MarkdownText
+import com.interlinedlist.android.feature.documents.ui.materialize.CreateFromMenu
+import com.interlinedlist.android.feature.documents.ui.materialize.CreateFromTestTags
 import com.interlinedlist.android.feature.documents.ui.presence.PresenceIndicator
 
 /** Stable test tags for the editor. */
@@ -64,6 +75,7 @@ object DocumentEditorTestTags {
     const val CONFLICT_RELOAD = "editorConflictReload"
     const val CONFLICT_RETRY = "editorConflictRetry"
     const val OFFLINE_HINT = "editorOfflineHint"
+    const val SELECTION_BAR = "editorSelectionBar"
 }
 
 /**
@@ -78,6 +90,8 @@ fun DocumentEditorRoute(
     modifier: Modifier = Modifier,
     onOpenShare: () -> Unit = {},
     onOpenManageAccess: () -> Unit = {},
+    onOpenDocument: (String) -> Unit = {},
+    onOpenList: (String) -> Unit = {},
     presenceViewModel: com.interlinedlist.android.feature.documents.ui.presence.DocumentPresenceViewModel = hiltViewModel(),
     viewModel: DocumentEditorViewModel = hiltViewModel(),
 ) {
@@ -108,6 +122,31 @@ fun DocumentEditorRoute(
         }
     }
 
+    // The shared "Create from…" window, opened on whichever destination the
+    // ＋ Create menu picked — for the whole document or for the selection. Its
+    // ViewModel is hoisted so that closing the window ends the flow, while a
+    // recomposition or a rotation keeps the edits.
+    val materializeViewModel: MaterializeWindowViewModel = hiltViewModel()
+    val closeCreateFrom = {
+        materializeViewModel.reset()
+        viewModel.dismissCreateFrom()
+    }
+    state.createFrom?.let { launch ->
+        MaterializeWindow(
+            launch = launch,
+            onDismiss = closeCreateFrom,
+            onOpenList = { list ->
+                closeCreateFrom()
+                onOpenList(list.id)
+            },
+            onOpenDocument = { document ->
+                closeCreateFrom()
+                onOpenDocument(document.id)
+            },
+            viewModel = materializeViewModel,
+        )
+    }
+
     DocumentEditorScreen(
         state = state,
         onTitleChange = viewModel::onTitleChange,
@@ -125,6 +164,8 @@ fun DocumentEditorRoute(
         onOpenManageAccess = onOpenManageAccess,
         onReloadConflict = viewModel::reloadForConflict,
         onRetrySave = { viewModel.save() },
+        onCreateFrom = viewModel::createFrom,
+        onCreateFromSelection = viewModel::createFromSelection,
         presenceParticipants = presenceState.participants,
         modifier = modifier,
     )
@@ -147,8 +188,25 @@ fun DocumentEditorScreen(
     onOpenManageAccess: () -> Unit = {},
     onReloadConflict: () -> Unit = {},
     onRetrySave: () -> Unit = {},
+    onCreateFrom: (MaterializeTarget) -> Unit = {},
+    onCreateFromSelection: (String, MaterializeTarget) -> Unit = { _, _ -> },
     presenceParticipants: List<Presence> = emptyList(),
 ) {
+    // The body is edited through a TextFieldValue so the highlighted range is
+    // known: "Create from selection" needs the selected markdown, not just the
+    // text. The ViewModel keeps owning the content; this only tracks selection,
+    // and re-syncs when the content changes underneath us (a reload, a conflict
+    // resolution, an inserted image).
+    var body by remember { mutableStateOf(TextFieldValue(state.content)) }
+    var selection by remember { mutableStateOf<TextRange?>(null) }
+    LaunchedEffect(state.content) {
+        if (body.text != state.content) {
+            body = body.copy(text = state.content, selection = TextRange(state.content.length))
+            selection = null
+        }
+    }
+    val selectedMarkdown = body.textIn(selection)
+
     Scaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
@@ -181,6 +239,11 @@ fun DocumentEditorScreen(
                             Icon(Icons.Default.Image, contentDescription = "Insert image")
                         }
                     }
+                    CreateFromMenu(
+                        onSelectTarget = onCreateFrom,
+                        contentDescription = "Create from this document",
+                        modifier = Modifier.testTag(CreateFromTestTags.EDITOR),
+                    )
                     IconButton(
                         onClick = onOpenManageAccess,
                         modifier = Modifier.testTag(DocumentEditorTestTags.MANAGE_ACCESS),
@@ -294,9 +357,19 @@ fun DocumentEditorScreen(
                         .testTag(DocumentEditorTestTags.PREVIEW),
                 )
             } else {
+                if (selectedMarkdown.isNotBlank()) {
+                    SelectionBar(
+                        onCreateFrom = { target -> onCreateFromSelection(selectedMarkdown, target) },
+                    )
+                }
                 OutlinedTextField(
-                    value = state.content,
-                    onValueChange = onContentChange,
+                    value = body,
+                    onValueChange = { edited ->
+                        val textChanged = edited.text != body.text
+                        selection = pinnedSelection(selection, edited, textChanged)
+                        body = edited
+                        if (textChanged) onContentChange(edited.text)
+                    },
                     label = { Text("Markdown") },
                     modifier = Modifier
                         .fillMaxSize()
@@ -306,6 +379,33 @@ fun DocumentEditorScreen(
                 )
             }
         }
+    }
+}
+
+/**
+ * The Selection action: turn just the highlighted markdown into a list, a
+ * document or a post. It appears only while something is highlighted, which is
+ * the only time a `docElements` source can be built.
+ */
+@Composable
+private fun SelectionBar(onCreateFrom: (MaterializeTarget) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(DocumentEditorTestTags.SELECTION_BAR),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "Selection",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        CreateFromMenu(
+            onSelectTarget = onCreateFrom,
+            label = "Create",
+            modifier = Modifier.testTag(CreateFromTestTags.SELECTION),
+        )
     }
 }
 

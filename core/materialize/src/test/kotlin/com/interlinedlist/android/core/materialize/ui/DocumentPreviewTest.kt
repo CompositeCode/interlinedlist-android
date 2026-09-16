@@ -85,4 +85,33 @@ class DocumentPreviewTest {
 
         assertThat(rendered).isEqualTo("# Launch notes")
     }
+
+    @Test
+    fun `a source that is already a document is previewed verbatim`() {
+        val markdown = "# Launch notes\n\n- Ship it\n- Tell everyone\n"
+
+        val rendered = renderDocumentPreview(
+            title = "Copy of Launch notes",
+            preview = preview.copy(documentMarkdown = markdown),
+            listStyle = DocumentListStyle.NUMBERED,
+            rowDataStyle = RowDataStyle.SUB_ITEMS,
+        )
+
+        // The rows and the edited title are ignored: this destination copies the
+        // source document through rather than rendering a table as bullets.
+        assertThat(rendered).isEqualTo("# Launch notes\n\n- Ship it\n- Tell everyone")
+        assertThat(rendered).doesNotContain("The Dream Machine")
+    }
+
+    @Test
+    fun `a blank verbatim markdown falls back to rendering the rows`() {
+        val rendered = renderDocumentPreview(
+            title = "Books to Read",
+            preview = preview.copy(documentMarkdown = "   "),
+            listStyle = DocumentListStyle.BULLETED,
+            rowDataStyle = RowDataStyle.INLINE,
+        )
+
+        assertThat(rendered).contains("- The Dream Machine")
+    }
 }
