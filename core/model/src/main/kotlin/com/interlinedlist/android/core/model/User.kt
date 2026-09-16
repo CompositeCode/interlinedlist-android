@@ -15,4 +15,10 @@ data class User(
     val bio: String?,
     val emailVerified: Boolean,
     val customerStatus: CustomerStatus,
+    /**
+     * The account's default post visibility (Settings -> Message Settings on the
+     * web). Seeds the composer's Public/Private toggle; a per-message choice
+     * overrides it. Defaults to public, matching the server default.
+     */
+    val defaultPubliclyVisible: Boolean = true,
 )

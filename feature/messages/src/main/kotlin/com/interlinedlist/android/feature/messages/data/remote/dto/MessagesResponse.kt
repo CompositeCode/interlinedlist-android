@@ -79,18 +79,26 @@ data class CrossPostStatusDto(
  * [imageUrls] / [videoUrls] carry media previously uploaded via the upload
  * endpoints, and [scheduledAt] (ISO-8601) defers publishing to a future time.
  *
+ * [publiclyVisible] decides whether the message lands on the public feed or stays
+ * visible only to its author. The composer always sends an explicit value (seeded
+ * from the account's `defaultPubliclyVisible` preference) so the server default
+ * never silently decides; it stays nullable for the call sites that do not offer
+ * the choice (e.g. replies).
+ *
  * Cross-posting targets are encoded per the create schema: [mastodonProviderIds]
  * lists the selected mastodon identity ids (a user may link several instances),
  * while [crossPostToBluesky] / [crossPostToLinkedIn] / [crossPostToTwitter] are
  * single boolean flags for the one-account networks.
  *
  * Only non-null fields are serialised (the shared Json uses `explicitNulls =
- * false`), so a plain InterlinedList-only post still sends just `{ content }`.
+ * false`), so a plain InterlinedList-only post sends just
+ * `{ content, publiclyVisible }`.
  */
 @Serializable
 data class CreateMessageRequest(
     val content: String,
     val parentId: String? = null,
+    val publiclyVisible: Boolean? = null,
     val imageUrls: List<String>? = null,
     val videoUrls: List<String>? = null,
     val scheduledAt: String? = null,

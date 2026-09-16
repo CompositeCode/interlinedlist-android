@@ -39,6 +39,12 @@ data class Message(
      * it was posted; null for an un-edited message. Drives the "edited" indicator.
      */
     val editedAt: String? = null,
+    /**
+     * False when the message is private (visible only to its author). Public is
+     * the server default, so an older cache row or a payload that omits the
+     * field reads as public.
+     */
+    val publiclyVisible: Boolean = true,
 ) {
     /** Best available display label for the author. */
     val authorLabel: String get() = authorDisplayName?.takeIf { it.isNotBlank() } ?: authorUsername
@@ -48,6 +54,16 @@ data class Message(
 
     /** True when the message has been edited since it was posted. */
     val isEdited: Boolean get() = editedAt != null
+
+    /** [publiclyVisible] as a domain value. */
+    val visibility: MessageVisibility get() = MessageVisibility.of(publiclyVisible)
+
+    /**
+     * True when the card should mark this message as private. Only the author's
+     * own private messages are marked — public messages are never badged, and
+     * another user's message is never labelled on the viewer's behalf.
+     */
+    val showsPrivateBadge: Boolean get() = mine && !publiclyVisible
 }
 
 /**

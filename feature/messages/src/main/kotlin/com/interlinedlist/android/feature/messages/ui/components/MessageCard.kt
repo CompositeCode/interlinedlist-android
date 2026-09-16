@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.FavoriteBorder
@@ -52,6 +53,9 @@ object MessageCardTags {
     const val REPORT_USER = "messageReportUser"
     const val BODY = "messageBody"
     const val EDITED = "messageEdited"
+
+    /** The "Private" marker shown on the author's own non-public messages. */
+    const val PRIVATE = "messagePrivate"
 }
 
 /**
@@ -104,6 +108,10 @@ fun MessageCard(
                         modifier = Modifier.testTag(MessageCardTags.EDITED),
                     )
                 }
+                if (message.showsPrivateBadge) {
+                    Spacer(Modifier.width(6.dp))
+                    PrivateBadge()
+                }
                 Spacer(Modifier.weight(1f))
                 MessageMenu(
                     isMine = message.mine,
@@ -146,6 +154,36 @@ fun MessageCard(
                 )
             }
         }
+    }
+}
+
+/**
+ * The "Private" marker: an icon plus label making it unmistakable that only the
+ * author can see this message. Public messages carry no badge at all, so the
+ * marker only ever means "not on the feed".
+ */
+@Composable
+private fun PrivateBadge() {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .clip(MaterialTheme.shapes.small)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 6.dp, vertical = 2.dp)
+            .testTag(MessageCardTags.PRIVATE),
+    ) {
+        Icon(
+            imageVector = Icons.Filled.Lock,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(12.dp),
+        )
+        Spacer(Modifier.width(4.dp))
+        Text(
+            text = "Private",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

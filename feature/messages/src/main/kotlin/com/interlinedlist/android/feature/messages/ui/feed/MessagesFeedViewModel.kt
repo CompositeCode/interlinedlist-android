@@ -9,6 +9,7 @@ import com.interlinedlist.android.feature.messages.domain.CrossPostSelection
 import com.interlinedlist.android.feature.messages.domain.CrossPostStatus
 import com.interlinedlist.android.feature.messages.domain.LinkedNetwork
 import com.interlinedlist.android.feature.messages.domain.Message
+import com.interlinedlist.android.feature.messages.domain.MessageVisibility
 import com.interlinedlist.android.feature.messages.domain.ReportReason
 import com.interlinedlist.android.feature.messages.ui.isSubscriptionGate
 import com.interlinedlist.android.feature.messages.ui.toUserMessage
@@ -47,6 +48,11 @@ data class MessagesFeedUiState(
     val attachments: List<PendingAttachment> = emptyList(),
     /** Optional future send time (ISO-8601) for the in-progress compose. */
     val scheduledAt: String? = null,
+    /**
+     * Visibility the in-progress compose will post with: the account's
+     * `defaultPubliclyVisible` preference unless the user overrode it here.
+     */
+    val composeVisibility: MessageVisibility = MessageVisibility.PUBLIC,
     /** The caller's already-linked networks, offered as cross-post destinations. */
     val linkedNetworks: List<LinkedNetwork> = emptyList(),
     /** Ids of the linked networks currently selected as cross-post targets. */
@@ -107,6 +113,10 @@ private data class FeedTransientState(
     val isPosting: Boolean = false,
     val attachments: List<PendingAttachment> = emptyList(),
     val scheduledAt: String? = null,
+    /** The account preference; the fallback until/unless the user overrides it. */
+    val defaultVisibility: MessageVisibility = MessageVisibility.PUBLIC,
+    /** The user's per-message choice for the open composer; null = use the default. */
+    val visibilityOverride: MessageVisibility? = null,
     val linkedNetworks: List<LinkedNetwork> = emptyList(),
     val selectedNetworkIds: Set<String> = emptySet(),
     val crossPostStatuses: List<CrossPostStatus> = emptyList(),
@@ -117,7 +127,10 @@ private data class FeedTransientState(
     val isSavingEdit: Boolean = false,
     val moderationTarget: ModerationTarget? = null,
     val isModerating: Boolean = false,
-)
+) {
+    /** A per-message override always wins over the account default. */
+    val composeVisibility: MessageVisibility get() = visibilityOverride ?: defaultVisibility
+}
 
 @HiltViewModel
 class MessagesFeedViewModel @Inject constructor(
@@ -144,6 +157,7 @@ class MessagesFeedViewModel @Inject constructor(
                 isPosting = t.isPosting,
                 attachments = t.attachments,
                 scheduledAt = t.scheduledAt,
+                composeVisibility = t.composeVisibility,
                 linkedNetworks = t.linkedNetworks,
                 selectedNetworkIds = t.selectedNetworkIds,
                 crossPostStatuses = t.crossPostStatuses,
@@ -164,6 +178,21 @@ class MessagesFeedViewModel @Inject constructor(
     init {
         refresh()
         loadLinkedNetworks()
+        loadDefaultVisibility()
+    }
+
+    /**
+     * Loads the account's default post visibility so the composer opens on the
+     * user's preference. Best-effort: a failure leaves the default at public and
+     * does not surface a feed-level error. A per-message override is preserved.
+     */
+    private fun loadDefaultVisibility() {
+        viewModelScope.launch {
+            when (val result = repository.getDefaultVisibility()) {
+                is ApiResult.Success -> transient.update { it.copy(defaultVisibility = result.data) }
+                is ApiResult.Failure -> Unit
+            }
+        }
     }
 
     /**
@@ -249,8 +278,15 @@ class MessagesFeedViewModel @Inject constructor(
             composeText = "",
             attachments = emptyList(),
             scheduledAt = null,
+            // Drop the per-message override; the next compose starts from the default.
+            visibilityOverride = null,
             selectedNetworkIds = emptySet(),
         )
+    }
+
+    /** Overrides the account default for this message only. */
+    fun onVisibilityChange(visibility: MessageVisibility) = transient.update {
+        it.copy(visibilityOverride = visibility)
     }
 
     fun onComposeTextChange(value: String) = transient.update { it.copy(composeText = value) }
@@ -335,6 +371,7 @@ class MessagesFeedViewModel @Inject constructor(
                     videoUrls = videos,
                     scheduledAt = snapshot.scheduledAt,
                     crossPost = crossPost,
+                    visibility = snapshot.composeVisibility,
                 )
             ) {
                 is ApiResult.Success -> transient.update {
@@ -344,6 +381,7 @@ class MessagesFeedViewModel @Inject constructor(
                         composeText = "",
                         attachments = emptyList(),
                         scheduledAt = null,
+                        visibilityOverride = null,
                         selectedNetworkIds = emptySet(),
                         crossPostStatuses = result.data.crossPosts,
                     )

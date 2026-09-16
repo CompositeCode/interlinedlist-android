@@ -15,6 +15,8 @@ data class UserDto(
     val bio: String? = null,
     val emailVerified: Boolean = false,
     val customerStatus: String? = null,
+    /** The account's default post visibility preference; public when absent. */
+    val defaultPubliclyVisible: Boolean = true,
 )
 
 /** Maps the wire model into the domain [User]. */
@@ -27,4 +29,5 @@ fun UserDto.toDomain(): User = User(
     bio = bio,
     emailVerified = emailVerified,
     customerStatus = CustomerStatus.fromApiValue(customerStatus),
+    defaultPubliclyVisible = defaultPubliclyVisible,
 )

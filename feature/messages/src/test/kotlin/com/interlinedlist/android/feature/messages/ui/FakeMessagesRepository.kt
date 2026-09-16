@@ -8,6 +8,7 @@ import com.interlinedlist.android.feature.messages.domain.CrossPostSelection
 import com.interlinedlist.android.feature.messages.domain.CrossPostStatus
 import com.interlinedlist.android.feature.messages.domain.LinkedNetwork
 import com.interlinedlist.android.feature.messages.domain.Message
+import com.interlinedlist.android.feature.messages.domain.MessageVisibility
 import com.interlinedlist.android.feature.messages.domain.ReportReason
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,6 +32,8 @@ class FakeMessagesRepository : MessagesRepository {
     /** Cross-post statuses returned alongside a successful [createResult]. */
     var createCrossPosts: List<CrossPostStatus> = emptyList()
     var linkedNetworksResult: ApiResult<List<LinkedNetwork>> = ApiResult.Success(emptyList())
+    /** The account's default post visibility, as read from `GET /api/user`. */
+    var defaultVisibilityResult: ApiResult<MessageVisibility> = ApiResult.Success(MessageVisibility.PUBLIC)
     var fetchResult: ApiResult<Message>? = null
     var refreshRepliesResult: ApiResult<Unit> = ApiResult.Success(Unit)
     var postReplyResult: ApiResult<Message>? = null
@@ -71,6 +74,7 @@ class FakeMessagesRepository : MessagesRepository {
         val videoUrls: List<String>,
         val scheduledAt: String?,
         val crossPost: CrossPostSelection = CrossPostSelection.NONE,
+        val visibility: MessageVisibility = MessageVisibility.PUBLIC,
     )
 
     /** Snapshot of the arguments passed to the last [report] call. */
@@ -112,8 +116,9 @@ class FakeMessagesRepository : MessagesRepository {
         videoUrls: List<String>,
         scheduledAt: String?,
         crossPost: CrossPostSelection,
+        visibility: MessageVisibility,
     ): ApiResult<CreatedMessage> {
-        lastCreate = CreateArgs(content, imageUrls, videoUrls, scheduledAt, crossPost)
+        lastCreate = CreateArgs(content, imageUrls, videoUrls, scheduledAt, crossPost, visibility)
         return when (val result = createResult) {
             is ApiResult.Success -> ApiResult.Success(CreatedMessage(result.data, createCrossPosts))
             is ApiResult.Failure -> result
@@ -122,6 +127,8 @@ class FakeMessagesRepository : MessagesRepository {
     }
 
     override suspend fun getLinkedNetworks(): ApiResult<List<LinkedNetwork>> = linkedNetworksResult
+
+    override suspend fun getDefaultVisibility(): ApiResult<MessageVisibility> = defaultVisibilityResult
 
     override suspend fun uploadImage(bytes: ByteArray, fileName: String, mimeType: String): ApiResult<String> {
         uploadedImages++
@@ -234,6 +241,7 @@ fun sampleMessage(
     scheduledAt: String? = null,
     authorUsername: String = "adron",
     editedAt: String? = null,
+    publiclyVisible: Boolean = true,
 ) = Message(
     id = id,
     content = content,
@@ -251,4 +259,5 @@ fun sampleMessage(
     videoUrls = videoUrls,
     scheduledAt = scheduledAt,
     editedAt = editedAt,
+    publiclyVisible = publiclyVisible,
 )

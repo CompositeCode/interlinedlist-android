@@ -165,4 +165,19 @@ class MessageDtoMapperTest {
 
         assertThat(message.linkPreview).isNull()
     }
+
+    @Test
+    fun `maps publiclyVisible into the domain`() {
+        val message = MessageDto(id = "m11", content = "shh", publiclyVisible = false)
+            .toDomain(currentUserId = null)
+
+        assertThat(message.publiclyVisible).isFalse()
+    }
+
+    @Test
+    fun `defaults to public when the payload omits publiclyVisible`() {
+        val message = MessageDto(id = "m12", content = "hi").toDomain(currentUserId = null)
+
+        assertThat(message.publiclyVisible).isTrue()
+    }
 }

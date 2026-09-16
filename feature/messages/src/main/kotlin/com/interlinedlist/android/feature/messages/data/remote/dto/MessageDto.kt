@@ -36,6 +36,8 @@ data class MessageDto(
     val linkMetadata: LinkMetadataDto? = null,
     /** Future send time for a scheduled message; null once published. */
     val scheduledAt: String? = null,
+    /** False when the message is private (visible only to its author). */
+    val publiclyVisible: Boolean = true,
 )
 
 /** Author identity embedded in a message. */
@@ -87,6 +89,7 @@ fun MessageDto.toDomain(currentUserId: String?): Message {
         videoUrls = videoUrls,
         linkPreview = linkMetadata?.toDomain(),
         scheduledAt = scheduledAt,
+        publiclyVisible = publiclyVisible,
     )
 }
 
