@@ -3,6 +3,7 @@ package com.interlinedlist.android.feature.profile.ui
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.datastore.ThemeMode
 import com.interlinedlist.android.feature.profile.data.SettingsRepository
+import com.interlinedlist.android.feature.profile.domain.LocationUpdate
 import com.interlinedlist.android.feature.profile.domain.UserSettings
 import com.interlinedlist.android.feature.profile.domain.UserSettingsUpdate
 import kotlinx.coroutines.flow.Flow
@@ -74,6 +75,18 @@ class FakeSettingsRepository : SettingsRepository {
             isPrivateAccount = update.isPrivateAccount ?: current.isPrivateAccount,
             notificationTrayLimit =
                 update.notificationTrayLimit ?: current.notificationTrayLimit,
+            // The location has three states, so it cannot collapse into an elvis:
+            // absent leaves the pair alone, Set replaces it, Clear removes it.
+            latitude = when (val location = update.location) {
+                null -> current.latitude
+                is LocationUpdate.Set -> location.coordinates.latitude
+                LocationUpdate.Clear -> null
+            },
+            longitude = when (val location = update.location) {
+                null -> current.longitude
+                is LocationUpdate.Set -> location.coordinates.longitude
+                LocationUpdate.Clear -> null
+            },
         )
     }
 }

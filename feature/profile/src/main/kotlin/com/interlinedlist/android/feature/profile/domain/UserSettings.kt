@@ -72,6 +72,7 @@ data class UserSettings(
     val viewingPreference: ViewingPreference = ViewingPreference.DEFAULT,
     val showPreviews: Boolean = true,
     val showAdvancedPostSettings: Boolean? = null,
+    /** The profile location, present only when the account has one set. */
     val latitude: Double? = null,
     val longitude: Double? = null,
     val isPrivateAccount: Boolean? = null,
@@ -84,9 +85,10 @@ data class UserSettings(
  * all optional. A null field means "leave it alone" — it is omitted from the request
  * body entirely, so changing one preference can never clobber another.
  *
- * (Consequence to be aware of: a nullable server field such as `latitude` cannot be
- * *cleared* through this type. Nothing needs that yet; whichever settings group does
- * will have to model the clear explicitly.)
+ * A consequence of that rule is that a nullable server field cannot be *cleared* by
+ * setting it to null here — null already means "leave it alone". A field that has to
+ * be clearable therefore models the clear explicitly, which is what [location] does
+ * for the coordinates (see [LocationUpdate]).
  */
 data class UserSettingsUpdate(
     val displayName: String? = null,
@@ -99,8 +101,8 @@ data class UserSettingsUpdate(
     val viewingPreference: ViewingPreference? = null,
     val showPreviews: Boolean? = null,
     val showAdvancedPostSettings: Boolean? = null,
-    val latitude: Double? = null,
-    val longitude: Double? = null,
+    /** Set or clear the profile location; null leaves the stored coordinates alone. */
+    val location: LocationUpdate? = null,
     val isPrivateAccount: Boolean? = null,
     val githubDefaultRepo: String? = null,
     val notificationTrayLimit: Int? = null,

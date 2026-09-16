@@ -1,6 +1,7 @@
 package com.interlinedlist.android.feature.profile.data.remote.dto
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
 
 /**
  * Body for `PATCH /api/user/update`. Every field the endpoint accepts is modelled
@@ -12,6 +13,14 @@ import kotlinx.serialization.Serializable
  * matching the types the same fields come back with on `UserWire`. The generated
  * spec types several of them as `string` because the route handler coerces its
  * input, which native types satisfy too.
+ *
+ * [latitude] and [longitude] are the exception: they are typed as [JsonElement] so
+ * the profile location can be **cleared**. With `explicitNulls = false` a Kotlin
+ * `null` is dropped from the body, which is how "leave this field alone" is said, so
+ * there would otherwise be no way to say "unset it". A `JsonNull` is not a Kotlin
+ * null, so it survives serialisation and goes out as a literal `null`; a
+ * `JsonPrimitive(47.6062)` goes out as the number the live API returns. Nothing else
+ * needs this, so nothing else pays for it.
  */
 @Serializable
 data class UpdateProfileRequest(
@@ -25,8 +34,8 @@ data class UpdateProfileRequest(
     val viewingPreference: String? = null,
     val showPreviews: Boolean? = null,
     val showAdvancedPostSettings: Boolean? = null,
-    val latitude: Double? = null,
-    val longitude: Double? = null,
+    val latitude: JsonElement? = null,
+    val longitude: JsonElement? = null,
     val isPrivateAccount: Boolean? = null,
     val githubDefaultRepo: String? = null,
     val notificationTrayLimit: Int? = null,
