@@ -51,6 +51,21 @@ class MaterializeWindowViewModel @Inject constructor(
     }
 
     /**
+     * Ends the flow: the next [start] opens a clean window even if it is handed
+     * the identical launch.
+     *
+     * [start] deliberately keeps the edits when it is re-entered with the same
+     * launch, so a recomposition or a rotation does not throw the user's work
+     * away. That leaves the host to say when the flow is actually over — closing
+     * the window — because only the host can tell the two apart.
+     */
+    fun reset() {
+        activeLaunch = null
+        nextUiId = 0L
+        _uiState.value = null
+    }
+
+    /**
      * Switches destination from inside the window. Nothing is discarded here:
      * the edits stay in state and [MaterializeWindowUiState.toRequest] decides
      * which of them the new destination can carry.

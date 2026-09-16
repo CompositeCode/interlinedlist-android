@@ -73,6 +73,7 @@ object MaterializeWindowTestTags {
     const val ADD_COLUMN = "materializeAddColumn"
     const val TABLE_PREVIEW = "materializeTablePreview"
     const val DOCUMENT_PREVIEW = "materializeDocumentPreview"
+    const val DRAFT_PREVIEW = "materializeDraftPreview"
     const val FILE_NAME = "materializeFileName"
     const val CONFIRM = "materializeConfirm"
     const val CANCEL = "materializeCancel"
@@ -286,7 +287,7 @@ private fun EditorPane(
         Banners(state)
 
         if (state.createsDraft) {
-            DraftNotice()
+            DraftNotice(state.preview.draftBody)
             return@Column
         }
 
@@ -373,7 +374,7 @@ private fun Banners(state: MaterializeWindowUiState) {
 
 /** The one destination that creates nothing: it hands the composer a draft. */
 @Composable
-private fun DraftNotice() {
+private fun DraftNotice(draftBody: String?) {
     Card {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("Opens in the composer", style = MaterialTheme.typography.titleMedium)
@@ -382,6 +383,18 @@ private fun DraftNotice() {
                     "selection and the composer opens with it, so you can edit it, add " +
                     "cross-post targets or a schedule, and post it yourself.",
                 style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+    }
+    // What the source reads as, when the entry point could work it out. The
+    // server still builds and sizes the body it hands the composer, so this is
+    // shown as a preview and never sent.
+    draftBody?.takeIf { it.isNotBlank() }?.let { body ->
+        Card(Modifier.testTag(MaterializeWindowTestTags.DRAFT_PREVIEW)) {
+            Text(
+                text = body,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(12.dp),
             )
         }
     }

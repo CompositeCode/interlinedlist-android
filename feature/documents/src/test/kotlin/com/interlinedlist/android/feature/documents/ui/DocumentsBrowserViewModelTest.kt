@@ -4,6 +4,8 @@ import androidx.lifecycle.SavedStateHandle
 import com.google.common.truth.Truth.assertThat
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
+import com.interlinedlist.android.core.materialize.domain.MaterializeSource
+import com.interlinedlist.android.core.materialize.domain.MaterializeTarget
 import com.interlinedlist.android.feature.ai.domain.AiAvailability
 import com.interlinedlist.android.feature.ai.domain.AiGate
 import com.interlinedlist.android.feature.ai.domain.AiQuota
@@ -256,6 +258,87 @@ class DocumentsBrowserViewModelTest {
 
         assertThat(vm.uiState.value.searchResults).isEmpty()
         assertThat(repo.lastSearchQuery).isNull()
+    }
+
+    // --- "Create from…" on a browser row -----------------------------------
+
+    @Test
+    fun `create from a row opens the window on an id-only document source`() =
+        runTest(dispatcher) {
+            val document = testDocument("d1", title = "Launch plan", content = "# Launch plan\n- Ship it")
+            repo.documents.value = listOf(document)
+
+            val vm = rootViewModel()
+            advanceUntilIdle()
+            vm.createFrom(document, MaterializeTarget.LIST)
+            advanceUntilIdle()
+
+            val launch = requireNotNull(vm.uiState.value.createFrom)
+            assertThat(launch.source).isEqualTo(MaterializeSource.Document("d1"))
+            assertThat(launch.initialTarget).isEqualTo(MaterializeTarget.LIST)
+            // The heading and the bullet are previewed as the rows they become.
+            assertThat(launch.preview.rows.map { it.values["text"] })
+                .containsExactly("Launch plan", "Ship it").inOrder()
+        }
+
+    @Test
+    fun `the destination the menu picked is the one the window opens on`() = runTest(dispatcher) {
+        val document = testDocument("d1", content = "- Ship it")
+        val vm = rootViewModel()
+        advanceUntilIdle()
+
+        vm.createFrom(document, MaterializeTarget.BOTH)
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.createFrom?.initialTarget).isEqualTo(MaterializeTarget.BOTH)
+    }
+
+    @Test
+    fun `a row with no cached body fetches it before previewing`() = runTest(dispatcher) {
+        // The index endpoint omits bodies, so the row knows only its snippet.
+        val row = testDocument("d1", title = "Launch plan")
+        repo.refreshDocumentResult = ApiResult.Success(
+            testDocument("d1", title = "Launch plan", content = "# Launch plan\n- Ship it"),
+        )
+
+        val vm = rootViewModel()
+        advanceUntilIdle()
+        vm.createFrom(row, MaterializeTarget.LIST)
+        advanceUntilIdle()
+
+        val launch = requireNotNull(vm.uiState.value.createFrom)
+        assertThat(launch.preview.rows.map { it.values["text"] })
+            .containsExactly("Launch plan", "Ship it").inOrder()
+    }
+
+    @Test
+    fun `a body that cannot be fetched still opens the window on the document`() =
+        runTest(dispatcher) {
+            repo.refreshDocumentResult = ApiResult.Failure(AppError.Network("offline"))
+
+            val vm = rootViewModel()
+            advanceUntilIdle()
+            vm.createFrom(testDocument("d1", title = "Launch plan"), MaterializeTarget.LIST)
+            advanceUntilIdle()
+
+            // Only the id is ever sent, so a missing preview is a worse preview —
+            // not a wrong creation.
+            val launch = requireNotNull(vm.uiState.value.createFrom)
+            assertThat(launch.source).isEqualTo(MaterializeSource.Document("d1"))
+            assertThat(launch.preview.suggestedTitle).isEqualTo("Launch plan")
+            assertThat(launch.preview.rows).isEmpty()
+        }
+
+    @Test
+    fun `dismissing the window clears it`() = runTest(dispatcher) {
+        val vm = rootViewModel()
+        advanceUntilIdle()
+        vm.createFrom(testDocument("d1", content = "- Ship it"), MaterializeTarget.LIST)
+        advanceUntilIdle()
+
+        vm.dismissCreateFrom()
+
+        assertThat(vm.uiState.value.createFrom).isNull()
     }
 
     @Test

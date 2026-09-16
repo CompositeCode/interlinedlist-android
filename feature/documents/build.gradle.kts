@@ -37,6 +37,11 @@ dependencies {
     // feature modules that use them, which is what the Powered Document entry
     // point on this surface is. No other feature module is depended on.
     implementation(project(":feature:ai"))
+    // "Create from…": the shared materialize domain, repository and the one
+    // preview/edit/confirm window every entry point opens. It is a :core:
+    // capability, not a feature dependency — documents only supplies the source
+    // and the preview it can derive locally.
+    implementation(project(":core:materialize"))
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
