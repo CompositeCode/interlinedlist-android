@@ -37,12 +37,14 @@ fun NavController.navigateToNewDm() = navigate(DirectMessagesDestinations.NEW_ME
  *
  * The app wires this into its top-level NavHost (see the module's report for the
  * exact snippet). [onBack] pops the current destination; [onOpenThread] lets the
- * host decide how threads are pushed.
+ * host decide how threads are pushed. [onFindPeople] should open the host's user
+ * search so someone with no messageable contacts can go and follow people.
  */
 fun NavGraphBuilder.directMessagesGraph(
     onBack: () -> Unit,
     onOpenThread: (username: String) -> Unit,
     onComposeNew: () -> Unit,
+    onFindPeople: () -> Unit,
 ) {
     composable(DirectMessagesDestinations.INBOX) {
         InboxRoute(
@@ -64,6 +66,7 @@ fun NavGraphBuilder.directMessagesGraph(
         NewMessageRoute(
             onBack = onBack,
             onRecipientChosen = onOpenThread,
+            onFindPeople = onFindPeople,
         )
     }
 }

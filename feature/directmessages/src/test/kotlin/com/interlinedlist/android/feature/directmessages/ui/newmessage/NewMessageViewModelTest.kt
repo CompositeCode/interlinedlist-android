@@ -67,4 +67,81 @@ class NewMessageViewModelTest {
         assertThat(vm.uiState.value.isLoading).isFalse()
         assertThat(vm.uiState.value.errorMessage).isNotNull()
     }
+
+    // ---- loading / loaded-but-empty / error are three distinct states ----
+
+    @Test
+    fun `content is Loading while the first load is in flight`() = runTest(dispatcher) {
+        val repo = FakeDirectMessagesRepository()
+        repo.recipientsResult = ApiResult.Success(listOf(adron))
+
+        val vm = NewMessageViewModel(repo)
+
+        assertThat(vm.uiState.value.content).isEqualTo(NewMessageContent.Loading)
+    }
+
+    @Test
+    fun `content is NoRecipients when the server returns an empty set`() = runTest(dispatcher) {
+        val repo = FakeDirectMessagesRepository()
+        repo.recipientsResult = ApiResult.Success(emptyList())
+
+        val vm = NewMessageViewModel(repo)
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.content).isEqualTo(NewMessageContent.NoRecipients)
+        assertThat(vm.uiState.value.errorMessage).isNull()
+    }
+
+    @Test
+    fun `content is Recipients when the server returns people`() = runTest(dispatcher) {
+        val repo = FakeDirectMessagesRepository()
+        repo.recipientsResult = ApiResult.Success(listOf(adron, blake))
+
+        val vm = NewMessageViewModel(repo)
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.content).isEqualTo(NewMessageContent.Recipients)
+    }
+
+    @Test
+    fun `content is Error on failure, never the empty explanation`() = runTest(dispatcher) {
+        val repo = FakeDirectMessagesRepository()
+        repo.recipientsResult = ApiResult.Failure(AppError.Network("offline"))
+
+        val vm = NewMessageViewModel(repo)
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.content).isEqualTo(NewMessageContent.Error)
+        assertThat(vm.uiState.value.content).isNotEqualTo(NewMessageContent.NoRecipients)
+    }
+
+    @Test
+    fun `a query that matches no one is NoMatches, not the rule explanation`() =
+        runTest(dispatcher) {
+            val repo = FakeDirectMessagesRepository()
+            repo.recipientsResult = ApiResult.Success(listOf(adron, blake))
+            val vm = NewMessageViewModel(repo)
+            advanceUntilIdle()
+
+            vm.onQueryChange("nobody-by-that-name")
+
+            assertThat(vm.uiState.value.content).isEqualTo(NewMessageContent.NoMatches)
+        }
+
+    @Test
+    fun `retry reloads and clears the previous error`() = runTest(dispatcher) {
+        val repo = FakeDirectMessagesRepository()
+        repo.recipientsResult = ApiResult.Failure(AppError.Network("offline"))
+        val vm = NewMessageViewModel(repo)
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.content).isEqualTo(NewMessageContent.Error)
+
+        repo.recipientsResult = ApiResult.Success(listOf(adron))
+        vm.load()
+        advanceUntilIdle()
+
+        assertThat(repo.recipientsCount).isEqualTo(2)
+        assertThat(vm.uiState.value.errorMessage).isNull()
+        assertThat(vm.uiState.value.content).isEqualTo(NewMessageContent.Recipients)
+    }
 }

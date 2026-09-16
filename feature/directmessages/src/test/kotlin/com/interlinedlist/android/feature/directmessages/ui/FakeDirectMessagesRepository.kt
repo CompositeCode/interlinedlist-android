@@ -32,6 +32,7 @@ class FakeDirectMessagesRepository(
     var recipientsResult: ApiResult<List<Recipient>> = ApiResult.Success(emptyList())
     var unreadResult: ApiResult<Int> = ApiResult.Success(0)
 
+    var recipientsCount = 0
     var refreshInboxCount = 0
     var refreshThreadCount = 0
     var pollCount = 0
@@ -74,7 +75,11 @@ class FakeDirectMessagesRepository(
     override suspend fun markRead(id: String): ApiResult<Unit> = markReadResult
     override suspend fun trash(id: String): ApiResult<Unit> = trashResult
     override suspend fun restore(id: String, username: String): ApiResult<Unit> = restoreResult
-    override suspend fun recipients(): ApiResult<List<Recipient>> = recipientsResult
+    override suspend fun recipients(): ApiResult<List<Recipient>> {
+        recipientsCount++
+        return recipientsResult
+    }
+
     override suspend fun unreadCount(): ApiResult<Int> = unreadResult
 
     fun failEverythingWith(error: AppError) {
