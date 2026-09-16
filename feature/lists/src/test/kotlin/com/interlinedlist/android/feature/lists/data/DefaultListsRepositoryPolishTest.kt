@@ -4,6 +4,7 @@ import com.google.common.truth.Truth.assertThat
 import com.interlinedlist.android.core.common.dispatcher.DispatcherProvider
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
+import com.interlinedlist.android.core.network.api.InterlinedListApi
 import com.interlinedlist.android.feature.lists.data.local.CachedListEntity
 import com.interlinedlist.android.feature.lists.data.local.ListDao
 import com.interlinedlist.android.feature.lists.data.remote.ListsApi
@@ -37,7 +38,9 @@ import retrofit2.Retrofit
 class DefaultListsRepositoryPolishTest {
 
     private lateinit var server: MockWebServer
+    private lateinit var retrofit: Retrofit
     private lateinit var api: ListsApi
+    private lateinit var userApi: InterlinedListApi
     private lateinit var dao: FakePolishDao
     private lateinit var repository: DefaultListsRepository
 
@@ -54,13 +57,14 @@ class DefaultListsRepositoryPolishTest {
     @Before
     fun setUp() {
         server = MockWebServer().also { it.start() }
-        api = Retrofit.Builder()
+        retrofit = Retrofit.Builder()
             .baseUrl(server.url("/"))
             .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()
-            .create(ListsApi::class.java)
+        api = retrofit.create(ListsApi::class.java)
+        userApi = retrofit.create(InterlinedListApi::class.java)
         dao = FakePolishDao()
-        repository = DefaultListsRepository(api, dao, json, testDispatchers)
+        repository = DefaultListsRepository(api, userApi, dao, json, testDispatchers)
     }
 
     @After

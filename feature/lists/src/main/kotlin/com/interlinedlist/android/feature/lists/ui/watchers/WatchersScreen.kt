@@ -10,30 +10,38 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.outlined.MailOutline
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -41,9 +49,13 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.interlinedlist.android.core.designsystem.theme.InterlinedListTheme
 import com.interlinedlist.android.feature.lists.domain.Contributor
+import com.interlinedlist.android.feature.lists.domain.InviteRole
+import com.interlinedlist.android.feature.lists.domain.InviteStatus
+import com.interlinedlist.android.feature.lists.domain.ListInvite
 import com.interlinedlist.android.feature.lists.domain.Watcher
 import com.interlinedlist.android.feature.lists.domain.WatcherCandidate
 import com.interlinedlist.android.feature.lists.domain.WatcherRole
+import com.interlinedlist.android.feature.lists.ui.inviteExpiryLabel
 
 /** Stable test tags for the watchers screen. */
 object WatchersTestTags {
@@ -57,6 +69,17 @@ object WatchersTestTags {
     fun remove(userId: String) = "watcherRemove_$userId"
     fun candidate(userId: String) = "watcherCandidate_$userId"
     fun contributor(userId: String) = "contributor_$userId"
+
+    // Email invites.
+    const val INVITE_EMAIL_FIELD = "inviteEmailField"
+    const val INVITE_SEND = "inviteSend"
+    const val INVITE_LIST = "inviteList"
+    const val INVITE_EMPTY = "inviteEmpty"
+    const val INVITE_ERROR = "inviteError"
+    const val INVITE_GATE = "inviteGate"
+    fun inviteEmailRole(role: InviteRole) = "inviteEmailRole_${role.apiValue}"
+    fun inviteRow(token: String) = "inviteRow_$token"
+    fun inviteRevoke(token: String) = "inviteRevoke_$token"
 }
 
 /**
@@ -77,6 +100,10 @@ fun WatchersRoute(
         onAddCandidate = { viewModel.addWatcher(it) },
         onChangeRole = viewModel::changeRole,
         onRemoveWatcher = viewModel::removeWatcher,
+        onInviteEmailChange = viewModel::onInviteEmailChange,
+        onSelectInviteEmailRole = viewModel::selectInviteRole,
+        onSendInvite = viewModel::sendInvite,
+        onRevokeInvite = viewModel::revokeInvite,
         modifier = modifier,
     )
 }
@@ -91,6 +118,10 @@ fun WatchersScreen(
     onAddCandidate: (WatcherCandidate) -> Unit,
     onChangeRole: (Watcher, WatcherRole) -> Unit,
     onRemoveWatcher: (Watcher) -> Unit,
+    onInviteEmailChange: (String) -> Unit,
+    onSelectInviteEmailRole: (InviteRole) -> Unit,
+    onSendInvite: () -> Unit,
+    onRevokeInvite: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -165,6 +196,19 @@ fun WatchersScreen(
                         }
                     }
 
+                    item {
+                        Spacer(Modifier.height(8.dp))
+                        HorizontalDivider()
+                        Spacer(Modifier.height(8.dp))
+                        InviteByEmailSection(
+                            state = state.invites,
+                            onEmailChange = onInviteEmailChange,
+                            onSelectRole = onSelectInviteEmailRole,
+                            onSend = onSendInvite,
+                            onRevoke = onRevokeInvite,
+                        )
+                    }
+
                     if (state.contributors.isNotEmpty()) {
                         item {
                             Text(
@@ -182,6 +226,169 @@ fun WatchersScreen(
                 }
             }
         }
+    }
+}
+
+/**
+ * "Invite by email" — the form for inviting an address that need not have an
+ * account yet, plus the pending invites it produces. Sending is a subscriber
+ * feature; listing and revoking are always available.
+ */
+@Composable
+private fun InviteByEmailSection(
+    state: ListInvitesUiState,
+    onEmailChange: (String) -> Unit,
+    onSelectRole: (InviteRole) -> Unit,
+    onSend: () -> Unit,
+    onRevoke: (String) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(Icons.Outlined.MailOutline, contentDescription = null)
+            Text("Invite by email", style = MaterialTheme.typography.titleMedium)
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = "Invite someone by email address — they don't need an account yet, " +
+                "and the list stays private.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        Spacer(Modifier.height(12.dp))
+        OutlinedTextField(
+            value = state.email,
+            onValueChange = onEmailChange,
+            label = { Text("Email") },
+            singleLine = true,
+            isError = state.emailError != null,
+            supportingText = state.emailError?.let { { Text(it) } },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag(WatchersTestTags.INVITE_EMAIL_FIELD),
+        )
+
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            InviteRole.entries.forEach { role ->
+                FilterChip(
+                    selected = state.role == role,
+                    onClick = { onSelectRole(role) },
+                    label = { Text(role.label) },
+                    modifier = Modifier.testTag(WatchersTestTags.inviteEmailRole(role)),
+                )
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+        Button(
+            onClick = onSend,
+            enabled = state.canSend,
+            modifier = Modifier.testTag(WatchersTestTags.INVITE_SEND),
+        ) { Text(if (state.isSending) "Sending…" else "Send invite") }
+
+        if (state.subscriptionRequired) {
+            Spacer(Modifier.height(8.dp))
+            Column(Modifier.testTag(WatchersTestTags.INVITE_GATE)) {
+                Text(
+                    text = "Subscriber feature",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    text = state.errorMessage ?: "Subscribe to invite people to lists.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        } else if (state.errorMessage != null) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = state.errorMessage,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.testTag(WatchersTestTags.INVITE_ERROR),
+            )
+        }
+
+        Spacer(Modifier.height(16.dp))
+        Text("Pending invites", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(8.dp))
+
+        when {
+            state.isLoading -> CircularProgressIndicator(Modifier.size(24.dp))
+
+            state.isEmpty -> Text(
+                text = "No invites yet.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.testTag(WatchersTestTags.INVITE_EMPTY),
+            )
+
+            // A short, owner-managed list — a plain Column keeps it renderable inside
+            // the screen's LazyColumn without nesting a second lazy list.
+            else -> Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(WatchersTestTags.INVITE_LIST),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                state.invites.forEach { invite ->
+                    PendingInviteRow(invite = invite, onRevoke = { onRevoke(invite.token) })
+                }
+            }
+        }
+    }
+}
+
+/** One pending invite: address, role, derived status and expiry, with Revoke. */
+@Composable
+private fun PendingInviteRow(invite: ListInvite, onRevoke: () -> Unit) {
+    val status = invite.statusAt()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(WatchersTestTags.inviteRow(invite.token)),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = invite.email,
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = "${invite.role.label} · ${inviteExpiryLabel(invite.expiresAt)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        AssistChip(
+            onClick = {},
+            enabled = false,
+            label = { Text(status.label) },
+            colors = AssistChipDefaults.assistChipColors(
+                disabledLabelColor = when (status) {
+                    InviteStatus.ACCEPTED -> MaterialTheme.colorScheme.primary
+                    InviteStatus.EXPIRED, InviteStatus.REVOKED -> MaterialTheme.colorScheme.error
+                    InviteStatus.PENDING -> MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            ),
+        )
+        TextButton(
+            onClick = onRevoke,
+            modifier = Modifier.testTag(WatchersTestTags.inviteRevoke(invite.token)),
+        ) { Text("Revoke") }
     }
 }
 
@@ -331,12 +538,31 @@ private fun WatchersScreenPreview() {
                     Watcher("u2", "grace", null, null, WatcherRole.VIEWER),
                 ),
                 isLoading = false,
+                invites = ListInvitesUiState(
+                    invites = listOf(
+                        ListInvite(
+                            email = "friend@example.com",
+                            token = "tok-a",
+                            role = InviteRole.EDITOR,
+                            expiresAt = null,
+                            createdAt = null,
+                            accepted = false,
+                            revokedAt = null,
+                            url = null,
+                        ),
+                    ),
+                    isLoading = false,
+                ),
             ),
             onBack = {},
             onSearchQueryChange = {},
             onAddCandidate = {},
             onChangeRole = { _, _ -> },
             onRemoveWatcher = {},
+            onInviteEmailChange = {},
+            onSelectInviteEmailRole = {},
+            onSendInvite = {},
+            onRevokeInvite = {},
         )
     }
 }
