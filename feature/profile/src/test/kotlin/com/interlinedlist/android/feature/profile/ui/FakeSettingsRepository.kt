@@ -44,6 +44,11 @@ class FakeSettingsRepository : SettingsRepository {
         return current.copy(
             viewingPreference = update.viewingPreference ?: current.viewingPreference,
             showPreviews = update.showPreviews ?: current.showPreviews,
+            maxMessageLength = update.maxMessageLength ?: current.maxMessageLength,
+            defaultPubliclyVisible = update.defaultPubliclyVisible ?: current.defaultPubliclyVisible,
+            messagesPerPage = update.messagesPerPage ?: current.messagesPerPage,
+            showAdvancedPostSettings =
+                update.showAdvancedPostSettings ?: current.showAdvancedPostSettings,
         )
     }
 }

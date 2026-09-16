@@ -15,6 +15,8 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -59,6 +61,10 @@ class DefaultSettingsRepositoryTest {
     private fun enqueueUser(
         viewingPreference: String = "all_messages",
         showPreviews: Boolean = true,
+        maxMessageLength: Int = 666,
+        defaultPubliclyVisible: Boolean = true,
+        messagesPerPage: Int = 20,
+        showAdvancedPostSettings: Boolean = false,
     ) = server.enqueue(
         MockResponse().setResponseCode(200).setBody(
             """
@@ -68,12 +74,12 @@ class DefaultSettingsRepositoryTest {
                 "username": "adron",
                 "displayName": "Adron Hall",
                 "theme": "dark",
-                "maxMessageLength": 666,
-                "defaultPubliclyVisible": true,
-                "messagesPerPage": 20,
+                "maxMessageLength": $maxMessageLength,
+                "defaultPubliclyVisible": $defaultPubliclyVisible,
+                "messagesPerPage": $messagesPerPage,
                 "viewingPreference": "$viewingPreference",
                 "showPreviews": $showPreviews,
-                "showAdvancedPostSettings": false,
+                "showAdvancedPostSettings": $showAdvancedPostSettings,
                 "latitude": 45.52,
                 "longitude": -122.68,
                 "isPrivateAccount": false,
@@ -216,4 +222,82 @@ class DefaultSettingsRepositoryTest {
             assertThat(settings.showPreviews).isTrue()
             assertThat(settings.notificationTrayLimit).isNull()
         }
+
+    // --- Message preferences (issue #32) -------------------------------------
+    // Each of the four saves alone, and the two numeric ones go out as JSON
+    // numbers rather than the strings the auto-generated spec claims.
+
+    @Test
+    fun `defaultPubliclyVisible PATCHes alone as a JSON boolean`() = runTest(testDispatcher) {
+        enqueueUser(defaultPubliclyVisible = false)
+
+        val result = repository.update(UserSettingsUpdate(defaultPubliclyVisible = false))
+
+        val body = server.takeJsonBody()
+        assertThat(body.keys).containsExactly("defaultPubliclyVisible")
+        val sent = body.getValue("defaultPubliclyVisible").jsonPrimitive
+        assertThat(sent.isString).isFalse()
+        assertThat(sent.booleanOrNull).isFalse()
+        assertThat((result as ApiResult.Success).data.defaultPubliclyVisible).isFalse()
+        assertThat(repository.observeSettings().first()?.defaultPubliclyVisible).isFalse()
+    }
+
+    @Test
+    fun `showAdvancedPostSettings PATCHes alone as a JSON boolean`() = runTest(testDispatcher) {
+        enqueueUser(showAdvancedPostSettings = true)
+
+        val result = repository.update(UserSettingsUpdate(showAdvancedPostSettings = true))
+
+        val body = server.takeJsonBody()
+        assertThat(body.keys).containsExactly("showAdvancedPostSettings")
+        val sent = body.getValue("showAdvancedPostSettings").jsonPrimitive
+        assertThat(sent.isString).isFalse()
+        assertThat(sent.booleanOrNull).isTrue()
+        assertThat((result as ApiResult.Success).data.showAdvancedPostSettings).isTrue()
+    }
+
+    @Test
+    fun `maxMessageLength PATCHes alone as a JSON number`() = runTest(testDispatcher) {
+        enqueueUser(maxMessageLength = 1000)
+
+        val result = repository.update(UserSettingsUpdate(maxMessageLength = 1000))
+
+        val body = server.takeJsonBody()
+        assertThat(body.keys).containsExactly("maxMessageLength")
+        val sent = body.getValue("maxMessageLength").jsonPrimitive
+        assertThat(sent.isString).isFalse()
+        assertThat(sent.intOrNull).isEqualTo(1000)
+        assertThat((result as ApiResult.Success).data.maxMessageLength).isEqualTo(1000)
+        assertThat(repository.observeSettings().first()?.maxMessageLength).isEqualTo(1000)
+    }
+
+    @Test
+    fun `messagesPerPage PATCHes alone as a JSON number`() = runTest(testDispatcher) {
+        enqueueUser(messagesPerPage = 30)
+
+        val result = repository.update(UserSettingsUpdate(messagesPerPage = 30))
+
+        val body = server.takeJsonBody()
+        assertThat(body.keys).containsExactly("messagesPerPage")
+        val sent = body.getValue("messagesPerPage").jsonPrimitive
+        assertThat(sent.isString).isFalse()
+        assertThat(sent.intOrNull).isEqualTo(30)
+        assertThat((result as ApiResult.Success).data.messagesPerPage).isEqualTo(30)
+    }
+
+    @Test
+    fun `a rejected numeric save leaves the cached value untouched`() = runTest(testDispatcher) {
+        enqueueUser(maxMessageLength = 666)
+        repository.refresh()
+        server.takeRequest()
+
+        server.enqueue(
+            MockResponse().setResponseCode(400)
+                .setBody("""{ "error": "maxMessageLength out of range", "code": "bad_request" }"""),
+        )
+        val result = repository.update(UserSettingsUpdate(maxMessageLength = 9_999))
+
+        assertThat(result).isInstanceOf(ApiResult.Failure::class.java)
+        assertThat(repository.observeSettings().first()?.maxMessageLength).isEqualTo(666)
+    }
 }
