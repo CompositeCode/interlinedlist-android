@@ -40,3 +40,23 @@ data class ResetPasswordRequest(
 data class VerifyEmailRequest(
     val token: String,
 )
+
+/**
+ * `POST /api/auth/verify-email-change` — confirms a pending email change with the
+ * token from the message sent to the *new* address. Unauthenticated
+ * (`x-auth-type: none` in the OpenAPI spec), so the tap works from a signed-out app.
+ */
+@Serializable
+data class VerifyEmailChangeRequest(
+    val token: String,
+)
+
+/**
+ * `POST /api/auth/undo-email-change` — reverts an email change using the token from
+ * the message sent to the *previous* address. Also unauthenticated by design: the
+ * whole point is that somebody who has lost access to the account can still undo it.
+ */
+@Serializable
+data class UndoEmailChangeRequest(
+    val token: String,
+)

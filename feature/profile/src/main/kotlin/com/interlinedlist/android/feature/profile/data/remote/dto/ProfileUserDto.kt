@@ -17,6 +17,12 @@ data class ProfileUserDto(
     val avatar: String? = null,
     val bio: String? = null,
     val customerStatus: String? = null,
+    /**
+     * The address a requested email change is waiting on, or null when no change is
+     * in flight. Present on `GET /api/user` for the signed-in user only (confirmed
+     * live); other users' profiles omit it.
+     */
+    val pendingEmail: String? = null,
     // --- Preference fields (present on `GET /api/user` for the signed-in user
     // only; other users' public profiles omit them, hence all-nullable). ---
     val theme: String? = null,

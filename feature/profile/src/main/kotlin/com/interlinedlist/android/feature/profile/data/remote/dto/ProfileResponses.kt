@@ -17,6 +17,7 @@ data class ProfileResponse(
     val avatar: String? = null,
     val bio: String? = null,
     val customerStatus: String? = null,
+    val pendingEmail: String? = null,
 ) {
     /** The user payload, whether wrapped under `user` or inlined at the top level. */
     val userOrSelf: ProfileUserDto?
@@ -29,6 +30,7 @@ data class ProfileResponse(
                 avatar = avatar,
                 bio = bio,
                 customerStatus = customerStatus,
+                pendingEmail = pendingEmail,
             )
         }
 }

@@ -15,6 +15,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -48,6 +50,9 @@ object AccountSettingsTestTags {
     const val EMAIL_FIELD = "accountSettingsEmailField"
     const val CHANGE_EMAIL = "accountSettingsChangeEmail"
     const val EMAIL_REQUESTED = "accountSettingsEmailRequested"
+    const val PENDING_EMAIL = "accountSettingsPendingEmail"
+    const val PENDING_RESEND = "accountSettingsPendingResend"
+    const val PENDING_RESENT = "accountSettingsPendingResent"
     const val ERROR = "accountSettingsError"
     const val DELETE_ACCOUNT = "accountSettingsDeleteAccount"
     const val DELETE_DIALOG = "accountSettingsDeleteDialog"
@@ -77,6 +82,7 @@ fun AccountSettingsRoute(
         state = state,
         onChangeEmail = viewModel::requestEmailChange,
         onAcknowledgeEmailChange = viewModel::acknowledgeEmailChange,
+        onResendEmailChange = viewModel::resendEmailChange,
         onDeleteAccount = viewModel::deleteAccount,
         onBack = onBack,
         modifier = modifier,
@@ -105,6 +111,7 @@ fun AccountSettingsScreen(
     state: AccountSettingsUiState,
     onChangeEmail: (String) -> Unit,
     onAcknowledgeEmailChange: () -> Unit,
+    onResendEmailChange: () -> Unit,
     onDeleteAccount: (String) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
@@ -140,6 +147,16 @@ fun AccountSettingsScreen(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (state.pendingEmail != null) {
+                Spacer(Modifier.height(12.dp))
+                PendingEmailChangeCard(
+                    pendingEmail = state.pendingEmail,
+                    isResending = state.isResendingEmailChange,
+                    wasResent = state.emailChangeResent,
+                    onResend = onResendEmailChange,
+                )
+            }
+
             Spacer(Modifier.height(12.dp))
             OutlinedTextField(
                 value = newEmail,
@@ -228,6 +245,69 @@ fun AccountSettingsScreen(
 }
 
 /**
+ * Shows the address an email change is waiting on, with the two things the API
+ * actually supports from here: re-sending the confirmation email, and the plain
+ * statement of how to stop the change (the undo link in the message sent to the
+ * current address — `POST /api/auth/undo-email-change`). The server exposes no
+ * endpoint that cancels a pending change directly, so no button pretends to.
+ */
+@Composable
+private fun PendingEmailChangeCard(
+    pendingEmail: String,
+    isResending: Boolean,
+    wasResent: Boolean,
+    onResend: () -> Unit,
+) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(AccountSettingsTestTags.PENDING_EMAIL),
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Text("Waiting for confirmation", style = MaterialTheme.typography.titleSmall)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = pendingEmail,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "Your account keeps its current email until you open the link we " +
+                    "sent to this address. To stop the change, use the “undo” link in the " +
+                    "email sent to your current address.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(12.dp))
+            OutlinedButton(
+                onClick = onResend,
+                enabled = !isResending,
+                modifier = Modifier.testTag(AccountSettingsTestTags.PENDING_RESEND),
+            ) {
+                if (isResending) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                } else {
+                    Text("Resend confirmation email")
+                }
+            }
+            if (wasResent) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "Sent again — check that inbox.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.testTag(AccountSettingsTestTags.PENDING_RESENT),
+                )
+            }
+        }
+    }
+}
+
+/**
  * The type-to-confirm delete guard: the user must re-type their exact username and enter
  * their email before the destructive confirm button enables.
  */
@@ -301,9 +381,13 @@ private fun DeleteAccountDialog(
 private fun AccountSettingsScreenPreview() {
     InterlinedListTheme {
         AccountSettingsScreen(
-            state = AccountSettingsUiState(username = "adron"),
+            state = AccountSettingsUiState(
+                username = "adron",
+                pendingEmail = "new@example.com",
+            ),
             onChangeEmail = {},
             onAcknowledgeEmailChange = {},
+            onResendEmailChange = {},
             onDeleteAccount = {},
             onBack = {},
         )

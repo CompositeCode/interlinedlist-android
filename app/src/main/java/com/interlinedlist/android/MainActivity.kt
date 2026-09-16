@@ -12,6 +12,7 @@ import com.interlinedlist.android.core.datastore.SessionStore
 import com.interlinedlist.android.core.datastore.ThemeMode
 import com.interlinedlist.android.core.datastore.ThemeSettingsStore
 import com.interlinedlist.android.core.designsystem.theme.InterlinedListTheme
+import com.interlinedlist.android.feature.auth.nav.AuthRoutes
 import com.interlinedlist.android.navigation.InterlinedListNavHost
 import com.interlinedlist.android.navigation.NotificationLaunch
 import dagger.hilt.android.AndroidEntryPoint
@@ -35,6 +36,10 @@ class MainActivity : ComponentActivity() {
         // A tapped system notification launches us with deep-link extras; resolve the
         // pending in-app route so the signed-in shell can navigate straight to it.
         val notificationRoute = NotificationLaunch.fromIntent(intent)?.route
+        // A tapped email-change link (confirm or undo) launches us with the token in
+        // the VIEW intent's data. Both endpoints behind it are unauthenticated, so the
+        // route resolves regardless of whether a session exists.
+        val emailChangeRoute = AuthRoutes.routeForEmailChangeLink(intent?.dataString)
         enableEdgeToEdge()
         setContent {
             val themeMode by themeSettingsStore.themeMode.collectAsStateWithLifecycle()
@@ -47,6 +52,7 @@ class MainActivity : ComponentActivity() {
                 InterlinedListNavHost(
                     startLoggedIn = startLoggedIn,
                     notificationRoute = notificationRoute,
+                    emailChangeRoute = emailChangeRoute,
                 )
             }
         }

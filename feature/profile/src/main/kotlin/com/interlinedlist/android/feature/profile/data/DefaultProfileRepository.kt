@@ -298,6 +298,13 @@ class DefaultProfileRepository @Inject constructor(
             safeApiCall(json) { api.requestEmailChange(ChangeEmailRequest(newEmail)) }
         }
 
+    override suspend fun getPendingEmailChange(): ApiResult<String?> =
+        withContext(dispatchers.io) {
+            safeApiCall(json) {
+                api.getCurrentUser().userOrSelf?.pendingEmail?.takeIf { it.isNotBlank() }
+            }
+        }
+
     override suspend fun deleteAccount(username: String, email: String): ApiResult<Unit> =
         withContext(dispatchers.io) {
             safeApiCall(json) { api.deleteAccount(DeleteAccountRequest(username = username, email = email)) }

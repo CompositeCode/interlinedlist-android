@@ -145,6 +145,14 @@ interface ProfileRepository {
     suspend fun requestEmailChange(newEmail: String): ApiResult<Unit>
 
     /**
+     * The address an email change is currently waiting on, read from `pendingEmail`
+     * on `GET /api/user`, or null when no change is in flight. Deliberately not
+     * cached: it is the kind of state that must never be shown stale, and it clears
+     * the moment the change is confirmed (or undone) from the emailed link.
+     */
+    suspend fun getPendingEmailChange(): ApiResult<String?>
+
+    /**
      * Deletes the current user's account via `POST /api/user/delete`, confirming with
      * the account's [username] and [email]. On success the caller signs the user out.
      */

@@ -219,6 +219,8 @@ class FakeProfileRepository : ProfileRepository {
     var identitiesResult: ApiResult<List<LinkedIdentity>> = ApiResult.Success(emptyList())
     var unlinkIdentityResult: ApiResult<Unit> = ApiResult.Success(Unit)
     var requestEmailChangeResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var pendingEmailChangeResults: ArrayDeque<ApiResult<String?>> = ArrayDeque()
+    var pendingEmailChangeResult: ApiResult<String?> = ApiResult.Success(null)
     var deleteAccountResult: ApiResult<Unit> = ApiResult.Success(Unit)
 
     var sessionsCount = 0
@@ -226,6 +228,8 @@ class FakeProfileRepository : ProfileRepository {
     var identitiesCount = 0
     var unlinkedProvider: String? = null
     var requestedEmail: String? = null
+    var requestedEmails: MutableList<String> = mutableListOf()
+    var pendingEmailChangeCount = 0
     var deleteAccountArgs: Pair<String, String>? = null
 
     override suspend fun getSessions(): ApiResult<List<LoginSession>> {
@@ -250,7 +254,17 @@ class FakeProfileRepository : ProfileRepository {
 
     override suspend fun requestEmailChange(newEmail: String): ApiResult<Unit> {
         requestedEmail = newEmail
+        requestedEmails += newEmail
         return requestEmailChangeResult
+    }
+
+    /**
+     * Returns the next queued result, falling back to [pendingEmailChangeResult] so
+     * a test can either script a sequence (pending → cleared) or pin one value.
+     */
+    override suspend fun getPendingEmailChange(): ApiResult<String?> {
+        pendingEmailChangeCount++
+        return pendingEmailChangeResults.removeFirstOrNull() ?: pendingEmailChangeResult
     }
 
     override suspend fun deleteAccount(username: String, email: String): ApiResult<Unit> {

@@ -24,6 +24,8 @@ class FakeAuthRepository(
     var resetResult: ApiResult<Unit> = ApiResult.Success(Unit),
     var verifyResult: ApiResult<Unit> = ApiResult.Success(Unit),
     var resendResult: ApiResult<Unit> = ApiResult.Success(Unit),
+    var verifyEmailChangeResult: ApiResult<Unit> = ApiResult.Success(Unit),
+    var undoEmailChangeResult: ApiResult<Unit> = ApiResult.Success(Unit),
 ) : AuthRepository {
 
     var loginCount = 0
@@ -33,6 +35,8 @@ class FakeAuthRepository(
     var lastReset: ResetArgs? = null
     var lastVerifyToken: String? = null
     var resendCount = 0
+    var lastVerifyEmailChangeToken: String? = null
+    var lastUndoEmailChangeToken: String? = null
 
     data class RegisterArgs(
         val email: String,
@@ -79,6 +83,16 @@ class FakeAuthRepository(
     override suspend fun resendVerificationEmail(): ApiResult<Unit> {
         resendCount++
         return resendResult
+    }
+
+    override suspend fun verifyEmailChange(token: String): ApiResult<Unit> {
+        lastVerifyEmailChangeToken = token
+        return verifyEmailChangeResult
+    }
+
+    override suspend fun undoEmailChange(token: String): ApiResult<Unit> {
+        lastUndoEmailChangeToken = token
+        return undoEmailChangeResult
     }
 
     override suspend fun logout() = Unit

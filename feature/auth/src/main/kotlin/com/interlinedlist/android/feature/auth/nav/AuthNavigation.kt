@@ -11,6 +11,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.navigation.navDeepLink
+import com.interlinedlist.android.feature.auth.ui.EMAIL_CHANGE_ACTION_ARG
+import com.interlinedlist.android.feature.auth.ui.EmailChangeRoute
 import com.interlinedlist.android.feature.auth.ui.ForgotPasswordRoute
 import com.interlinedlist.android.feature.auth.ui.LoginRoute
 import com.interlinedlist.android.feature.auth.ui.RegisterRoute
@@ -41,18 +43,50 @@ object AuthRoutes {
      * `<intent-filter>` maps `https://interlinedlist.com/reset-password` and
      * `/verify-email` onto these so `NavController.handleDeepLink` lands directly
      * on the matching screen with its `token` populated.
+     *
+     * Built lazily: `NavDeepLink` parses its pattern with `android.net.Uri`, and the
+     * plain route helpers on this object are covered by JVM unit tests that must not
+     * drag the Android framework in just by touching the object.
      */
-    val RESET_DEEP_LINKS: List<NavDeepLink> = listOf(
-        navDeepLink { uriPattern = "https://interlinedlist.com/reset-password?$TOKEN_ARG={$TOKEN_ARG}" },
-        navDeepLink { uriPattern = "interlinedlist://reset-password?$TOKEN_ARG={$TOKEN_ARG}" },
-    )
-    val VERIFY_DEEP_LINKS: List<NavDeepLink> = listOf(
-        navDeepLink { uriPattern = "https://interlinedlist.com/verify-email?$TOKEN_ARG={$TOKEN_ARG}" },
-        navDeepLink { uriPattern = "interlinedlist://verify-email?$TOKEN_ARG={$TOKEN_ARG}" },
-    )
+    val RESET_DEEP_LINKS: List<NavDeepLink> by lazy {
+        listOf(
+            navDeepLink { uriPattern = "https://interlinedlist.com/reset-password?$TOKEN_ARG={$TOKEN_ARG}" },
+            navDeepLink { uriPattern = "interlinedlist://reset-password?$TOKEN_ARG={$TOKEN_ARG}" },
+        )
+    }
+    val VERIFY_DEEP_LINKS: List<NavDeepLink> by lazy {
+        listOf(
+            navDeepLink { uriPattern = "https://interlinedlist.com/verify-email?$TOKEN_ARG={$TOKEN_ARG}" },
+            navDeepLink { uriPattern = "interlinedlist://verify-email?$TOKEN_ARG={$TOKEN_ARG}" },
+        )
+    }
 
     fun reset(token: String) = "auth/reset?$TOKEN_ARG=$token"
     fun verify(token: String) = "auth/verify?$TOKEN_ARG=$token"
+
+    /**
+     * Confirm-or-undo destination for the two email-change links. Both halves share
+     * one screen and differ only by the `action` argument, so the emailed
+     * `/verify-email-change` and `/undo-email-change` links map onto the same route.
+     */
+    const val EMAIL_CHANGE =
+        "auth/email-change?$EMAIL_CHANGE_ACTION_ARG={$EMAIL_CHANGE_ACTION_ARG}&$TOKEN_ARG={$TOKEN_ARG}"
+
+    fun emailChange(action: EmailChangeAction, token: String) =
+        "auth/email-change?$EMAIL_CHANGE_ACTION_ARG=${action.name}&$TOKEN_ARG=$token"
+
+    /**
+     * Maps a tapped email-change link onto an in-app route, or returns null when the
+     * URI is not one of those links (or carries no token).
+     *
+     * The app resolves the launch intent through here — the same way a tapped
+     * notification goes through `NotificationLaunch` — rather than relying on implicit
+     * `navDeepLink` matching, so this security-sensitive entry point is exercised by
+     * plain unit tests. Both endpoints behind it are unauthenticated, so the route
+     * resolves whether or not the app has a session.
+     */
+    fun routeForEmailChangeLink(uri: String?): String? =
+        EmailChangeLink.parse(uri)?.let { emailChange(it.action, it.token) }
 }
 
 /**
@@ -101,6 +135,28 @@ fun NavGraphBuilder.authGraph(
         ResetPasswordRoute(
             onReset = { navController.popToLogin() },
             onBackToLogin = { navController.popToLogin() },
+        )
+    }
+
+    composable(
+        route = AuthRoutes.EMAIL_CHANGE,
+        arguments = listOf(
+            navArgument(EMAIL_CHANGE_ACTION_ARG) {
+                type = NavType.StringType
+                nullable = true
+                defaultValue = null
+            },
+            navArgument(AuthRoutes.TOKEN_ARG) {
+                type = NavType.StringType
+                nullable = true
+                defaultValue = null
+            },
+        ),
+    ) {
+        EmailChangeRoute(
+            // Reached from an email while signed in *or* signed out: go back to
+            // whatever was underneath, falling back to Login when nothing is.
+            onDone = { if (!navController.popBackStack()) navController.popToLogin() },
         )
     }
 
