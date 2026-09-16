@@ -28,6 +28,8 @@ class OrganizationDetailScreenTest {
         state: OrganizationDetailUiState,
         onRemoveMember: (OrgMember) -> Unit = {},
         onDelete: () -> Unit = {},
+        onJoin: () -> Unit = {},
+        onLeave: () -> Unit = {},
     ) {
         composeRule.setContent {
             InterlinedListTheme {
@@ -40,6 +42,8 @@ class OrganizationDetailScreenTest {
                     onRemoveMember = onRemoveMember,
                     onSaveEdit = { _, _, _ -> },
                     onDelete = onDelete,
+                    onJoin = onJoin,
+                    onLeave = onLeave,
                 )
             }
         }
@@ -96,5 +100,106 @@ class OrganizationDetailScreenTest {
         )
 
         composeRule.onNodeWithTag(OrganizationDetailTestTags.EMPTY).assertIsDisplayed()
+    }
+
+    @Test
+    fun nonMember_seesJoinPrompt_andNoMemberTools() {
+        setScreen(
+            state = OrganizationDetailUiState(
+                // No role: the API reports membership only for the caller's own orgs.
+                organization = Organization("o1", "Metals", null, null, true, 1, null, null),
+                isLoading = false,
+            ),
+        )
+
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.JOIN_PROMPT).assertIsDisplayed()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.JOIN).assertIsDisplayed()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.SEARCH).assertDoesNotExist()
+    }
+
+    @Test
+    fun nonMember_join_reportsTheAction() {
+        var joined = false
+        setScreen(
+            state = OrganizationDetailUiState(
+                organization = Organization("o1", "Metals", null, null, true, 1, null, null),
+                isLoading = false,
+            ),
+            onJoin = { joined = true },
+        )
+
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.JOIN).performClick()
+        assert(joined)
+    }
+
+    @Test
+    fun nonMemberOfPrivateOrg_isNotOfferedJoin() {
+        setScreen(
+            state = OrganizationDetailUiState(
+                organization = Organization("o1", "Acme", null, null, false, 2, null, null),
+                isLoading = false,
+            ),
+        )
+
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.JOIN_PROMPT).assertIsDisplayed()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.JOIN).assertDoesNotExist()
+    }
+
+    @Test
+    fun member_leaveFlow_confirmsBeforeLeaving() {
+        var left = false
+        setScreen(
+            state = OrganizationDetailUiState(
+                organization = Organization("o1", "Bikey Life", null, null, true, 3, OrgRole.MEMBER, null),
+                members = listOf(
+                    OrgMember("u1", "ada", "Ada", null, OrgRole.OWNER, active = true),
+                    OrgMember("me", "me", null, null, OrgRole.MEMBER, active = true),
+                ),
+                isLoading = false,
+            ),
+            onLeave = { left = true },
+        )
+
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.OVERFLOW).performClick()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.LEAVE).performClick()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.LEAVE_DIALOG).assertIsDisplayed()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.LEAVE_CONFIRM).performClick()
+        assert(left)
+    }
+
+    @Test
+    fun soleOwner_isExplainedInsteadOfBeingAllowedToLeave() {
+        var left = false
+        setScreen(
+            state = OrganizationDetailUiState(
+                organization = Organization("o1", "Acme", null, null, false, 2, OrgRole.OWNER, null),
+                members = listOf(
+                    OrgMember("me", "me", null, null, OrgRole.OWNER, active = true),
+                    OrgMember("u2", "grace", null, null, OrgRole.MEMBER, active = true),
+                ),
+                isLoading = false,
+            ),
+            onLeave = { left = true },
+        )
+
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.OVERFLOW).performClick()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.LEAVE).performClick()
+        // The dialog explains why, and offers no destructive confirm at all.
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.LAST_OWNER_NOTICE).assertIsDisplayed()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.LEAVE_CONFIRM).assertDoesNotExist()
+        assert(!left)
+    }
+
+    @Test
+    fun nonMember_isNotOfferedLeave() {
+        setScreen(
+            state = OrganizationDetailUiState(
+                organization = Organization("o1", "Metals", null, null, true, 1, null, null),
+                isLoading = false,
+            ),
+        )
+
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.OVERFLOW).performClick()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.LEAVE).assertDoesNotExist()
     }
 }

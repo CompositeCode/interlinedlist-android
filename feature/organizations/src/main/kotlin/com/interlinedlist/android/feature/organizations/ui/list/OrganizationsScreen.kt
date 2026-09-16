@@ -59,6 +59,8 @@ object OrganizationsTestTags {
     const val CREATE_NAME = "organizationsCreateName"
     const val CREATE_CONFIRM = "organizationsCreateConfirm"
     fun row(id: String) = "organizationRow_$id"
+    fun join(id: String) = "organizationJoin_$id"
+    fun membership(id: String) = "organizationMembership_$id"
 }
 
 /**
@@ -79,6 +81,7 @@ fun OrganizationsRoute(
         onOpenOrg = onOpenOrg,
         onBack = onBack,
         onLoadMore = viewModel::loadMore,
+        onJoinOrg = viewModel::joinOrganization,
         onCreateOrganization = { name, description, isPublic ->
             viewModel.createOrganization(name, description, isPublic, onCreated = { onOpenOrg(it.id) })
         },
@@ -94,6 +97,7 @@ fun OrganizationsScreen(
     onOpenOrg: (String) -> Unit,
     onBack: () -> Unit,
     onLoadMore: () -> Unit,
+    onJoinOrg: (String) -> Unit,
     onCreateOrganization: (name: String, description: String?, isPublic: Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -157,8 +161,10 @@ fun OrganizationsScreen(
                         organizations = state.organizations,
                         isLoadingMore = state.isLoadingMore,
                         hasMore = state.hasMore,
+                        joiningOrgIds = state.joiningOrgIds,
                         onOpenOrg = onOpenOrg,
                         onLoadMore = onLoadMore,
+                        onJoinOrg = onJoinOrg,
                     )
                 }
             }
@@ -181,8 +187,10 @@ private fun OrganizationsList(
     organizations: List<Organization>,
     isLoadingMore: Boolean,
     hasMore: Boolean,
+    joiningOrgIds: Set<String>,
     onOpenOrg: (String) -> Unit,
     onLoadMore: () -> Unit,
+    onJoinOrg: (String) -> Unit,
 ) {
     LazyColumn(
         modifier = Modifier
@@ -192,7 +200,12 @@ private fun OrganizationsList(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         items(organizations, key = { it.id }) { org ->
-            OrganizationCard(org = org, onClick = { onOpenOrg(org.id) })
+            OrganizationCard(
+                org = org,
+                isJoining = org.id in joiningOrgIds,
+                onClick = { onOpenOrg(org.id) },
+                onJoin = { onJoinOrg(org.id) },
+            )
         }
         if (hasMore) {
             item {
@@ -213,7 +226,12 @@ private fun LaunchedLoadMore(onLoadMore: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun OrganizationCard(org: Organization, onClick: () -> Unit) {
+private fun OrganizationCard(
+    org: Organization,
+    isJoining: Boolean,
+    onClick: () -> Unit,
+    onJoin: () -> Unit,
+) {
     Card(
         onClick = onClick,
         modifier = Modifier
@@ -238,7 +256,11 @@ private fun OrganizationCard(org: Organization, onClick: () -> Unit) {
                 )
             }
             Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 Text(
                     text = "${org.memberCount} ${if (org.memberCount == 1) "member" else "members"}",
                     style = MaterialTheme.typography.labelMedium,
@@ -251,12 +273,23 @@ private fun OrganizationCard(org: Organization, onClick: () -> Unit) {
                         color = MaterialTheme.colorScheme.secondary,
                     )
                 }
+                Spacer(Modifier.weight(1f))
+                // Membership drives the affordance: members see their role, while a
+                // public org they have not joined offers Join.
                 org.role?.let { role ->
                     Text(
                         text = role.label,
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.tertiary,
+                        modifier = Modifier.testTag(OrganizationsTestTags.membership(org.id)),
                     )
+                }
+                if (org.canJoin) {
+                    TextButton(
+                        onClick = onJoin,
+                        enabled = !isJoining,
+                        modifier = Modifier.testTag(OrganizationsTestTags.join(org.id)),
+                    ) { Text(if (isJoining) "Joining…" else "Join") }
                 }
             }
         }
@@ -372,6 +405,7 @@ private fun OrganizationsScreenPreview() {
             onOpenOrg = {},
             onBack = {},
             onLoadMore = {},
+            onJoinOrg = {},
             onCreateOrganization = { _, _, _ -> },
         )
     }

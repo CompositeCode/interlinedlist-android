@@ -19,6 +19,16 @@ data class Organization(
 ) {
     /** Best label for a card: the name, falling back to a placeholder. */
     val displayName: String get() = name.ifBlank { "Untitled organization" }
+
+    /**
+     * Whether the signed-in user belongs to this organization. The API reports a
+     * role only for the caller's own memberships, so an absent role means "not a
+     * member" — that drives the Join/Leave affordance.
+     */
+    val isMember: Boolean get() = role != null
+
+    /** A public organization the user has not joined can be joined from the UI. */
+    val canJoin: Boolean get() = isPublic && !isMember
 }
 
 /**

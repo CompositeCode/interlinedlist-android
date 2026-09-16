@@ -139,4 +139,59 @@ class OrganizationsViewModelTest {
 
         assertThat(vm.uiState.value.subscriptionRequired).isTrue()
     }
+
+    @Test
+    fun `joining a public org flips the cached row to a membership`() = runTest(dispatcher) {
+        val public = Organization("o1", "Metals", null, null, true, 1, null, null)
+        val repo = FakeOrganizationsRepository().apply {
+            refreshResult = ApiResult.Success(Paged(listOf(public), hasMore = false, total = 1, offset = 1))
+        }
+        val vm = OrganizationsViewModel(repo)
+        // Keep the combined Room stream active so the cache reaches the UI state.
+        backgroundScope.launch { vm.uiState.collect { } }
+        advanceUntilIdle()
+
+        // Before joining the card offers Join.
+        assertThat(vm.uiState.value.organizations.single().canJoin).isTrue()
+
+        vm.joinOrganization("o1")
+        advanceUntilIdle()
+
+        assertThat(repo.joinedOrgIds).containsExactly("o1")
+        val joined = vm.uiState.value.organizations.single()
+        assertThat(joined.isMember).isTrue()
+        assertThat(joined.canJoin).isFalse()
+        assertThat(joined.memberCount).isEqualTo(2)
+        assertThat(vm.transientState.value.joiningOrgIds).isEmpty()
+        assertThat(vm.transientState.value.errorMessage).isNull()
+    }
+
+    @Test
+    fun `a refused join surfaces an explanation and clears the in-flight flag`() = runTest(dispatcher) {
+        val repo = FakeOrganizationsRepository().apply {
+            joinResult = ApiResult.Failure(AppError.Forbidden("Organization is private"))
+        }
+        val vm = OrganizationsViewModel(repo)
+        advanceUntilIdle()
+
+        vm.joinOrganization("o1")
+        advanceUntilIdle()
+
+        val state = vm.transientState.value
+        assertThat(state.joiningOrgIds).isEmpty()
+        assertThat(state.errorMessage).contains("private")
+    }
+
+    @Test
+    fun `a second join for the same org is ignored while one is in flight`() = runTest(dispatcher) {
+        val repo = FakeOrganizationsRepository()
+        val vm = OrganizationsViewModel(repo)
+        advanceUntilIdle()
+
+        vm.joinOrganization("o1")
+        vm.joinOrganization("o1")
+        advanceUntilIdle()
+
+        assertThat(repo.joinedOrgIds).containsExactly("o1")
+    }
 }

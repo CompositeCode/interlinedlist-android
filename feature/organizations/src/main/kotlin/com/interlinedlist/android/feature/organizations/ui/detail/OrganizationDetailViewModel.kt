@@ -9,7 +9,10 @@ import com.interlinedlist.android.feature.organizations.domain.MemberCandidate
 import com.interlinedlist.android.feature.organizations.domain.OrgMember
 import com.interlinedlist.android.feature.organizations.domain.OrgRole
 import com.interlinedlist.android.feature.organizations.domain.Organization
+import com.interlinedlist.android.feature.organizations.ui.LAST_OWNER_EXPLANATION
 import com.interlinedlist.android.feature.organizations.ui.isSubscriptionGate
+import com.interlinedlist.android.feature.organizations.ui.toJoinMessage
+import com.interlinedlist.android.feature.organizations.ui.toLeaveMessage
 import com.interlinedlist.android.feature.organizations.ui.toUserMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,13 +34,32 @@ data class OrganizationDetailUiState(
     val errorMessage: String? = null,
     val subscriptionRequired: Boolean = false,
     val deleted: Boolean = false,
+    // Membership (join / leave) in flight.
+    val isJoining: Boolean = false,
+    val isLeaving: Boolean = false,
     // Member search / add.
     val searchQuery: String = "",
     val candidates: List<MemberCandidate> = emptyList(),
     val isSearching: Boolean = false,
 ) {
     val title: String get() = organization?.displayName.orEmpty()
-    val isEmpty: Boolean get() = members.isEmpty() && !isLoading && errorMessage == null
+    val isEmpty: Boolean get() = members.isEmpty() && !isLoading && errorMessage == null && isMember
+
+    /** Whether the signed-in user belongs to this organization. */
+    val isMember: Boolean get() = organization?.isMember == true
+
+    /** A public organization the user has not joined can be joined from here. */
+    val canJoin: Boolean get() = organization?.canJoin == true
+
+    /**
+     * True when the user is this organization's only owner. Leaving would orphan
+     * the organization, and the server refuses it (400 "Cannot remove the last
+     * owner"), so the UI explains it up front instead of failing. Requires a loaded
+     * member list; without one the server's rejection is the backstop.
+     */
+    val isLastOwner: Boolean
+        get() = organization?.role == OrgRole.OWNER &&
+            members.count { it.role == OrgRole.OWNER } == 1
 }
 
 @HiltViewModel
@@ -60,21 +82,75 @@ class OrganizationDetailViewModel @Inject constructor(
     fun load() {
         _uiState.update { it.copy(isLoading = true, errorMessage = null, subscriptionRequired = false) }
         viewModelScope.launch {
-            when (val result = repository.getOrganization(orgId)) {
-                is ApiResult.Success -> _uiState.update { it.copy(organization = result.data, isLoading = false) }
-                is ApiResult.Failure -> _uiState.update {
-                    it.copy(
-                        isLoading = false,
-                        errorMessage = result.error.toUserMessage(),
-                        subscriptionRequired = result.error.isSubscriptionGate,
-                    )
+            val organization = when (val result = repository.getOrganization(orgId)) {
+                is ApiResult.Success -> {
+                    _uiState.update { it.copy(organization = result.data, isLoading = false) }
+                    result.data
+                }
+                is ApiResult.Failure -> {
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            errorMessage = result.error.toUserMessage(),
+                            subscriptionRequired = result.error.isSubscriptionGate,
+                        )
+                    }
+                    null
                 }
             }
-            // Members are loaded after metadata; a failure surfaces but keeps the header.
+            // Members are members-only on the server (403 otherwise), so a
+            // non-member sees the join prompt rather than a permission error.
+            if (organization?.isMember != true) {
+                _uiState.update { it.copy(members = emptyList()) }
+                return@launch
+            }
             when (val members = repository.getMembers(orgId)) {
                 is ApiResult.Success -> _uiState.update { it.copy(members = members.data) }
                 is ApiResult.Failure -> _uiState.update {
                     it.copy(errorMessage = it.errorMessage ?: members.error.toUserMessage())
+                }
+            }
+        }
+    }
+
+    /** Joins this (public) organization, then reloads so membership state is server-truth. */
+    fun join() {
+        if (_uiState.value.isJoining) return
+        _uiState.update { it.copy(isJoining = true, errorMessage = null) }
+        viewModelScope.launch {
+            when (val result = repository.joinOrganization(orgId)) {
+                is ApiResult.Success -> {
+                    _uiState.update { it.copy(isJoining = false) }
+                    load()
+                }
+                is ApiResult.Failure -> _uiState.update {
+                    it.copy(isJoining = false, errorMessage = result.error.toJoinMessage())
+                }
+            }
+        }
+    }
+
+    /**
+     * Leaves this organization. A sole owner is stopped with an explanation rather
+     * than a failed request; if the server refuses anyway (the member list may not
+     * have loaded) that rejection is explained the same way.
+     */
+    fun leave(onLeft: () -> Unit = {}) {
+        val state = _uiState.value
+        if (state.isLeaving) return
+        if (state.isLastOwner) {
+            _uiState.update { it.copy(errorMessage = LAST_OWNER_EXPLANATION) }
+            return
+        }
+        _uiState.update { it.copy(isLeaving = true, errorMessage = null) }
+        viewModelScope.launch {
+            when (val result = repository.leaveOrganization(orgId)) {
+                is ApiResult.Success -> {
+                    _uiState.update { it.copy(isLeaving = false) }
+                    onLeft()
+                }
+                is ApiResult.Failure -> _uiState.update {
+                    it.copy(isLeaving = false, errorMessage = result.error.toLeaveMessage())
                 }
             }
         }

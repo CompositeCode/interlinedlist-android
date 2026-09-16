@@ -32,11 +32,15 @@ class FakeOrganizationsRepository : OrganizationsRepository {
     var addMemberResult: ApiResult<Unit> = ApiResult.Success(Unit)
     var updateRoleResult: ApiResult<Unit> = ApiResult.Success(Unit)
     var removeMemberResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var joinResult: ApiResult<Unit> = ApiResult.Success(Unit)
+    var leaveResult: ApiResult<Unit> = ApiResult.Success(Unit)
 
     var refreshCount = 0
     var loadMoreCount = 0
     var addMemberCount = 0
     var removeMemberCount = 0
+    var joinedOrgIds = mutableListOf<String>()
+    var leftOrgIds = mutableListOf<String>()
     var lastMemberSearch: String? = null
     var lastUpdate: Triple<String?, String?, Boolean?>? = null
 
@@ -84,6 +88,27 @@ class FakeOrganizationsRepository : OrganizationsRepository {
         return deleteResult
     }
 
+    override suspend fun joinOrganization(orgId: String): ApiResult<Unit> {
+        joinedOrgIds += orgId
+        if (joinResult is ApiResult.Success) {
+            // Mirrors the repository: the cached row gains the caller's membership.
+            cache.value = cache.value.map { org ->
+                if (org.id == orgId) org.copy(role = OrgRole.MEMBER, memberCount = org.memberCount + 1) else org
+            }
+        }
+        return joinResult
+    }
+
+    override suspend fun leaveOrganization(orgId: String): ApiResult<Unit> {
+        leftOrgIds += orgId
+        if (leaveResult is ApiResult.Success) {
+            cache.value = cache.value.map { org ->
+                if (org.id == orgId) org.copy(role = null, memberCount = (org.memberCount - 1).coerceAtLeast(0)) else org
+            }
+        }
+        return leaveResult
+    }
+
     override suspend fun getMembers(orgId: String, limit: Int): ApiResult<List<OrgMember>> = membersResult
 
     override suspend fun searchMemberCandidates(
@@ -111,5 +136,9 @@ class FakeOrganizationsRepository : OrganizationsRepository {
     companion object {
         fun subscriptionFailure(): ApiResult.Failure =
             ApiResult.Failure(AppError.SubscriptionRequired("Organizations require an active subscription"))
+
+        /** The live 400 the server returns when the only owner tries to leave. */
+        fun lastOwnerFailure(): ApiResult.Failure =
+            ApiResult.Failure(AppError.Unknown("Cannot remove the last owner"))
     }
 }

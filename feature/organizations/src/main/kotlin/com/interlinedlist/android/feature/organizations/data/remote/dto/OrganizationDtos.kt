@@ -30,8 +30,11 @@ data class OrganizationDto(
     val memberCount: Int? = null,
     val membersCount: Int? = null,
     val members: Int? = null,
-    // The current user's role in this org, when the endpoint includes it.
+    // The current user's role in this org, when the endpoint includes it. The
+    // index reports it as `role`, the detail endpoint as `userRole` (explicitly
+    // null for a non-member), so both names are read.
     val role: String? = null,
+    val userRole: String? = null,
     val updatedAt: String? = null,
 ) {
     /** The avatar URL under whichever field name the API used. */
@@ -40,6 +43,12 @@ data class OrganizationDto(
     val resolvedPublic: Boolean get() = isPublic ?: public ?: false
     /** Member count under whichever name the API used, defaulting to zero. */
     val resolvedMemberCount: Int get() = memberCount ?: membersCount ?: members ?: 0
+
+    /**
+     * The caller's role under whichever name the endpoint used. `null` means the
+     * caller is not a member — that is how the API signals non-membership.
+     */
+    val resolvedRole: String? get() = role ?: userRole
 }
 
 /** Pagination block shared by list endpoints. */
@@ -82,6 +91,16 @@ data class CreateOrganizationRequest(
     val description: String? = null,
     val avatar: String? = null,
     val isPublic: String? = null,
+)
+
+/**
+ * Body for `POST /api/user/organizations` — joining a public organization.
+ * The server requires the key `organizationId` (it 400s with
+ * `{"error":"Organization ID is required"}` otherwise).
+ */
+@Serializable
+data class JoinOrganizationRequest(
+    val organizationId: String,
 )
 
 /** Body for `PUT /api/organizations/{id}` — partial metadata updates. */
