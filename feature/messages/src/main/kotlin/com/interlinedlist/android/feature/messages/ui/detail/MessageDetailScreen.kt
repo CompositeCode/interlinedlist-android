@@ -61,12 +61,14 @@ object MessageDetailTags {
  *
  * @param onBack pops the detail screen off the back stack.
  * @param onOpenMessage navigates into a reply (which is itself a message).
+ * @param onOpenTag opens the feed filtered to a tapped tag; null leaves tags inert.
  */
 @Composable
 fun MessageDetailRoute(
     onBack: () -> Unit,
     onOpenMessage: (String) -> Unit,
     modifier: Modifier = Modifier,
+    onOpenTag: ((String) -> Unit)? = null,
     viewModel: MessageDetailViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -74,6 +76,7 @@ fun MessageDetailRoute(
         state = state,
         onBack = onBack,
         onOpenMessage = onOpenMessage,
+        onOpenTag = onOpenTag,
         onDig = viewModel::onDig,
         onReplyTextChange = viewModel::onReplyTextChange,
         onPostReply = viewModel::postReply,
@@ -113,6 +116,7 @@ fun MessageDetailScreen(
     onMuteUser: (Message) -> Unit = {},
     onReportUser: (Message) -> Unit = {},
     onFetchMetadata: (Message) -> Unit = {},
+    onOpenTag: ((String) -> Unit)? = null,
     onDismissReport: () -> Unit = {},
     onSubmitReport: (ReportReason, String) -> Unit = { _, _ -> },
     onEditTextChange: (String) -> Unit = {},
@@ -154,6 +158,7 @@ fun MessageDetailScreen(
                 onMuteUser = onMuteUser,
                 onReportUser = onReportUser,
                 onFetchMetadata = onFetchMetadata,
+                onOpenTag = onOpenTag,
             )
         }
     }
@@ -201,6 +206,7 @@ private fun Content(
     onMuteUser: (Message) -> Unit,
     onReportUser: (Message) -> Unit,
     onFetchMetadata: (Message) -> Unit,
+    onOpenTag: ((String) -> Unit)?,
 ) {
     val message = state.message
     Column(
@@ -228,6 +234,7 @@ private fun Content(
                         onOpenLink = { onFetchMetadata(message) },
                         // A push/quote here still opens the original it re-shares.
                         onOpenPushedMessage = onOpenMessage,
+                        onTagClick = onOpenTag,
                     )
                     HorizontalDivider(thickness = 2.dp, color = MaterialTheme.colorScheme.outlineVariant)
                     Text(
@@ -250,6 +257,7 @@ private fun Content(
                     onReportUser = { onReportUser(reply) },
                     onOpenLink = { onFetchMetadata(reply) },
                     onOpenPushedMessage = onOpenMessage,
+                    onTagClick = onOpenTag,
                 )
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             }

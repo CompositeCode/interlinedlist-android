@@ -79,6 +79,8 @@ class MessagesFeedScreenTest {
         onPush: (Message) -> Unit = {},
         onQuote: (Message) -> Unit = {},
         onSelectTagSuggestion: (TagSuggestion) -> Unit = {},
+        onOpenTag: ((String) -> Unit)? = null,
+        onBack: () -> Unit = {},
     ) {
         composeRule.setContent {
             var state by mutableStateOf(initial)
@@ -137,6 +139,8 @@ class MessagesFeedScreenTest {
                         state = state.copy(isComposeOpen = true, quoteTarget = quoted)
                         onQuote(quoted)
                     },
+                    onOpenTag = onOpenTag,
+                    onBack = onBack,
                 )
             }
         }
@@ -591,6 +595,67 @@ class MessagesFeedScreenTest {
         // One label, not four: tags are free-form strings, never word tokens.
         composeRule.onNodeWithTag(MessageCardTags.tagTag(tag)).assertIsDisplayed()
         composeRule.onNodeWithText(tag).assertIsDisplayed()
+    }
+
+    @Test
+    fun tappingATag_opensThatTagsFeed() {
+        val opened = mutableListOf<String>()
+        setFeed(
+            MessagesFeedUiState(messages = listOf(message("1", "tagged post", tags = listOf("lists")))),
+            onOpenTag = { opened += it },
+        )
+
+        composeRule.onNodeWithTag(MessageCardTags.tagTag("lists")).performClick()
+
+        assertThat(opened).containsExactly("lists")
+    }
+
+    @Test
+    fun tappingATagWithSpacesAndPunctuation_passesItWhole() {
+        val tag = "life is short, o brave girl"
+        val opened = mutableListOf<String>()
+        setFeed(
+            MessagesFeedUiState(messages = listOf(message("1", "tagged", tags = listOf(tag)))),
+            onOpenTag = { opened += it },
+        )
+
+        composeRule.onNodeWithTag(MessageCardTags.tagTag(tag)).performClick()
+
+        // Exactly the tag the card carried: not trimmed, split or lowercased.
+        assertThat(opened).containsExactly(tag)
+    }
+
+    @Test
+    fun tags_areInert_whereTheHostWiresNoTagDestination() {
+        setFeed(MessagesFeedUiState(messages = listOf(message("1", "tagged", tags = listOf("lists")))))
+        composeRule.onNodeWithTag(MessageCardTags.tagTag("lists")).assertHasNoClickAction()
+    }
+
+    @Test
+    fun tagFeed_showsTheTagAndABackArrow_insteadOfTheComposerAndScheduled() {
+        val backs = mutableListOf<Unit>()
+        setFeed(
+            MessagesFeedUiState(
+                tag = "lists",
+                messages = listOf(message("1", "tagged", tags = listOf("lists"))),
+            ),
+            onBack = { backs += Unit },
+        )
+
+        composeRule.onNodeWithTag(MessagesFeedTags.TAG_TITLE).assertIsDisplayed()
+        // Composing here would post an untagged message into a feed it cannot join.
+        composeRule.onNodeWithTag(MessagesFeedTags.FAB).assertDoesNotExist()
+        composeRule.onNodeWithTag(MessagesFeedTags.SCHEDULED_ACTION).assertDoesNotExist()
+
+        composeRule.onNodeWithTag(MessagesFeedTags.BACK).performClick()
+        assertThat(backs).hasSize(1)
+    }
+
+    @Test
+    fun tagFeed_keepsTheViewPreferenceSwitcher() {
+        // The tag feed is a normal feed: the account's view preference still applies.
+        setFeed(MessagesFeedUiState(tag = "lists", messages = listOf(message("1", "tagged"))))
+        composeRule.onNodeWithTag(MessagesFeedTags.VIEW_PREFERENCES).assertIsDisplayed()
     }
 
     @Test

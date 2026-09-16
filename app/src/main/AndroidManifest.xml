@@ -29,6 +29,13 @@
                 destinations (shared list/document tokens, password reset, email
                 verification, and the confirm/undo halves of an email change).
                 autoVerify enables Android App Links verification.
+
+                The site root is registered for the tag feed: the web links every
+                tag on a message card to "/?tag=<tag>" (there is no /tag/<tag>
+                path — it 404s), and an intent filter cannot match on a query
+                string. So "/" is the narrowest filter that can catch a tag link.
+                A root link with no tag simply opens the app's normal start
+                destination, which shows the same feed the homepage does.
             -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
@@ -37,6 +44,7 @@
                 <data android:scheme="https" android:host="interlinedlist.com" />
                 <data android:pathPrefix="/lists/shared/" />
                 <data android:pathPrefix="/documents/shared/" />
+                <data android:path="/" />
                 <data android:path="/reset-password" />
                 <data android:path="/verify-email" />
                 <data android:path="/verify-email-change" />
@@ -50,6 +58,7 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="interlinedlist" android:host="lists" />
                 <data android:scheme="interlinedlist" android:host="documents" />
+                <data android:scheme="interlinedlist" android:host="tag" />
                 <data android:scheme="interlinedlist" android:host="reset-password" />
                 <data android:scheme="interlinedlist" android:host="verify-email" />
                 <data android:scheme="interlinedlist" android:host="verify-email-change" />

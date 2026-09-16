@@ -25,7 +25,12 @@ data class MessageEntity(
     val dugByMe: Boolean,
     val parentId: String?,
     val mine: Boolean,
-    /** Server-relative ordering position captured at fetch time (feed order). */
+    /**
+     * Server-relative ordering position captured at fetch time, used to order a
+     * message's **replies**. A message's place in a *feed* is not stored here —
+     * the same message can sit in the main feed and in any number of tag feeds at
+     * once — but in [FeedEntryEntity].
+     */
     val feedOrder: Long,
     /** Attached image URLs, stored via [MessageConverters]. */
     val imageUrls: List<String> = emptyList(),
