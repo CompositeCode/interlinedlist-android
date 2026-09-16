@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.SharedPreferences
 import com.interlinedlist.android.core.common.session.SessionTokenProvider
 import com.interlinedlist.android.core.datastore.SessionStore
+import com.interlinedlist.android.core.datastore.SharedPrefsThemeSettingsStore
+import com.interlinedlist.android.core.datastore.ThemeSettingsStore
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
@@ -30,4 +32,13 @@ abstract class SessionBindsModule {
 
     @Binds
     abstract fun bindSessionTokenProvider(impl: SessionStore): SessionTokenProvider
+
+    /**
+     * Singleton so the activity's theme observer and the settings sync that writes to
+     * it are the same store — otherwise an adopted account theme would not reach the
+     * running UI until the process restarted.
+     */
+    @Binds
+    @Singleton
+    abstract fun bindThemeSettingsStore(impl: SharedPrefsThemeSettingsStore): ThemeSettingsStore
 }

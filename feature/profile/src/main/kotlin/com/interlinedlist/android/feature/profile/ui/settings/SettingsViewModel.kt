@@ -3,6 +3,7 @@ package com.interlinedlist.android.feature.profile.ui.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.interlinedlist.android.core.common.result.ApiResult
+import com.interlinedlist.android.core.datastore.ThemeMode
 import com.interlinedlist.android.feature.profile.data.SettingsRepository
 import com.interlinedlist.android.feature.profile.domain.SettingsBounds
 import com.interlinedlist.android.feature.profile.domain.UserSettings
@@ -27,9 +28,16 @@ import javax.inject.Inject
  * Settings screen state. [settings] is null until the first load succeeds (the screen
  * shows the loading/error state then); [isSaving] covers an in-flight preference write,
  * which the screen uses to keep the controls responsive but visibly pending.
+ *
+ * [themeMode] is carried separately from [settings] on purpose: the appearance the app
+ * renders comes from the **device's** store, which an offline change deliberately
+ * outruns, while `settings.theme` is only the last value the server knew. Showing the
+ * account field here would make the control flicker back to the stale value every time
+ * the settings refreshed.
  */
 data class SettingsUiState(
     val settings: UserSettings? = null,
+    val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val isLoading: Boolean = false,
     val isSaving: Boolean = false,
     val errorMessage: String? = null,
@@ -57,6 +65,13 @@ class SettingsViewModel @Inject constructor(
                 if (settings != null) _uiState.update { it.copy(settings = settings) }
             }
         }
+        // The device's theme is its own source of truth, so follow it directly rather
+        // than deriving it from the account field the settings carry.
+        viewModelScope.launch {
+            repository.observeThemeMode().collect { mode ->
+                _uiState.update { it.copy(themeMode = mode) }
+            }
+        }
         refresh()
     }
 
@@ -70,6 +85,34 @@ class SettingsViewModel @Inject constructor(
                 }
                 is ApiResult.Failure -> _uiState.update {
                     it.copy(isLoading = false, errorMessage = result.error.toUserMessage())
+                }
+            }
+        }
+    }
+
+    /**
+     * Switches the app's appearance.
+     *
+     * Unlike every other preference here this is **not** rolled back when the save
+     * fails: the device's store already holds the choice, the app has already
+     * re-themed, and undoing that because the network was unavailable is exactly the
+     * behaviour the offline requirement rules out.
+     *
+     * Because the outcome differs from the other rows, so does the message — the
+     * server's reason plus [THEME_NOT_SYNCED_NOTE], so the user is told that the
+     * appearance they are looking at is real and that only the account copy is behind.
+     */
+    fun setThemeMode(mode: ThemeMode) {
+        if (_uiState.value.themeMode == mode) return
+        _uiState.update { it.copy(isSaving = true, errorMessage = null) }
+        viewModelScope.launch {
+            when (val result = repository.setThemeMode(mode)) {
+                is ApiResult.Success -> _uiState.update { it.copy(isSaving = false) }
+                is ApiResult.Failure -> _uiState.update {
+                    it.copy(
+                        isSaving = false,
+                        errorMessage = "${result.error.toUserMessage()} $THEME_NOT_SYNCED_NOTE",
+                    )
                 }
             }
         }
@@ -200,6 +243,15 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun dismissError() = _uiState.update { it.copy(errorMessage = null) }
+
+    companion object {
+        /**
+         * Appended to a failed theme save. The choice is kept and the app has already
+         * re-themed, so the message must not read like the change was lost.
+         */
+        const val THEME_NOT_SYNCED_NOTE: String =
+            "Your theme is applied on this device and will sync to your account later."
+    }
 
     /**
      * True when [value] is inside [range]; otherwise reports it as an error naming

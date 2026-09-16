@@ -79,6 +79,7 @@ import com.interlinedlist.android.feature.profile.ui.profile.PublicDocumentRoute
 import com.interlinedlist.android.feature.profile.ui.profile.PublicListRoute
 import com.interlinedlist.android.feature.profile.ui.profile.UserProfileRoute
 import com.interlinedlist.android.feature.profile.ui.search.UserSearchRoute
+import com.interlinedlist.android.feature.profile.ui.settings.AccountThemeSyncEffect
 import com.interlinedlist.android.feature.profile.ui.settings.SettingsRoute
 import com.interlinedlist.android.ui.home.HomeViewModel
 
@@ -212,6 +213,10 @@ fun InterlinedListNavHost(
         }
         composable(Routes.MAIN) {
             val context = LocalContext.current
+            // Entered both by a cold start with a session and by a fresh sign-in, so
+            // this is where the account's theme is adopted (and any change made
+            // offline is pushed) without waiting for the user to open Settings.
+            AccountThemeSyncEffect()
             MainShell(
                 notificationRoute = notificationRoute,
                 onLoggedOut = {

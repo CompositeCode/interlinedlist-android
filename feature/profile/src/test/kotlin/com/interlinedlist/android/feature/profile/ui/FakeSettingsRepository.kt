@@ -1,6 +1,7 @@
 package com.interlinedlist.android.feature.profile.ui
 
 import com.interlinedlist.android.core.common.result.ApiResult
+import com.interlinedlist.android.core.datastore.ThemeMode
 import com.interlinedlist.android.feature.profile.data.SettingsRepository
 import com.interlinedlist.android.feature.profile.domain.UserSettings
 import com.interlinedlist.android.feature.profile.domain.UserSettingsUpdate
@@ -12,18 +13,39 @@ import kotlinx.coroutines.flow.MutableStateFlow
  * [updateResult] drive the success/failure paths; on success the fake behaves like
  * the real one — it publishes the new settings to [observeSettings] — and every
  * update is recorded so tests can assert exactly which fields were sent.
+ *
+ * The theme half mirrors the real repository's contract too: [setThemeMode] stores the
+ * mode locally **before** the result is consulted, so a failed save still leaves the
+ * device holding the user's choice.
  */
 class FakeSettingsRepository : SettingsRepository {
 
     private val settings = MutableStateFlow<UserSettings?>(null)
+    private val themeMode = MutableStateFlow(ThemeMode.SYSTEM)
 
     var refreshResult: ApiResult<UserSettings> = ApiResult.Success(UserSettings())
     var updateResult: ((UserSettingsUpdate) -> ApiResult<UserSettings>)? = null
+    var themeResult: ((ThemeMode) -> ApiResult<UserSettings>)? = null
 
     var refreshCount = 0
     val updates = mutableListOf<UserSettingsUpdate>()
+    val themeModes = mutableListOf<ThemeMode>()
 
     override fun observeSettings(): Flow<UserSettings?> = settings
+
+    override fun observeThemeMode(): Flow<ThemeMode> = themeMode
+
+    /** Seeds the device's stored appearance, as a previous session would have left it. */
+    fun seedThemeMode(mode: ThemeMode) {
+        themeMode.value = mode
+    }
+
+    override suspend fun setThemeMode(mode: ThemeMode): ApiResult<UserSettings> {
+        themeModes += mode
+        // Local first, exactly like the real one: the choice survives a failed push.
+        themeMode.value = mode
+        return themeResult?.invoke(mode) ?: ApiResult.Success(settings.value ?: UserSettings())
+    }
 
     override suspend fun refresh(): ApiResult<UserSettings> {
         refreshCount++

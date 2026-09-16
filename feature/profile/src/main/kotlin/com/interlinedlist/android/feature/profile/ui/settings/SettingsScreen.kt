@@ -33,6 +33,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.interlinedlist.android.core.datastore.ThemeMode
 import com.interlinedlist.android.core.designsystem.theme.InterlinedListTheme
 import com.interlinedlist.android.feature.profile.domain.SettingsBounds
 import com.interlinedlist.android.feature.profile.domain.UserSettings
@@ -43,6 +44,7 @@ import com.interlinedlist.android.feature.profile.domain.maxMessageLengthOrDefau
 import com.interlinedlist.android.feature.profile.domain.messagesPerPageOrDefault
 import com.interlinedlist.android.feature.profile.domain.notificationTrayLimitOrDefault
 import com.interlinedlist.android.feature.profile.domain.showAdvancedPostSettingsOrDefault
+import com.interlinedlist.android.feature.profile.domain.wire
 
 /** Stable test tags for the Settings screen. */
 object SettingsTestTags {
@@ -67,6 +69,23 @@ object SettingsTestTags {
     /** Tag for one feed-filter option, keyed on its wire value. */
     fun viewingPreference(option: ViewingPreference): String =
         "settingsViewingPreference_${option.wire}"
+
+    /** Tag for one appearance option, keyed on its account wire value. */
+    fun themeMode(option: ThemeMode): String = "settingsTheme_${option.wire}"
+}
+
+/** The label shown for each appearance (wording follows the web help centre). */
+private fun ThemeMode.label(): String = when (this) {
+    ThemeMode.SYSTEM -> "System"
+    ThemeMode.LIGHT -> "Light"
+    ThemeMode.DARK -> "Dark"
+}
+
+/** The one-line explanation shown under each appearance. */
+private fun ThemeMode.description(): String = when (this) {
+    ThemeMode.SYSTEM -> "Follow your device's light or dark setting"
+    ThemeMode.LIGHT -> "Always use the light appearance"
+    ThemeMode.DARK -> "Always use the dark appearance"
 }
 
 /** The label shown for each feed filter (wording follows the web help centre). */
@@ -103,6 +122,7 @@ fun SettingsRoute(
         state = state,
         onBack = onBack,
         onRetry = viewModel::refresh,
+        onSelectThemeMode = viewModel::setThemeMode,
         onSelectViewingPreference = viewModel::setViewingPreference,
         onToggleShowPreviews = viewModel::setShowPreviews,
         onSetMessagesPerPage = viewModel::setMessagesPerPage,
@@ -123,6 +143,7 @@ fun SettingsScreen(
     state: SettingsUiState,
     onBack: () -> Unit,
     onRetry: () -> Unit,
+    onSelectThemeMode: (ThemeMode) -> Unit,
     onSelectViewingPreference: (ViewingPreference) -> Unit,
     onToggleShowPreviews: (Boolean) -> Unit,
     onSetMessagesPerPage: (Int) -> Unit,
@@ -160,6 +181,8 @@ fun SettingsScreen(
                 }
                 ProfileGroup(
                     settings = settings,
+                    themeMode = state.themeMode,
+                    onSelectThemeMode = onSelectThemeMode,
                     onSetMaxMessageLength = onSetMaxMessageLength,
                 )
                 ViewPreferencesGroup(
@@ -274,16 +297,23 @@ private fun ViewPreferencesGroup(
 }
 
 /**
- * "Profile": the account-wide message character limit.
+ * "Profile": the app's appearance and the account-wide message character limit.
  *
- * The web deliberately files the limit here and not under Message settings — its own
- * help centre tells users to "adjust it in Settings, then Profile (not Message
- * Settings)" — so this mirrors that. Message settings points at it for anyone who
- * looks there first.
+ * Both are filed here because the web files them here: `/help/settings` lists
+ * **Profile settings** as Display Name, Bio, Avatar, "Theme: Light, dark, or system
+ * (follows your device preference)", then "Max message length", and the help centre
+ * tells users to "adjust it in Settings, then Profile (not Message Settings)". Theme
+ * sits above the limit in the same order the web uses.
+ *
+ * The theme is read from [themeMode] — the device's own store — rather than from
+ * `settings.theme`, so the selection shows what the app is actually rendering even
+ * when the account has not caught up yet.
  */
 @Composable
 private fun ProfileGroup(
     settings: UserSettings,
+    themeMode: ThemeMode,
+    onSelectThemeMode: (ThemeMode) -> Unit,
     onSetMaxMessageLength: (Int) -> Unit,
 ) {
     SettingsGroup(
@@ -291,6 +321,22 @@ private fun ProfileGroup(
         description = "Your display name, bio and avatar are edited from Edit profile.",
         modifier = Modifier.testTag(SettingsTestTags.PROFILE),
     ) {
+        Text(
+            text = "Theme",
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
+        )
+        ThemeMode.entries.forEach { option ->
+            SettingsRadioRow(
+                label = option.label(),
+                description = option.description(),
+                selected = themeMode == option,
+                onSelect = { onSelectThemeMode(option) },
+                tag = SettingsTestTags.themeMode(option),
+            )
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         SettingsNumberRow(
             label = "Message character limit",
             description = "The longest message you can post (default 666 characters).",
@@ -431,9 +477,11 @@ private fun SettingsScreenPreview() {
                     showAdvancedPostSettings = false,
                     isPrivateAccount = true,
                 ),
+                themeMode = ThemeMode.DARK,
             ),
             onBack = {},
             onRetry = {},
+            onSelectThemeMode = {},
             onSelectViewingPreference = {},
             onToggleShowPreviews = {},
             onSetMessagesPerPage = {},

@@ -57,7 +57,15 @@ class DefaultSettingsRepositoryTest {
         api = retrofit.create(ProfileApi::class.java)
         trayLimitStore =
             NotificationTrayLimitStore(retrofit.create(InterlinedListApi::class.java), json)
-        repository = DefaultSettingsRepository(api, trayLimitStore, json, dispatchers)
+        // The theme half of the settings surface has its own suite
+        // (SettingsThemeSyncTest); here it only has to exist and not interfere.
+        repository = DefaultSettingsRepository(
+            api,
+            trayLimitStore,
+            FakeThemeSettingsStore(),
+            json,
+            dispatchers,
+        )
     }
 
     @After

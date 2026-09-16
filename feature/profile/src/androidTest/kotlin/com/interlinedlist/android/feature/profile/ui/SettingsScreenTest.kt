@@ -17,6 +17,8 @@ import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.google.common.truth.Truth.assertThat
+import com.interlinedlist.android.core.datastore.ThemeMode
 import com.interlinedlist.android.core.designsystem.theme.InterlinedListTheme
 import com.interlinedlist.android.feature.profile.domain.UserSettings
 import com.interlinedlist.android.feature.profile.domain.ViewingPreference
@@ -38,6 +40,7 @@ class SettingsScreenTest {
 
     private fun setContent(
         state: SettingsUiState,
+        onSelectThemeMode: (ThemeMode) -> Unit = {},
         onSelectViewingPreference: (ViewingPreference) -> Unit = {},
         onToggleShowPreviews: (Boolean) -> Unit = {},
         onSetMessagesPerPage: (Int) -> Unit = {},
@@ -55,6 +58,7 @@ class SettingsScreenTest {
                     state = state,
                     onBack = {},
                     onRetry = onRetry,
+                    onSelectThemeMode = onSelectThemeMode,
                     onSelectViewingPreference = onSelectViewingPreference,
                     onToggleShowPreviews = onToggleShowPreviews,
                     onSetMessagesPerPage = onSetMessagesPerPage,
@@ -367,6 +371,7 @@ class SettingsScreenTest {
                     state = SettingsUiState(settings = settings, errorMessage = null),
                     onBack = {},
                     onRetry = {},
+                    onSelectThemeMode = {},
                     onSelectViewingPreference = {},
                     onToggleShowPreviews = {},
                     onSetMessagesPerPage = {},
@@ -453,6 +458,7 @@ class SettingsScreenTest {
                     state = SettingsUiState(settings = settings),
                     onBack = {},
                     onRetry = {},
+                    onSelectThemeMode = {},
                     onSelectViewingPreference = {},
                     onToggleShowPreviews = {},
                     onSetMessagesPerPage = {},
@@ -474,5 +480,55 @@ class SettingsScreenTest {
         settings = settings.copy(isPrivateAccount = false)
 
         composeRule.onNodeWithTag(SettingsTestTags.PRIVATE_ACCOUNT).assertIsOff()
+    }
+
+    // --- Theme (issue #36) ---------------------------------------------------
+    // Filed under Profile because that is where the web files it: `/help/settings`
+    // lists Theme under "Profile settings", between Avatar and Max message length.
+
+    @Test
+    fun theme_showsTheDeviceSelectionInsideTheProfileGroup() {
+        setContent(SettingsUiState(settings = UserSettings(), themeMode = ThemeMode.DARK))
+
+        composeRule.onNodeWithTag(SettingsTestTags.PROFILE).assertIsDisplayed()
+        composeRule.onNodeWithTag(SettingsTestTags.themeMode(ThemeMode.DARK)).assertIsSelected()
+    }
+
+    /**
+     * The account field and the device store can disagree while an offline change is
+     * still owed; the control must show what the app is actually rendering.
+     */
+    @Test
+    fun theme_prefersTheDeviceStoreOverTheAccountField() {
+        setContent(
+            SettingsUiState(
+                settings = UserSettings(theme = "light"),
+                themeMode = ThemeMode.DARK,
+            ),
+        )
+
+        composeRule.onNodeWithTag(SettingsTestTags.themeMode(ThemeMode.DARK)).assertIsSelected()
+    }
+
+    @Test
+    fun choosingATheme_reportsTheSelection() {
+        var chosen: ThemeMode? = null
+        setContent(
+            SettingsUiState(settings = UserSettings(), themeMode = ThemeMode.SYSTEM),
+            onSelectThemeMode = { chosen = it },
+        )
+
+        composeRule.onNodeWithTag(SettingsTestTags.themeMode(ThemeMode.DARK)).performClick()
+
+        assertThat(chosen).isEqualTo(ThemeMode.DARK)
+    }
+
+    /** "Follow the device" is an option the account carries too, so it is offered. */
+    @Test
+    fun theme_offersFollowTheSystem() {
+        setContent(SettingsUiState(settings = UserSettings(), themeMode = ThemeMode.LIGHT))
+
+        composeRule.onNodeWithTag(SettingsTestTags.themeMode(ThemeMode.SYSTEM)).assertIsDisplayed()
+        composeRule.onNodeWithTag(SettingsTestTags.themeMode(ThemeMode.SYSTEM)).performClick()
     }
 }
