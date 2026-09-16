@@ -18,8 +18,16 @@ import kotlinx.coroutines.flow.Flow
  */
 interface MessagesRepository {
 
-    /** The cached top-level feed, newest-first, re-emitting on every change. */
-    fun observeFeed(): Flow<List<Message>>
+    /**
+     * The cached top-level feed, newest-first, re-emitting on every change.
+     *
+     * [tag] selects *which* feed: null is the account's main feed, a non-null tag
+     * is the feed filtered to that tag (`GET /api/messages?tag=`). Both are the
+     * same feed in every other respect — same cursor paging, same view preference,
+     * same cached message rows — they differ only in which rows belong to them, so
+     * loading a tag feed never disturbs the main one.
+     */
+    fun observeFeed(tag: String? = null): Flow<List<Message>>
 
     /** Cached replies to [messageId], re-emitting on every change. */
     fun observeReplies(messageId: String): Flow<List<Message>>
@@ -40,21 +48,28 @@ interface MessagesRepository {
      * the following/followers scopes are applied by the server from the saved
      * preference, which is why [setViewingPreference] must succeed before a
      * refresh can show a different view.
+     *
+     * [tag] scopes the request (and the cache it replaces) to one tag's feed; null
+     * refreshes the main feed. Refreshing a tag feed leaves the main feed's cached
+     * rows exactly where they were.
      */
     suspend fun refreshFeed(
         preference: ViewingPreference = ViewingPreference.DEFAULT,
+        tag: String? = null,
     ): ApiResult<String?>
 
     /**
      * Fetches the page that follows [cursor] and appends it to the cached feed.
      * [cursor] is the opaque token a previous [refreshFeed]/[loadMoreFeed]
      * returned and is handed to the API verbatim — never construct or parse one.
-     * [preference] must match the one the page chain started under. Returns the
-     * cursor for the page after this one, or null at the end.
+     * [preference] and [tag] must match the ones the page chain started under —
+     * the cursor is only meaningful within the query that produced it.
+     * Returns the cursor for the page after this one, or null at the end.
      */
     suspend fun loadMoreFeed(
         cursor: String,
         preference: ViewingPreference = ViewingPreference.DEFAULT,
+        tag: String? = null,
     ): ApiResult<String?>
 
     /**

@@ -13,6 +13,7 @@ import com.interlinedlist.android.core.datastore.ThemeMode
 import com.interlinedlist.android.core.datastore.ThemeSettingsStore
 import com.interlinedlist.android.core.designsystem.theme.InterlinedListTheme
 import com.interlinedlist.android.feature.auth.nav.AuthRoutes
+import com.interlinedlist.android.feature.messages.navigation.MessagesDestinations
 import com.interlinedlist.android.navigation.InterlinedListNavHost
 import com.interlinedlist.android.navigation.NotificationLaunch
 import dagger.hilt.android.AndroidEntryPoint
@@ -40,6 +41,10 @@ class MainActivity : ComponentActivity() {
         // the VIEW intent's data. Both endpoints behind it are unauthenticated, so the
         // route resolves regardless of whether a session exists.
         val emailChangeRoute = AuthRoutes.routeForEmailChangeLink(intent?.dataString)
+        // A tapped tag link (`https://interlinedlist.com/?tag=…`, the URL the web's
+        // own tag chips point at) resolves to the tag-filtered feed. Resolved here
+        // rather than by implicit nav matching so the rule is unit-testable.
+        val tagFeedRoute = MessagesDestinations.routeForTagLink(intent?.dataString)
         enableEdgeToEdge()
         setContent {
             val themeMode by themeSettingsStore.themeMode.collectAsStateWithLifecycle()
@@ -53,6 +58,7 @@ class MainActivity : ComponentActivity() {
                     startLoggedIn = startLoggedIn,
                     notificationRoute = notificationRoute,
                     emailChangeRoute = emailChangeRoute,
+                    tagFeedRoute = tagFeedRoute,
                 )
             }
         }
