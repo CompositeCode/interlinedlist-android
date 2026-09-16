@@ -3,11 +3,13 @@ package com.interlinedlist.android.feature.lists.ui.detail
 import androidx.lifecycle.SavedStateHandle
 import com.google.common.truth.Truth.assertThat
 import com.interlinedlist.android.core.common.result.ApiResult
+import com.interlinedlist.android.feature.lists.FakeGithubRepository
 import com.interlinedlist.android.feature.lists.FakeListsRepository
 import com.interlinedlist.android.feature.lists.domain.FieldType
 import com.interlinedlist.android.feature.lists.domain.ListDetail
 import com.interlinedlist.android.feature.lists.domain.ListRow
 import com.interlinedlist.android.feature.lists.domain.ListSchema
+import com.interlinedlist.android.feature.lists.domain.ListSource
 import com.interlinedlist.android.feature.lists.domain.ListSummary
 import com.interlinedlist.android.feature.lists.domain.RefreshResult
 import com.interlinedlist.android.feature.lists.domain.SchemaField
@@ -40,8 +42,29 @@ class ListDetailViewModelTest {
         rows = rows,
     )
 
-    private fun viewModel(repo: FakeListsRepository) =
-        ListDetailViewModel(repo, SavedStateHandle(mapOf(LIST_ID_ARG to "L1")))
+    /** The same list, but mirroring a GitHub repository's issues. */
+    private fun githubDetail(rows: List<ListRow>) = ListDetail(
+        summary = ListSummary(
+            id = "L1",
+            title = "Repo issues",
+            description = null,
+            itemCount = rows.size,
+            folderId = null,
+            isPublic = false,
+            updatedAt = null,
+            parentId = null,
+            source = ListSource.GITHUB,
+            githubRepo = "octocat/Hello-World",
+            githubRepoPrivate = true,
+        ),
+        schema = schema,
+        rows = rows,
+    )
+
+    private fun viewModel(
+        repo: FakeListsRepository,
+        github: FakeGithubRepository = FakeGithubRepository(),
+    ) = ListDetailViewModel(repo, github, SavedStateHandle(mapOf(LIST_ID_ARG to "L1")))
 
     @Before fun setUp() = Dispatchers.setMain(dispatcher)
 
@@ -200,7 +223,7 @@ class ListDetailViewModelTest {
     @Test
     fun `refreshFromGithub surfaces a summary and reloads the rows`() = runTest(dispatcher) {
         val repo = FakeListsRepository().apply {
-            detailResult = ApiResult.Success(detail(emptyList()))
+            detailResult = ApiResult.Success(githubDetail(emptyList()))
             refreshGithubResult = ApiResult.Success(
                 RefreshResult(message = null, added = 2, updated = 0, removed = 0),
             )
@@ -209,7 +232,7 @@ class ListDetailViewModelTest {
         advanceUntilIdle()
 
         // After the refresh, the reload returns freshly-synced rows.
-        repo.detailResult = ApiResult.Success(detail(listOf(ListRow("r1", mapOf("title" to "Synced")))))
+        repo.detailResult = ApiResult.Success(githubDetail(listOf(ListRow("r1", mapOf("title" to "Synced")))))
         vm.refreshFromGithub()
         advanceUntilIdle()
 
@@ -222,7 +245,7 @@ class ListDetailViewModelTest {
     @Test
     fun `refreshFromGithub failure surfaces an error and clears the spinner`() = runTest(dispatcher) {
         val repo = FakeListsRepository().apply {
-            detailResult = ApiResult.Success(detail(emptyList()))
+            detailResult = ApiResult.Success(githubDetail(emptyList()))
             refreshGithubResult = FakeListsRepository.subscriptionFailure()
         }
         val vm = viewModel(repo)
@@ -234,6 +257,90 @@ class ListDetailViewModelTest {
         assertThat(vm.uiState.value.isRefreshing).isFalse()
         assertThat(vm.uiState.value.errorMessage).isNotNull()
         assertThat(vm.uiState.value.refreshMessage).isNull()
+    }
+
+    @Test
+    fun `refresh is not offered or spent on a local list`() = runTest(dispatcher) {
+        val repo = FakeListsRepository().apply {
+            detailResult = ApiResult.Success(detail(emptyList()))
+        }
+        val vm = viewModel(repo)
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.isGithubBacked).isFalse()
+        vm.refreshFromGithub()
+        advanceUntilIdle()
+
+        // `POST /api/lists/{id}/refresh` 400s on a local list; do not call it.
+        assertThat(repo.refreshGithubCount).isEqualTo(0)
+    }
+
+    @Test
+    fun `a GitHub-backed list exposes its repository and repository visibility`() = runTest(dispatcher) {
+        val repo = FakeListsRepository().apply {
+            detailResult = ApiResult.Success(githubDetail(emptyList()))
+        }
+        val vm = viewModel(repo)
+        advanceUntilIdle()
+
+        val summary = vm.uiState.value.summary!!
+        assertThat(vm.uiState.value.isGithubBacked).isTrue()
+        assertThat(summary.githubRepo).isEqualTo("octocat/Hello-World")
+        // The repository is private on GitHub; the list itself is merely not public.
+        assertThat(summary.githubRepoPrivate).isTrue()
+        assertThat(summary.isPublic).isFalse()
+    }
+
+    @Test
+    fun `the next issue number is fetched for a GitHub-backed list`() = runTest(dispatcher) {
+        val repo = FakeListsRepository().apply {
+            detailResult = ApiResult.Success(githubDetail(emptyList()))
+        }
+        val github = FakeGithubRepository().apply {
+            nextIssueNumberResult = ApiResult.Success(42)
+        }
+        val vm = viewModel(repo, github)
+        advanceUntilIdle()
+
+        assertThat(github.lastNextIssueRepo).isEqualTo("octocat/Hello-World")
+        assertThat(vm.uiState.value.nextIssueNumber).isEqualTo(42)
+    }
+
+    @Test
+    fun `a local list never asks GitHub for an issue number`() = runTest(dispatcher) {
+        val repo = FakeListsRepository().apply { detailResult = ApiResult.Success(detail(emptyList())) }
+        val github = FakeGithubRepository()
+        val vm = viewModel(repo, github)
+        advanceUntilIdle()
+
+        assertThat(github.lastNextIssueRepo).isNull()
+        assertThat(vm.uiState.value.nextIssueNumber).isNull()
+    }
+
+    @Test
+    fun `an unavailable issue number just drops the hint`() = runTest(dispatcher) {
+        val repo = FakeListsRepository().apply {
+            detailResult = ApiResult.Success(githubDetail(emptyList()))
+        }
+        val github = FakeGithubRepository().apply {
+            nextIssueNumberResult = FakeListsRepository.subscriptionFailure()
+        }
+        val vm = viewModel(repo, github)
+        advanceUntilIdle()
+
+        // Informational only: the list still loaded fine.
+        assertThat(vm.uiState.value.nextIssueNumber).isNull()
+        assertThat(vm.uiState.value.errorMessage).isNull()
+    }
+
+    @Test
+    fun `the row form names the issue operation a save performs`() {
+        assertThat(githubIssueHint("octocat/Hello-World", isNewRow = true, nextIssueNumber = 42))
+            .isEqualTo("Saving opens issue #42 in octocat/Hello-World.")
+        assertThat(githubIssueHint("octocat/Hello-World", isNewRow = true, nextIssueNumber = null))
+            .isEqualTo("Saving opens a new issue in octocat/Hello-World.")
+        assertThat(githubIssueHint("octocat/Hello-World", isNewRow = false, nextIssueNumber = 42))
+            .isEqualTo("Saving updates the matching issue in octocat/Hello-World.")
     }
 
     // --- Parent chain (breadcrumb) + child lists -----------------------------

@@ -48,8 +48,22 @@ data class ListDto(
     val metadata: JsonElement? = null,
     /** Where the rows come from — `"local"`, `"github"`, … (see `ListSource`). */
     val source: String? = null,
+    /** `"owner/repo"` backing a GitHub list; null on a local one. */
+    val githubRepo: String? = null,
+    /**
+     * Whether the backing **repository** is private on GitHub. Re-read on every
+     * sync, and absent (null) until a list has synced at least once — which is
+     * why it stays nullable rather than defaulting to `false`.
+     */
+    val githubRepoPrivate: Boolean? = null,
     // Detail responses may inline the schema; the mapper handles either shape.
     val schema: JsonElement? = null,
+    /**
+     * Column definitions inlined on a detail response. A GitHub-backed list has
+     * no stored schema — `GET /api/lists/{id}` returns its fixed nine issue
+     * columns here — so this is the only place that list's schema can be read.
+     */
+    val properties: JsonElement? = null,
 )
 
 /** Pagination block shared by list endpoints. */
@@ -100,6 +114,11 @@ data class ListEnvelope(
  *   passed through with every key intact.
  * - [source] is the low-cardinality list source string — `"local"` or `"github"`
  *   (see [com.interlinedlist.android.feature.lists.domain.ListSource]).
+ * - [githubRepo] (`"owner/repo"`) is **required** when [source] is `"github"`: the
+ *   server answers `400 githubRepo is required for GitHub-backed lists (format:
+ *   owner/repo)` without it. [githubSource] names which part of the repository the
+ *   rows mirror and is optional; issues are the documented mapping
+ *   ([com.interlinedlist.android.feature.lists.domain.GITHUB_SOURCE_ISSUES]).
  * - [folderId] is a real column on a list, but neither the OpenAPI create schema
  *   nor the help centre lists it as a *create* field: filing a list into a folder
  *   is documented on `PUT /api/lists/{id}`. It is sent when supplied; a caller that
@@ -117,13 +136,21 @@ data class CreateListRequest(
     val initialRows: List<JsonObject>? = null,
     val metadata: JsonObject? = null,
     val source: String? = null,
+    val githubRepo: String? = null,
+    val githubSource: String? = null,
 )
 
-/** Body for `PUT /api/lists/{id}` — partial metadata updates. */
+/**
+ * Body for `PUT /api/lists/{id}` — partial metadata updates.
+ *
+ * [parentId] re-parents the list. It is the one thing a GitHub-backed list's
+ * schema editor may change, since those lists' columns are fixed by GitHub.
+ */
 @Serializable
 data class UpdateListRequest(
     val title: String? = null,
     val description: String? = null,
     val folderId: String? = null,
     val isPublic: Boolean? = null,
+    val parentId: String? = null,
 )

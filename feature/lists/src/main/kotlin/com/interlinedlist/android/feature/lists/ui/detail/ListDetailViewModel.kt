@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.interlinedlist.android.core.common.result.ApiResult
+import com.interlinedlist.android.feature.lists.data.GithubRepository
 import com.interlinedlist.android.feature.lists.data.ListsRepository
 import com.interlinedlist.android.feature.lists.domain.ListRow
 import com.interlinedlist.android.feature.lists.domain.ListSchema
@@ -33,9 +34,17 @@ data class ListDetailUiState(
     val isEditingMetadata: Boolean = false,
     /** Ancestors of this list, root first — empty for a root list. */
     val breadcrumb: List<ListSummary> = emptyList(),
+    /**
+     * The issue number a newly added row will get, for a GitHub-backed list.
+     * Null when unknown or not applicable — the row form simply omits the hint.
+     */
+    val nextIssueNumber: Int? = null,
 ) {
     val title: String get() = summary?.title.orEmpty()
     val isEmpty: Boolean get() = rows.isEmpty() && !isLoading && errorMessage == null
+
+    /** True when this list mirrors a GitHub repository's issues. */
+    val isGithubBacked: Boolean get() = summary?.isGithubBacked == true
 }
 
 /** The nav argument key the detail route reads its list id from. */
@@ -44,6 +53,7 @@ const val LIST_ID_ARG = "listId"
 @HiltViewModel
 class ListDetailViewModel @Inject constructor(
     private val repository: ListsRepository,
+    private val githubRepository: GithubRepository,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -72,6 +82,7 @@ class ListDetailViewModel @Inject constructor(
                         )
                     }
                     loadBreadcrumb(result.data.summary)
+                    loadNextIssueNumber(result.data.summary)
                 }
                 is ApiResult.Failure -> _uiState.update {
                     it.copy(
@@ -155,6 +166,8 @@ class ListDetailViewModel @Inject constructor(
      */
     fun refreshFromGithub() {
         if (_uiState.value.isRefreshing) return
+        // The endpoint 400s on a local list; do not spend the request.
+        if (!_uiState.value.isGithubBacked) return
         _uiState.update { it.copy(isRefreshing = true, errorMessage = null, refreshMessage = null) }
         viewModelScope.launch {
             when (val result = repository.refreshGithubList(listId)) {
@@ -190,8 +203,30 @@ class ListDetailViewModel @Inject constructor(
                         )
                     }
                     loadBreadcrumb(result.data.summary)
+                    loadNextIssueNumber(result.data.summary)
                 }
                 is ApiResult.Failure -> Unit // Keep the existing rows; refresh already succeeded.
+            }
+        }
+    }
+
+    /**
+     * For a GitHub-backed list, asks GitHub which number the next issue will take
+     * so the add-row form can name the issue the user is about to open.
+     *
+     * Purely informational: a failure (or a repo the token cannot see) just leaves
+     * the hint off rather than blocking a row the server would accept anyway.
+     */
+    private fun loadNextIssueNumber(summary: ListSummary) {
+        val repo = summary.githubRepo?.takeIf { summary.isGithubBacked }
+        if (repo == null) {
+            _uiState.update { it.copy(nextIssueNumber = null) }
+            return
+        }
+        viewModelScope.launch {
+            when (val result = githubRepository.getNextIssueNumber(repo)) {
+                is ApiResult.Success -> _uiState.update { it.copy(nextIssueNumber = result.data) }
+                is ApiResult.Failure -> _uiState.update { it.copy(nextIssueNumber = null) }
             }
         }
     }

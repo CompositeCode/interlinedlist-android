@@ -110,21 +110,6 @@ class ListsViewModel @Inject constructor(
         }
     }
 
-    fun createList(title: String, description: String?, onCreated: (ListSummary) -> Unit = {}) {
-        if (title.isBlank()) return
-        viewModelScope.launch {
-            when (val result = repository.createList(title.trim(), description?.trim()?.ifBlank { null }, isPublic = false)) {
-                is ApiResult.Success -> onCreated(result.data)
-                is ApiResult.Failure -> _uiState.update {
-                    it.copy(
-                        errorMessage = result.error.toUserMessage(),
-                        subscriptionRequired = result.error.isSubscriptionGate,
-                    )
-                }
-            }
-        }
-    }
-
     fun deleteList(id: String) {
         viewModelScope.launch {
             when (val result = repository.deleteList(id)) {

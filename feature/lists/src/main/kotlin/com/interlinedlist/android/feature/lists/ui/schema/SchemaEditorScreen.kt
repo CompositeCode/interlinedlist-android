@@ -41,6 +41,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.interlinedlist.android.core.designsystem.theme.InterlinedListTheme
 import com.interlinedlist.android.feature.lists.domain.FieldType
+import com.interlinedlist.android.feature.lists.domain.ListSummary
 
 /** Stable test tags for the schema editor. */
 object SchemaEditorTestTags {
@@ -50,9 +51,12 @@ object SchemaEditorTestTags {
     const val PROGRESS = "schemaEditorProgress"
     const val ERROR = "schemaEditorError"
     const val SUBSCRIPTION = "schemaEditorSubscription"
+    const val LOCKED_NOTICE = "schemaEditorLockedNotice"
+    const val PARENT_PICKER = "schemaEditorParentPicker"
     fun column(uiId: Long) = "schemaColumn_$uiId"
     fun key(uiId: Long) = "schemaColumnKey_$uiId"
     fun remove(uiId: Long) = "schemaColumnRemove_$uiId"
+    fun parentOption(id: String) = "schemaEditorParent_$id"
 }
 
 /**
@@ -83,6 +87,7 @@ fun SchemaEditorRoute(
         onLabelChange = viewModel::updateLabel,
         onTypeChange = viewModel::updateType,
         onSave = { viewModel.save() },
+        onSelectParent = viewModel::setParent,
         modifier = modifier,
     )
 }
@@ -100,28 +105,33 @@ fun SchemaEditorScreen(
     onTypeChange: (Long, FieldType) -> Unit,
     onSave: () -> Unit,
     modifier: Modifier = Modifier,
+    onSelectParent: (String) -> Unit = {},
 ) {
     Scaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
             TopAppBar(
-                title = { Text("Edit columns") },
+                title = { Text(if (state.isSchemaLocked) "Columns & parent" else "Edit columns") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
-                    TextButton(
-                        onClick = onSave,
-                        enabled = state.canSave,
-                        modifier = Modifier.testTag(SchemaEditorTestTags.SAVE),
-                    ) { Text("Save") }
+                    // Nothing to save on a locked schema: the parent picker
+                    // persists on selection.
+                    if (state.canEditColumns) {
+                        TextButton(
+                            onClick = onSave,
+                            enabled = state.canSave,
+                            modifier = Modifier.testTag(SchemaEditorTestTags.SAVE),
+                        ) { Text("Save") }
+                    }
                 },
             )
         },
         floatingActionButton = {
-            if (!state.subscriptionRequired && !state.isLoading) {
+            if (state.canEditColumns && !state.subscriptionRequired && !state.isLoading) {
                 ExtendedFloatingActionButton(
                     onClick = onAddColumn,
                     icon = { Icon(Icons.Default.Add, contentDescription = null) },
@@ -161,16 +171,31 @@ fun SchemaEditorScreen(
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    items(state.columns, key = { it.uiId }) { column ->
-                        ColumnCard(
-                            column = column,
-                            onKeyChange = { onKeyChange(column.uiId, it) },
-                            onLabelChange = { onLabelChange(column.uiId, it) },
-                            onTypeChange = { onTypeChange(column.uiId, it) },
-                            onRemove = { onRemoveColumn(column.uiId) },
-                        )
+                    if (state.isSchemaLocked) {
+                        item { LockedNotice(state.githubRepo) }
+                        item {
+                            ParentPicker(
+                                parentId = state.parentId,
+                                options = state.parentOptions,
+                                enabled = !state.isSaving,
+                                onSelectParent = onSelectParent,
+                            )
+                        }
                     }
-                    if (state.columns.isEmpty()) {
+                    items(state.columns, key = { it.uiId }) { column ->
+                        if (state.canEditColumns) {
+                            ColumnCard(
+                                column = column,
+                                onKeyChange = { onKeyChange(column.uiId, it) },
+                                onLabelChange = { onLabelChange(column.uiId, it) },
+                                onTypeChange = { onTypeChange(column.uiId, it) },
+                                onRemove = { onRemoveColumn(column.uiId) },
+                            )
+                        } else {
+                            LockedColumnCard(column)
+                        }
+                    }
+                    if (state.columns.isEmpty() && state.canEditColumns) {
                         item {
                             Text(
                                 "No columns yet. Use Add column to define this list's shape.",
@@ -180,6 +205,105 @@ fun SchemaEditorScreen(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Why the columns cannot be edited. A GitHub-backed list's schema is the fixed
+ * set of issue fields, so saying so plainly beats letting someone edit a form
+ * whose save the server will refuse.
+ */
+@Composable
+private fun LockedNotice(githubRepo: String?) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(SchemaEditorTestTags.LOCKED_NOTICE),
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("Columns are set by GitHub", style = MaterialTheme.typography.titleSmall)
+            Text(
+                text = buildString {
+                    append("This list mirrors issues")
+                    if (!githubRepo.isNullOrBlank()) append(" in $githubRepo")
+                    append(
+                        ", so its columns are fixed: title, body, labels, assignees and " +
+                            "state come from GitHub and cannot be changed here. The parent " +
+                            "list is the one thing you can still change.",
+                    )
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** A fixed GitHub column, rendered for reference only. */
+@Composable
+private fun LockedColumnCard(column: EditableColumn) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(SchemaEditorTestTags.column(column.uiId)),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(column.label.ifBlank { column.key }, style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    text = column.key + " · " + column.type.name.lowercase(),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (column.readOnly) {
+                Text(
+                    text = "Set by GitHub",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+/** The only edit a locked schema allows: where this list hangs in the tree. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ParentPicker(
+    parentId: String?,
+    options: List<ListSummary>,
+    enabled: Boolean,
+    onSelectParent: (String) -> Unit,
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(SchemaEditorTestTags.PARENT_PICKER),
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Parent list", style = MaterialTheme.typography.titleSmall)
+            if (options.isEmpty()) {
+                Text(
+                    "No other lists to nest this one under yet.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            options.forEach { option ->
+                FilterChip(
+                    selected = option.id == parentId,
+                    enabled = enabled,
+                    onClick = { onSelectParent(option.id) },
+                    label = { Text(option.title.ifBlank { "Untitled list" }) },
+                    modifier = Modifier.testTag(SchemaEditorTestTags.parentOption(option.id)),
+                )
             }
         }
     }

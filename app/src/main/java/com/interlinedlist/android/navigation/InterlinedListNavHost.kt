@@ -1,5 +1,7 @@
 package com.interlinedlist.android.navigation
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
@@ -344,6 +346,10 @@ private fun MainShell(
                     onOpenConnections = { tabNav.navigate(Routes.LIST_CONNECTIONS) },
                     onOpenSharedWithMe = { tabNav.navigate(Routes.LISTS_SHARED_WITH_ME) },
                     onOpenFolders = { tabNav.navigate(Routes.LIST_FOLDERS) },
+                    // A GitHub-backed list needs GitHub linked with the Issues
+                    // scope; linking is an OAuth flow this app does not drive, so
+                    // the picker routes to the existing connected-accounts screen.
+                    onOpenConnectedAccounts = { tabNav.navigate(Routes.INTEGRATIONS_ACCOUNTS) },
                 )
             }
             composable(
@@ -351,6 +357,7 @@ private fun MainShell(
                 arguments = listOf(navArgument("listId") { type = NavType.StringType }),
             ) { entry ->
                 val listId = entry.arguments?.getString("listId").orEmpty()
+                val context = LocalContext.current
                 ListDetailRoute(
                     onBack = { tabNav.popBackStack() },
                     onListDeleted = { tabNav.popBackStack() },
@@ -359,6 +366,13 @@ private fun MainShell(
                     onOpenShare = { tabNav.navigate(Routes.listShare(listId)) },
                     // Breadcrumb hops and newly created child lists open a detail route.
                     onOpenList = { id -> tabNav.navigate(Routes.listDetail(id)) },
+                    // The repository link under a GitHub-backed list's title opens
+                    // that repo's issues page in the browser, as the web app does.
+                    onOpenRepo = { url ->
+                        runCatching {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                        }
+                    },
                 )
             }
             composable(

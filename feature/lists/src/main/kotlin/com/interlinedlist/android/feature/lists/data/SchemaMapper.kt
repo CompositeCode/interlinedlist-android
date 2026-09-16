@@ -110,19 +110,31 @@ object SchemaMapper {
         val obj = value as? JsonObject ?: return null
         val key = keyHint
             ?: obj.string("key")
+            ?: obj.string("propertyKey")
             ?: obj.string("name")
             ?: obj.string("id")
             ?: return null
 
         val label = obj.string("label")
+            ?: obj.string("propertyName")
             ?: obj.string("title")
             ?: obj.string("name")?.takeIf { keyHint != null }
             ?: humanize(key)
 
-        val type = FieldType.fromDsl(obj.string("type") ?: obj.string("fieldType"))
-        val required = obj["required"]?.let { (it as? JsonPrimitive)?.booleanOrNull } ?: false
+        val type = FieldType.fromDsl(
+            obj.string("type") ?: obj.string("propertyType") ?: obj.string("fieldType"),
+        )
+        val required = obj.boolean("required") ?: obj.boolean("isRequired") ?: false
+        // GitHub-backed lists send `isReadOnly` on their synthetic columns
+        // (`number`, `url`, `created_at`, `updated_at`); the row endpoints reject
+        // writes to them, so the flag has to survive into the schema.
+        val readOnly = obj.boolean("isReadOnly") ?: obj.boolean("readOnly") ?: false
         val options = (obj["options"] as? JsonArray)
             ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+            // A select's allowed values may arrive nested under `validationRules`.
+            ?: (obj["validationRules"] as? JsonObject)
+                ?.let { it["options"] as? JsonArray }
+                ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
             ?: emptyList()
 
         return SchemaField(
@@ -131,11 +143,15 @@ object SchemaMapper {
             type = type,
             required = required,
             options = options,
+            readOnly = readOnly,
         )
     }
 
     private fun JsonObject.string(name: String): String? =
         (this[name] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+
+    private fun JsonObject.boolean(name: String): Boolean? =
+        (this[name] as? JsonPrimitive)?.booleanOrNull
 
     /** Turns a raw key like `first_name`/`firstName` into a readable `First Name`. */
     private fun humanize(key: String): String {

@@ -11,7 +11,8 @@ import androidx.room.RoomDatabase
 @Database(
     entities = [CachedListEntity::class],
     // v2 adds CachedListEntity.parentId (list tree / breadcrumb).
-    version = 2,
+    // v3 adds source/githubRepo/githubRepoPrivate (GitHub-backed lists).
+    version = 3,
     exportSchema = false,
 )
 abstract class ListsDatabase : RoomDatabase() {

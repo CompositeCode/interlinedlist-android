@@ -25,12 +25,17 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -59,7 +64,13 @@ object ListsTestTags {
 /**
  * Hilt-wired entry point for the Lists index. [onOpenList] receives the tapped
  * list's id so the app can navigate to the detail route.
+ *
+ * [onOpenConnectedAccounts] is the escape hatch when someone tries to create a
+ * GitHub-backed list without GitHub linked: OAuth linking happens in the browser,
+ * so the sheet routes to the existing connected-accounts screen rather than
+ * pretending it can fix it here.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ListsRoute(
     onOpenList: (String) -> Unit,
@@ -67,9 +78,15 @@ fun ListsRoute(
     modifier: Modifier = Modifier,
     onOpenSharedWithMe: () -> Unit = {},
     onOpenFolders: () -> Unit = {},
+    onOpenConnectedAccounts: () -> Unit = {},
     viewModel: ListsViewModel = hiltViewModel(),
+    newListViewModel: NewListViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val newListState by newListViewModel.uiState.collectAsStateWithLifecycle()
+    var creating by rememberSaveable { mutableStateOf(false) }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
     ListsScreen(
         state = state,
         onOpenList = onOpenList,
@@ -78,9 +95,34 @@ fun ListsRoute(
         onOpenFolders = onOpenFolders,
         onSearchQueryChange = viewModel::onSearchQueryChange,
         onLoadMore = viewModel::loadMore,
-        onCreateList = { title -> viewModel.createList(title, description = null, onCreated = { onOpenList(it.id) }) },
+        onNewList = { creating = true },
         modifier = modifier,
     )
+
+    if (creating) {
+        ModalBottomSheet(
+            onDismissRequest = { creating = false; newListViewModel.reset() },
+            sheetState = sheetState,
+        ) {
+            NewListSheet(
+                state = newListState,
+                onSelectKind = newListViewModel::selectKind,
+                onTitleChange = newListViewModel::onTitleChange,
+                onPublicChange = newListViewModel::onPublicChange,
+                onRepoQueryChange = newListViewModel::onRepoQueryChange,
+                onSelectRepo = newListViewModel::selectRepo,
+                onSelectOrg = newListViewModel::selectOrg,
+                onCreate = {
+                    newListViewModel.create { summary ->
+                        creating = false
+                        onOpenList(summary.id)
+                    }
+                },
+                onCancel = { creating = false; newListViewModel.reset() },
+                onOpenConnectedAccounts = { creating = false; onOpenConnectedAccounts() },
+            )
+        }
+    }
 }
 
 /** Stateless lists index — loading / empty / error / subscription / content states. */
@@ -92,7 +134,7 @@ fun ListsScreen(
     onOpenConnections: () -> Unit,
     onSearchQueryChange: (String) -> Unit,
     onLoadMore: () -> Unit,
-    onCreateList: (String) -> Unit,
+    onNewList: () -> Unit,
     modifier: Modifier = Modifier,
     onOpenSharedWithMe: () -> Unit = {},
     onOpenFolders: () -> Unit = {},
@@ -124,7 +166,7 @@ fun ListsScreen(
         floatingActionButton = {
             if (!state.subscriptionRequired) {
                 ExtendedFloatingActionButton(
-                    onClick = { onCreateList("New list") },
+                    onClick = onNewList,
                     icon = { Icon(Icons.Default.Add, contentDescription = null) },
                     text = { Text("New list") },
                     modifier = Modifier.testTag(ListsTestTags.CREATE_FAB),
@@ -325,7 +367,7 @@ private fun ListsScreenPreview() {
             onOpenConnections = {},
             onSearchQueryChange = {},
             onLoadMore = {},
-            onCreateList = {},
+            onNewList = {},
         )
     }
 }

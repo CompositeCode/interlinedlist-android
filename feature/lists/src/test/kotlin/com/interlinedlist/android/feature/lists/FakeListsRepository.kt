@@ -4,6 +4,7 @@ import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
 import com.interlinedlist.android.feature.lists.data.ListsRepository
 import com.interlinedlist.android.feature.lists.domain.Contributor
+import com.interlinedlist.android.feature.lists.domain.GITHUB_SOURCE_ISSUES
 import com.interlinedlist.android.feature.lists.domain.ListConnection
 import com.interlinedlist.android.feature.lists.domain.ListDetail
 import com.interlinedlist.android.feature.lists.domain.ListFolder
@@ -23,6 +24,7 @@ import com.interlinedlist.android.feature.lists.domain.SharedListResolution
 import com.interlinedlist.android.feature.lists.domain.Watcher
 import com.interlinedlist.android.feature.lists.domain.WatcherCandidate
 import com.interlinedlist.android.feature.lists.domain.WatcherRole
+import com.interlinedlist.android.feature.lists.domain.isValidGithubRepo
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.serialization.json.JsonObject
@@ -95,6 +97,9 @@ class FakeListsRepository : ListsRepository {
     var lastCreateInitialRows: List<Map<String, String>>? = null
     var lastCreateMetadata: JsonObject? = null
     var lastCreateSource: ListSource? = null
+    var lastCreateGithubRepo: String? = null
+    var lastCreateGithubSource: String? = null
+    var lastUpdatedParentId: String? = null
     var updateListCount = 0
     var updateFolderCount = 0
     var deleteFolderCount = 0
@@ -153,6 +158,8 @@ class FakeListsRepository : ListsRepository {
         initialRows: List<Map<String, String>>?,
         metadata: JsonObject?,
         source: ListSource?,
+        githubRepo: String?,
+        githubSource: String?,
     ): ApiResult<ListSummary> {
         lastCreateParentId = parentId
         lastCreateFolderId = folderId
@@ -160,8 +167,41 @@ class FakeListsRepository : ListsRepository {
         lastCreateInitialRows = initialRows
         lastCreateMetadata = metadata
         lastCreateSource = source
+        lastCreateGithubRepo = githubRepo
+        lastCreateGithubSource = githubSource
         return createResult ?: ApiResult.Success(
-            ListSummary("new", title, description, 0, folderId, isPublic, null, parentId),
+            ListSummary(
+                id = "new",
+                title = title,
+                description = description,
+                itemCount = 0,
+                folderId = folderId,
+                isPublic = isPublic,
+                updatedAt = null,
+                parentId = parentId,
+                source = source ?: ListSource.LOCAL,
+                githubRepo = githubRepo,
+            ),
+        )
+    }
+
+    /** Mirrors the real repository: validates the repo then delegates to [createList]. */
+    override suspend fun createGithubList(
+        repo: String,
+        title: String,
+        isPublic: Boolean,
+        parentId: String?,
+    ): ApiResult<ListSummary> {
+        if (!isValidGithubRepo(repo)) {
+            return ApiResult.Failure(AppError.Unknown("Pick a repository in owner/repo form."))
+        }
+        return createList(
+            title = title,
+            isPublic = isPublic,
+            parentId = parentId,
+            source = ListSource.GITHUB,
+            githubRepo = repo,
+            githubSource = GITHUB_SOURCE_ISSUES,
         )
     }
 
@@ -183,11 +223,13 @@ class FakeListsRepository : ListsRepository {
         description: String?,
         isPublic: Boolean?,
         folderId: String?,
+        parentId: String?,
     ): ApiResult<ListSummary> {
         updateListCount++
         lastUpdatedTitle = title
         lastUpdatedDescription = description
         lastUpdatedIsPublic = isPublic
+        lastUpdatedParentId = parentId
         val result = updateListResult ?: run {
             val current = cache.value.firstOrNull { it.id == id }
             ApiResult.Success(
@@ -199,6 +241,10 @@ class FakeListsRepository : ListsRepository {
                     folderId = folderId ?: current?.folderId,
                     isPublic = isPublic ?: current?.isPublic ?: false,
                     updatedAt = current?.updatedAt,
+                    parentId = parentId ?: current?.parentId,
+                    source = current?.source ?: ListSource.LOCAL,
+                    githubRepo = current?.githubRepo,
+                    githubRepoPrivate = current?.githubRepoPrivate,
                 ),
             )
         }
