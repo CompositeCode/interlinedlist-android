@@ -24,6 +24,10 @@ data class ListSchema(
  * @param type controls rendering and the form input used to edit the value.
  * @param required whether the add/edit form should treat the field as mandatory.
  * @param options selectable values for [FieldType.SELECT] fields.
+ * @param readOnly the server assigns this column's value and rejects writes to
+ *   it. GitHub-backed lists mark `number`, `url`, `created_at` and `updated_at`
+ *   this way (`isReadOnly` on the synthetic schema), so the row form must show
+ *   them without offering an input and must not send them back.
  */
 data class SchemaField(
     val key: String,
@@ -31,6 +35,7 @@ data class SchemaField(
     val type: FieldType,
     val required: Boolean = false,
     val options: List<String> = emptyList(),
+    val readOnly: Boolean = false,
 )
 
 /**

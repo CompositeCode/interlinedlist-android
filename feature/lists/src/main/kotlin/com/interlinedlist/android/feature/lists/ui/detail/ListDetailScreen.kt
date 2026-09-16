@@ -97,6 +97,7 @@ fun ListDetailRoute(
     modifier: Modifier = Modifier,
     onOpenShare: () -> Unit = {},
     onOpenList: (String) -> Unit = {},
+    onOpenRepo: (String) -> Unit = {},
     viewModel: ListDetailViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -130,6 +131,7 @@ fun ListDetailRoute(
         onOpenWatchers = onOpenWatchers,
         onOpenShare = onOpenShare,
         onOpenList = onOpenList,
+        onOpenRepo = onOpenRepo,
         onNewChildList = { viewModel.createChildList(onOpenList) },
         snackbarHostState = snackbarHostState,
         // Saved views have their own ViewModel on the same nav entry, so the
@@ -149,6 +151,8 @@ fun ListDetailRoute(
                 schema = state.schema,
                 row = liveRow,
                 isSaving = state.isSaving,
+                githubRepo = state.summary?.takeIf { it.isGithubBacked }?.githubRepo,
+                nextIssueNumber = state.nextIssueNumber,
                 onSave = { values ->
                     when (target) {
                         EditorTarget.New -> viewModel.addRow(values) { editing = null }
@@ -205,6 +209,7 @@ fun ListDetailScreen(
     onOpenWatchers: () -> Unit = {},
     onOpenShare: () -> Unit = {},
     onOpenList: (String) -> Unit = {},
+    onOpenRepo: (String) -> Unit = {},
     onNewChildList: () -> Unit = {},
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
     viewSwitcher: @Composable () -> Unit = {},
@@ -222,16 +227,23 @@ fun ListDetailScreen(
                     }
                 },
                 actions = {
-                    if (state.isRefreshing) {
-                        CircularProgressIndicator(
-                            Modifier
-                                .padding(horizontal = 12.dp)
-                                .height(20.dp)
-                                .width(20.dp),
-                        )
-                    } else {
-                        IconButton(onClick = onRefresh, modifier = Modifier.testTag(ListDetailTestTags.REFRESH)) {
-                            Icon(Icons.Default.Refresh, contentDescription = "Refresh from source")
+                    // `POST /api/lists/{id}/refresh` only means anything for a
+                    // GitHub-backed list, so the action appears only there.
+                    if (state.isGithubBacked) {
+                        if (state.isRefreshing) {
+                            CircularProgressIndicator(
+                                Modifier
+                                    .padding(horizontal = 12.dp)
+                                    .height(20.dp)
+                                    .width(20.dp),
+                            )
+                        } else {
+                            IconButton(
+                                onClick = onRefresh,
+                                modifier = Modifier.testTag(ListDetailTestTags.REFRESH),
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = "Refresh from GitHub")
+                            }
                         }
                     }
                     IconButton(
@@ -245,7 +257,9 @@ fun ListDetailScreen(
                             modifier = Modifier.testTag(ListDetailTestTags.EDIT_LIST),
                         )
                         DropdownMenuItem(
-                            text = { Text("Edit columns") },
+                            // A GitHub-backed list's columns are fixed by GitHub;
+                            // the same screen then offers the parent list only.
+                            text = { Text(if (state.isGithubBacked) "Columns & parent" else "Edit columns") },
                             onClick = { menuOpen = false; onEditSchema() },
                             modifier = Modifier.testTag(ListDetailTestTags.EDIT_SCHEMA),
                         )
@@ -299,6 +313,13 @@ fun ListDetailScreen(
 
             else -> Column(Modifier.padding(padding)) {
                 Breadcrumb(ancestors = state.breadcrumb, onOpenList = onOpenList)
+                state.summary?.takeIf { it.isGithubBacked }?.let { summary ->
+                    GithubRepoLinkRow(
+                        repo = summary.githubRepo.orEmpty(),
+                        githubRepoPrivate = summary.githubRepoPrivate,
+                        onOpenRepo = onOpenRepo,
+                    )
+                }
                 viewSwitcher()
                 if (!state.summary?.description.isNullOrBlank()) {
                     Text(
@@ -314,6 +335,9 @@ fun ListDetailScreen(
                     isEmpty = state.isEmpty,
                     onEditRow = onEditRow,
                     onDeleteRow = onDeleteRow,
+                    // On a GitHub-backed list a delete closes the issue rather
+                    // than removing anything, so the affordance says so.
+                    deleteLabel = if (state.isGithubBacked) "Close issue on GitHub" else "Delete row",
                 )
             }
         }
@@ -375,6 +399,7 @@ private fun SchemaTable(
     isEmpty: Boolean,
     onEditRow: (ListRow) -> Unit,
     onDeleteRow: (String) -> Unit,
+    deleteLabel: String = "Delete row",
 ) {
     if (isEmpty) {
         Centered(Modifier.testTag(ListDetailTestTags.EMPTY)) {
@@ -408,6 +433,7 @@ private fun SchemaTable(
                 row = row,
                 onClick = { onEditRow(row) },
                 onDelete = { onDeleteRow(row.id) },
+                deleteLabel = deleteLabel,
             )
         }
     }
@@ -420,6 +446,7 @@ private fun RowCard(
     row: ListRow,
     onClick: () -> Unit,
     onDelete: () -> Unit,
+    deleteLabel: String = "Delete row",
 ) {
     Card(
         onClick = onClick,
@@ -438,7 +465,7 @@ private fun RowCard(
                     }
                 }
                 IconButton(onClick = onDelete) {
-                    Icon(Icons.Default.Delete, contentDescription = "Delete row")
+                    Icon(Icons.Default.Delete, contentDescription = deleteLabel)
                 }
             }
         }

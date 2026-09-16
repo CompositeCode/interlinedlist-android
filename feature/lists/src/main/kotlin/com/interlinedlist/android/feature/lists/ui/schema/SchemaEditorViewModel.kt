@@ -7,6 +7,7 @@ import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.feature.lists.data.ListsRepository
 import com.interlinedlist.android.feature.lists.domain.FieldType
 import com.interlinedlist.android.feature.lists.domain.ListSchema
+import com.interlinedlist.android.feature.lists.domain.ListSummary
 import com.interlinedlist.android.feature.lists.domain.SchemaField
 import com.interlinedlist.android.feature.lists.ui.isSubscriptionGate
 import com.interlinedlist.android.feature.lists.ui.toUserMessage
@@ -31,6 +32,8 @@ data class EditableColumn(
     val key: String = "",
     val label: String = "",
     val type: FieldType = FieldType.TEXT,
+    /** The server assigns this column's value (GitHub's `number`, `url`, …). */
+    val readOnly: Boolean = false,
 ) {
     /** True once the column has a usable key to persist. */
     val isComplete: Boolean get() = key.isNotBlank()
@@ -44,9 +47,29 @@ data class SchemaEditorUiState(
     val errorMessage: String? = null,
     val subscriptionRequired: Boolean = false,
     val saved: Boolean = false,
+    /**
+     * True for a GitHub-backed list, whose columns are the fixed GitHub issue
+     * fields. The editor is then **locked to the parent list**: the columns are
+     * shown read-only and only [parentId] can change. Letting someone edit a
+     * fixed schema would produce a confusing server error at save time instead of
+     * an honest "you cannot change this" up front.
+     */
+    val isSchemaLocked: Boolean = false,
+    /** `"owner/repo"` behind a locked schema, for the explanation copy. */
+    val githubRepo: String? = null,
+    /** The list this one currently hangs under, if any. */
+    val parentId: String? = null,
+    /** Other lists that could be this list's parent. */
+    val parentOptions: List<ListSummary> = emptyList(),
 ) {
-    /** Save is allowed once at least one column has a key and nothing is in flight. */
-    val canSave: Boolean get() = !isSaving && columns.any { it.isComplete }
+    /**
+     * Save is allowed once at least one column has a key and nothing is in
+     * flight — and never on a locked schema.
+     */
+    val canSave: Boolean get() = !isSchemaLocked && !isSaving && columns.any { it.isComplete }
+
+    /** Columns may be added/removed/retyped only on an unlocked schema. */
+    val canEditColumns: Boolean get() = !isSchemaLocked
 }
 
 @HiltViewModel
@@ -66,6 +89,22 @@ class SchemaEditorViewModel @Inject constructor(
 
     init {
         load()
+        observeParentOptions()
+    }
+
+    /**
+     * Candidate parent lists, straight from the offline-first cache — the picker
+     * is the only edit a locked (GitHub-backed) schema still allows, and it does
+     * not warrant its own network call. A list cannot parent itself.
+     */
+    private fun observeParentOptions() {
+        viewModelScope.launch {
+            repository.observeLists().collect { lists ->
+                _uiState.update { state ->
+                    state.copy(parentOptions = lists.filterNot { it.id == listId })
+                }
+            }
+        }
     }
 
     fun load() {
@@ -73,9 +112,13 @@ class SchemaEditorViewModel @Inject constructor(
         viewModelScope.launch {
             when (val result = repository.getListDetail(listId)) {
                 is ApiResult.Success -> _uiState.update {
+                    val summary = result.data.summary
                     it.copy(
                         columns = result.data.schema.fields.map(::toEditable),
                         isLoading = false,
+                        isSchemaLocked = summary.isGithubBacked,
+                        githubRepo = summary.githubRepo,
+                        parentId = summary.parentId,
                     )
                 }
                 is ApiResult.Failure -> _uiState.update {
@@ -89,12 +132,14 @@ class SchemaEditorViewModel @Inject constructor(
         }
     }
 
-    fun addColumn() = _uiState.update {
-        it.copy(columns = it.columns + EditableColumn(uiId = nextUiId++))
+    fun addColumn() {
+        if (_uiState.value.isSchemaLocked) return
+        _uiState.update { it.copy(columns = it.columns + EditableColumn(uiId = nextUiId++)) }
     }
 
-    fun removeColumn(uiId: Long) = _uiState.update {
-        it.copy(columns = it.columns.filterNot { column -> column.uiId == uiId })
+    fun removeColumn(uiId: Long) {
+        if (_uiState.value.isSchemaLocked) return
+        _uiState.update { it.copy(columns = it.columns.filterNot { column -> column.uiId == uiId }) }
     }
 
     fun updateKey(uiId: Long, key: String) = mutate(uiId) { it.copy(key = key) }
@@ -103,7 +148,34 @@ class SchemaEditorViewModel @Inject constructor(
 
     fun updateType(uiId: Long, type: FieldType) = mutate(uiId) { it.copy(type = type) }
 
+    /**
+     * Re-parents the list. This is the whole of what a locked schema allows, and
+     * it works the same on an unlocked one.
+     */
+    fun setParent(parentId: String, onDone: () -> Unit = {}) {
+        if (_uiState.value.isSaving || parentId == _uiState.value.parentId) return
+        _uiState.update { it.copy(isSaving = true, errorMessage = null) }
+        viewModelScope.launch {
+            when (val result = repository.updateList(id = listId, parentId = parentId)) {
+                is ApiResult.Success -> {
+                    _uiState.update { it.copy(isSaving = false, parentId = result.data.parentId ?: parentId) }
+                    onDone()
+                }
+                is ApiResult.Failure -> _uiState.update {
+                    it.copy(
+                        isSaving = false,
+                        errorMessage = result.error.toUserMessage(),
+                        subscriptionRequired = result.error.isSubscriptionGate,
+                    )
+                }
+            }
+        }
+    }
+
     fun save(onSaved: () -> Unit = {}) {
+        // A GitHub-backed list's columns are GitHub's; the server would reject
+        // the write, so it is refused here with the UI already saying why.
+        if (_uiState.value.isSchemaLocked) return
         val schema = toSchema()
         if (schema.isEmpty) return
         _uiState.update { it.copy(isSaving = true, errorMessage = null) }
@@ -150,9 +222,13 @@ class SchemaEditorViewModel @Inject constructor(
         key = field.key,
         label = field.label,
         type = field.type,
+        readOnly = field.readOnly,
     )
 
-    private fun mutate(uiId: Long, transform: (EditableColumn) -> EditableColumn) = _uiState.update { state ->
-        state.copy(columns = state.columns.map { if (it.uiId == uiId) transform(it) else it })
+    private fun mutate(uiId: Long, transform: (EditableColumn) -> EditableColumn) {
+        if (_uiState.value.isSchemaLocked) return
+        _uiState.update { state ->
+            state.copy(columns = state.columns.map { if (it.uiId == uiId) transform(it) else it })
+        }
     }
 }

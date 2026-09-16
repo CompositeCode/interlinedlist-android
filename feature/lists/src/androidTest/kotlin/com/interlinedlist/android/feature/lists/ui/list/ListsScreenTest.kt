@@ -34,7 +34,7 @@ class ListsScreenTest {
                     onOpenConnections = {},
                     onSearchQueryChange = {},
                     onLoadMore = {},
-                    onCreateList = {},
+                    onNewList = {},
                 )
             }
         }

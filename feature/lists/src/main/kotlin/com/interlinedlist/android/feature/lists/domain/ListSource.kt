@@ -14,4 +14,11 @@ enum class ListSource(val wire: String) {
 
     /** A list mirrored from a GitHub repository. */
     GITHUB("github"),
+    ;
+
+    companion object {
+        /** Maps the API's `source` string to a [ListSource], defaulting to [LOCAL]. */
+        fun fromWire(raw: String?): ListSource =
+            entries.firstOrNull { it.wire.equals(raw?.trim(), ignoreCase = true) } ?: LOCAL
+    }
 }

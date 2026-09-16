@@ -4,6 +4,7 @@ import com.interlinedlist.android.feature.lists.data.local.CachedListEntity
 import com.interlinedlist.android.feature.lists.data.remote.dto.FolderDto
 import com.interlinedlist.android.feature.lists.data.remote.dto.ListDto
 import com.interlinedlist.android.feature.lists.domain.ListFolder
+import com.interlinedlist.android.feature.lists.domain.ListSource
 import com.interlinedlist.android.feature.lists.domain.ListSummary
 
 /** DTO/entity ↔ domain mapping for list summaries and folders. */
@@ -22,6 +23,11 @@ object ListMapper {
         isPublic = dto.isPublic,
         updatedAt = dto.updatedAt,
         parentId = dto.parentId ?: dto.parent?.id,
+        source = ListSource.fromWire(dto.source),
+        githubRepo = dto.githubRepo?.takeIf { it.isNotBlank() },
+        // Left null when the server has not recorded it: an unknown repository
+        // visibility must never be rendered as "public".
+        githubRepoPrivate = dto.githubRepoPrivate,
     )
 
     fun summaryToEntity(summary: ListSummary): CachedListEntity = CachedListEntity(
@@ -33,6 +39,9 @@ object ListMapper {
         isPublic = summary.isPublic,
         updatedAt = summary.updatedAt,
         parentId = summary.parentId,
+        source = summary.source.wire,
+        githubRepo = summary.githubRepo,
+        githubRepoPrivate = summary.githubRepoPrivate,
     )
 
     fun summaryFromEntity(entity: CachedListEntity): ListSummary = ListSummary(
@@ -44,6 +53,9 @@ object ListMapper {
         isPublic = entity.isPublic,
         updatedAt = entity.updatedAt,
         parentId = entity.parentId,
+        source = ListSource.fromWire(entity.source),
+        githubRepo = entity.githubRepo,
+        githubRepoPrivate = entity.githubRepoPrivate,
     )
 
     fun folderFromDto(dto: FolderDto): ListFolder = ListFolder(

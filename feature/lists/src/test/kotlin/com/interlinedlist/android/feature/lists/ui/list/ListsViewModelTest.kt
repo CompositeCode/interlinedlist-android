@@ -112,19 +112,6 @@ class ListsViewModelTest {
     }
 
     @Test
-    fun `createList reports the created list id via callback`() = runTest(dispatcher) {
-        val repo = FakeListsRepository()
-        val vm = ListsViewModel(repo)
-        advanceUntilIdle()
-
-        var createdId: String? = null
-        vm.createList("Groceries", null) { createdId = it.id }
-        advanceUntilIdle()
-
-        assertThat(createdId).isEqualTo("new")
-    }
-
-    @Test
     fun `search shows server results and clearing restores the cached index`() = runTest(dispatcher) {
         val repo = FakeListsRepository().apply {
             refreshResult = ApiResult.Success(Paged(listOf(summary("cached")), hasMore = false, total = 1, offset = 1))

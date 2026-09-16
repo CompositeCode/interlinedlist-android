@@ -56,6 +56,9 @@ interface ListsRepository {
      *   as [addRow] sends a row.
      * - [metadata] is a free-form JSON object passed through untouched.
      * - [source] marks where the rows come from (defaults to the server's own).
+     * - [githubRepo] (`"owner/repo"`) and [githubSource] configure a
+     *   [ListSource.GITHUB] list; see [createGithubList], which is what callers
+     *   should reach for.
      */
     suspend fun createList(
         title: String,
@@ -67,6 +70,23 @@ interface ListsRepository {
         initialRows: List<Map<String, String>>? = null,
         metadata: JsonObject? = null,
         source: ListSource? = null,
+        githubRepo: String? = null,
+        githubSource: String? = null,
+    ): ApiResult<ListSummary>
+
+    /**
+     * Creates a list backed by a GitHub repository's issues.
+     *
+     * Sends `source: "github"` together with [repo] as `githubRepo` and
+     * `githubSource: "issues"`; the server rejects a GitHub source without a
+     * well-formed `owner/repo` (`400 bad_request`), so [repo] is validated here
+     * before the request is spent.
+     */
+    suspend fun createGithubList(
+        repo: String,
+        title: String,
+        isPublic: Boolean = false,
+        parentId: String? = null,
     ): ApiResult<ListSummary>
 
     /**
@@ -93,9 +113,12 @@ interface ListsRepository {
     suspend fun getParentChain(parentId: String): ApiResult<List<ListSummary>>
 
     /**
-     * Updates a list's metadata (title/description/visibility/folder). Only the
-     * supplied fields change; the returned summary reflects the server's echo and
-     * the cache is updated to match.
+     * Updates a list's metadata (title/description/visibility/folder/parent).
+     * Only the supplied fields change; the returned summary reflects the server's
+     * echo and the cache is updated to match.
+     *
+     * [parentId] is the one editable property of a GitHub-backed list, whose
+     * columns are fixed by GitHub.
      */
     suspend fun updateList(
         id: String,
@@ -103,6 +126,7 @@ interface ListsRepository {
         description: String? = null,
         isPublic: Boolean? = null,
         folderId: String? = null,
+        parentId: String? = null,
     ): ApiResult<ListSummary>
 
     /** Deletes a list and evicts it from the cache. */

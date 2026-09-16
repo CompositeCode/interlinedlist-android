@@ -33,7 +33,9 @@ import com.interlinedlist.android.feature.lists.domain.SchemaField
 object RowEditorTestTags {
     const val SAVE = "rowEditorSave"
     const val CANCEL = "rowEditorCancel"
+    const val GITHUB_HINT = "rowEditorGithubHint"
     fun field(key: String) = "rowField_$key"
+    fun readOnlyField(key: String) = "rowFieldReadOnly_$key"
 }
 
 /**
@@ -43,6 +45,12 @@ object RowEditorTestTags {
  *
  * Values are collected as strings keyed by field key and returned to [onSave];
  * the repository serialises them into the row's dynamic `data` map.
+ *
+ * On a GitHub-backed list a row *is* an issue: saving a new row opens one and
+ * saving an existing row updates it. [githubRepo] (and [nextIssueNumber], when
+ * known) name that consequence up front. Read-only columns — `Issue #`, `Link`,
+ * `Created`, `Updated`, which GitHub assigns — are shown but never sent, since
+ * the row endpoints reject writes to them.
  */
 @Composable
 fun RowEditor(
@@ -52,11 +60,14 @@ fun RowEditor(
     onSave: (Map<String, String>) -> Unit,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
+    githubRepo: String? = null,
+    nextIssueNumber: Int? = null,
 ) {
-    // One editable value per schema field, seeded from the row when editing.
+    val editableFields = schema.fields.filterNot { it.readOnly }
+    // One editable value per writable schema field, seeded from the row when editing.
     val values = remember(row, schema) {
         mutableStateMapOf<String, String>().apply {
-            schema.fields.forEach { field -> put(field.key, row?.valueFor(field.key).orEmpty()) }
+            editableFields.forEach { field -> put(field.key, row?.valueFor(field.key).orEmpty()) }
         }
     }
 
@@ -72,12 +83,29 @@ fun RowEditor(
             style = androidx.compose.material3.MaterialTheme.typography.titleLarge,
         )
 
-        schema.fields.forEach { field ->
-            FieldInput(
-                field = field,
-                value = values[field.key].orEmpty(),
-                onValueChange = { values[field.key] = it },
+        if (!githubRepo.isNullOrBlank()) {
+            Text(
+                text = githubIssueHint(
+                    repo = githubRepo,
+                    isNewRow = row == null,
+                    nextIssueNumber = nextIssueNumber,
+                ),
+                style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.testTag(RowEditorTestTags.GITHUB_HINT),
             )
+        }
+
+        schema.fields.forEach { field ->
+            if (field.readOnly) {
+                ReadOnlyField(field = field, value = row?.valueFor(field.key).orEmpty())
+            } else {
+                FieldInput(
+                    field = field,
+                    value = values[field.key].orEmpty(),
+                    onValueChange = { values[field.key] = it },
+                )
+            }
         }
 
         Spacer(Modifier.height(8.dp))
@@ -92,6 +120,32 @@ fun RowEditor(
                 modifier = Modifier.testTag(RowEditorTestTags.SAVE),
             ) { Text(if (row == null) "Add" else "Save") }
         }
+    }
+}
+
+/**
+ * What saving this row will do on GitHub. Named explicitly because "add row" and
+ * "open a public issue in someone's repository" are not the same expectation.
+ */
+internal fun githubIssueHint(repo: String, isNewRow: Boolean, nextIssueNumber: Int?): String = when {
+    !isNewRow -> "Saving updates the matching issue in $repo."
+    nextIssueNumber != null -> "Saving opens issue #$nextIssueNumber in $repo."
+    else -> "Saving opens a new issue in $repo."
+}
+
+/** A column GitHub owns: shown for context, never edited and never sent back. */
+@Composable
+private fun ReadOnlyField(field: SchemaField, value: String) {
+    Column(Modifier.testTag(RowEditorTestTags.readOnlyField(field.key))) {
+        Text(
+            text = field.label,
+            style = androidx.compose.material3.MaterialTheme.typography.labelMedium,
+            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = value.ifBlank { "—" },
+            style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
+        )
     }
 }
 

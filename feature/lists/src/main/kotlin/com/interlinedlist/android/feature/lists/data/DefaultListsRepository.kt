@@ -23,6 +23,7 @@ import com.interlinedlist.android.feature.lists.data.remote.dto.UpdateSchemaRequ
 import com.interlinedlist.android.feature.lists.data.remote.dto.UpdateViewRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.UpdateWatcherRoleRequest
 import com.interlinedlist.android.feature.lists.domain.Contributor
+import com.interlinedlist.android.feature.lists.domain.GITHUB_SOURCE_ISSUES
 import com.interlinedlist.android.feature.lists.domain.ListConnection
 import com.interlinedlist.android.feature.lists.domain.ListDetail
 import com.interlinedlist.android.feature.lists.domain.ListFolder
@@ -42,6 +43,7 @@ import com.interlinedlist.android.feature.lists.domain.SharedListResolution
 import com.interlinedlist.android.feature.lists.domain.Watcher
 import com.interlinedlist.android.feature.lists.domain.WatcherCandidate
 import com.interlinedlist.android.feature.lists.domain.WatcherRole
+import com.interlinedlist.android.feature.lists.domain.isValidGithubRepo
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
@@ -107,6 +109,8 @@ class DefaultListsRepository @Inject constructor(
         initialRows: List<Map<String, String>>?,
         metadata: JsonObject?,
         source: ListSource?,
+        githubRepo: String?,
+        githubSource: String?,
     ): ApiResult<ListSummary> = withContext(dispatchers.io) {
         val body = CreateListRequest(
             title = title,
@@ -119,6 +123,8 @@ class DefaultListsRepository @Inject constructor(
             initialRows = initialRows?.map { JsonObject(it.toJsonData()) },
             metadata = metadata,
             source = source?.wire,
+            githubRepo = githubRepo,
+            githubSource = githubSource,
         )
         when (val result = safeApiCall(json) { api.createList(body) }) {
             is ApiResult.Success -> {
@@ -128,6 +134,8 @@ class DefaultListsRepository @Inject constructor(
                             id = "", title = title, description = description,
                             itemCount = 0, folderId = folderId, isPublic = isPublic,
                             updatedAt = null, parentId = parentId,
+                            source = source ?: ListSource.LOCAL,
+                            githubRepo = githubRepo,
                         ),
                     )
                 val summary = ListMapper.summaryFromDto(dto)
@@ -136,6 +144,30 @@ class DefaultListsRepository @Inject constructor(
             }
             is ApiResult.Failure -> result
         }
+    }
+
+    override suspend fun createGithubList(
+        repo: String,
+        title: String,
+        isPublic: Boolean,
+        parentId: String?,
+    ): ApiResult<ListSummary> {
+        val trimmed = repo.trim()
+        // The server's own rule, checked before spending a request:
+        // `githubRepo is required for GitHub-backed lists (format: owner/repo)`.
+        if (!isValidGithubRepo(trimmed)) {
+            return ApiResult.Failure(
+                AppError.Unknown("Pick a repository in owner/repo form."),
+            )
+        }
+        return createList(
+            title = title.trim().ifBlank { trimmed.substringAfter('/') },
+            isPublic = isPublic,
+            parentId = parentId,
+            source = ListSource.GITHUB,
+            githubRepo = trimmed,
+            githubSource = GITHUB_SOURCE_ISSUES,
+        )
     }
 
     override suspend fun createListFromMessage(
@@ -183,12 +215,14 @@ class DefaultListsRepository @Inject constructor(
         description: String?,
         isPublic: Boolean?,
         folderId: String?,
+        parentId: String?,
     ): ApiResult<ListSummary> = withContext(dispatchers.io) {
         val body = UpdateListRequest(
             title = title,
             description = description,
             isPublic = isPublic,
             folderId = folderId,
+            parentId = parentId,
         )
         when (val result = safeApiCall(json) { api.updateList(id, body) }) {
             is ApiResult.Success -> {
@@ -229,10 +263,16 @@ class DefaultListsRepository @Inject constructor(
             }
 
             // 2) Schema (dynamic DSL). Prefer the dedicated endpoint; fall back to
-            //    any schema inlined on the list payload.
+            //    any schema inlined on the list payload. A GitHub-backed list has
+            //    no stored schema — its fixed issue columns arrive inlined under
+            //    `properties` — so an empty answer falls back too, not just a
+            //    failed one.
+            val inlined = listDto.schema ?: listDto.properties
             val schema: ListSchema = when (val schemaResult = safeApiCall(json) { api.getSchema(id) }) {
                 is ApiResult.Success -> SchemaMapper.fromJson(schemaResult.data)
-                is ApiResult.Failure -> SchemaMapper.fromJson(listDto.schema)
+                    .takeIf { !it.isEmpty }
+                    ?: SchemaMapper.fromJson(inlined)
+                is ApiResult.Failure -> SchemaMapper.fromJson(inlined)
             }
 
             // 3) First page of rows.

@@ -18,4 +18,9 @@ data class CachedListEntity(
     val updatedAt: String?,
     /** Parent list id — kept so a cached list still knows where it sits in the tree. */
     val parentId: String? = null,
+    /** `ListSource.wire` — cached so an offline index still marks GitHub lists. */
+    val source: String? = null,
+    val githubRepo: String? = null,
+    /** Repository visibility on GitHub; null while unknown. */
+    val githubRepoPrivate: Boolean? = null,
 )
