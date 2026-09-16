@@ -11,6 +11,9 @@ import com.interlinedlist.android.feature.lists.domain.ListRow
 import com.interlinedlist.android.feature.lists.domain.ListSchema
 import com.interlinedlist.android.feature.lists.domain.ListSource
 import com.interlinedlist.android.feature.lists.domain.ListSummary
+import com.interlinedlist.android.feature.lists.domain.ListView
+import com.interlinedlist.android.feature.lists.domain.ListViewConfig
+import com.interlinedlist.android.feature.lists.domain.ListViewScope
 import com.interlinedlist.android.feature.lists.domain.Paged
 import com.interlinedlist.android.feature.lists.domain.RefreshResult
 import com.interlinedlist.android.feature.lists.domain.ShareLink
@@ -67,6 +70,13 @@ class FakeListsRepository : ListsRepository {
     var createConnectionResult: ApiResult<ListConnection>? = null
     var deleteConnectionResult: ApiResult<Unit> = ApiResult.Success(Unit)
 
+    // Saved views.
+    var viewsResult: ApiResult<List<ListView>> = ApiResult.Success(emptyList())
+    var createViewResult: ApiResult<ListView>? = null
+    var updateViewResult: ApiResult<ListView>? = null
+    var forkViewResult: ApiResult<ListView>? = null
+    var deleteViewResult: ApiResult<Unit> = ApiResult.Success(Unit)
+
     // Sharing.
     var shareLinksResult: ApiResult<List<ShareLink>> = ApiResult.Success(emptyList())
     var createShareLinkResult: ApiResult<ShareLink>? = null
@@ -106,6 +116,15 @@ class FakeListsRepository : ListsRepository {
     var lastCreatedShareRole: ShareRole? = null
     var lastRevokedToken: String? = null
     var lastResolvedToken: String? = null
+    var viewsCount = 0
+    var lastCreatedViewName: String? = null
+    var lastCreatedViewScope: ListViewScope? = null
+    var lastUpdatedViewId: String? = null
+    var lastUpdatedViewName: String? = null
+    var lastUpdatedViewConfig: ListViewConfig? = null
+    var lastUpdatedViewIsDefault: Boolean? = null
+    var lastForkedViewId: String? = null
+    var lastDeletedViewId: String? = null
     var lastClaimedToken: String? = null
 
     override fun observeLists(): Flow<List<ListSummary>> = cache
@@ -288,6 +307,55 @@ class FakeListsRepository : ListsRepository {
         ?: ApiResult.Success(ListConnection("c-new", fromListId, toListId, label, fromListId, toListId))
 
     override suspend fun deleteConnection(id: String): ApiResult<Unit> = deleteConnectionResult
+
+    override suspend fun getViews(listId: String): ApiResult<List<ListView>> {
+        viewsCount++
+        return viewsResult
+    }
+
+    override suspend fun createView(
+        listId: String,
+        name: String,
+        scope: ListViewScope?,
+        config: ListViewConfig?,
+        isDefault: Boolean,
+    ): ApiResult<ListView> {
+        lastCreatedViewName = name
+        lastCreatedViewScope = scope
+        // Mirrors the real repository: an absent scope never reaches the network.
+        if (scope == null) return ApiResult.Failure(AppError.Unknown("Choose whether the view is shared or personal."))
+        return createViewResult ?: ApiResult.Success(
+            ListView("v-new", listId, "me", name, scope, ListViewConfig.DEFAULT, isDefault, 0),
+        )
+    }
+
+    override suspend fun updateView(
+        listId: String,
+        viewId: String,
+        name: String?,
+        config: ListViewConfig?,
+        isDefault: Boolean?,
+    ): ApiResult<ListView> {
+        lastUpdatedViewId = viewId
+        lastUpdatedViewName = name
+        lastUpdatedViewConfig = config
+        lastUpdatedViewIsDefault = isDefault
+        return updateViewResult ?: ApiResult.Success(
+            ListView(viewId, listId, "me", name.orEmpty(), ListViewScope.PERSONAL, ListViewConfig.DEFAULT, isDefault == true, 0),
+        )
+    }
+
+    override suspend fun forkView(listId: String, viewId: String): ApiResult<ListView> {
+        lastForkedViewId = viewId
+        return forkViewResult ?: ApiResult.Success(
+            ListView("$viewId-copy", listId, "me", "Copy", ListViewScope.PERSONAL, ListViewConfig.DEFAULT, false, 0),
+        )
+    }
+
+    override suspend fun deleteView(listId: String, viewId: String): ApiResult<Unit> {
+        lastDeletedViewId = viewId
+        return deleteViewResult
+    }
 
     override suspend fun getShareLinks(listId: String): ApiResult<List<ShareLink>> = shareLinksResult
 

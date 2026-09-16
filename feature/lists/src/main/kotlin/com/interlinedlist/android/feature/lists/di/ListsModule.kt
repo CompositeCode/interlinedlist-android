@@ -2,6 +2,8 @@ package com.interlinedlist.android.feature.lists.di
 
 import android.content.Context
 import androidx.room.Room
+import com.interlinedlist.android.core.datastore.SessionStore
+import com.interlinedlist.android.feature.lists.data.CurrentUserIdProvider
 import com.interlinedlist.android.feature.lists.data.DefaultListsRepository
 import com.interlinedlist.android.feature.lists.data.ListsRepository
 import com.interlinedlist.android.feature.lists.data.local.ListDao
@@ -50,4 +52,10 @@ object ListsDataModule {
 
     @Provides
     fun provideListDao(db: ListsDatabase): ListDao = db.listDao()
+
+    /** Adapts the Android-backed [SessionStore] to the module's id contract. */
+    @Provides
+    @Singleton
+    fun provideCurrentUserIdProvider(sessionStore: SessionStore): CurrentUserIdProvider =
+        CurrentUserIdProvider { sessionStore.userId }
 }

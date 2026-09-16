@@ -9,6 +9,9 @@ import com.interlinedlist.android.feature.lists.domain.ListRow
 import com.interlinedlist.android.feature.lists.domain.ListSchema
 import com.interlinedlist.android.feature.lists.domain.ListSource
 import com.interlinedlist.android.feature.lists.domain.ListSummary
+import com.interlinedlist.android.feature.lists.domain.ListView
+import com.interlinedlist.android.feature.lists.domain.ListViewConfig
+import com.interlinedlist.android.feature.lists.domain.ListViewScope
 import com.interlinedlist.android.feature.lists.domain.Paged
 import com.interlinedlist.android.feature.lists.domain.RefreshResult
 import com.interlinedlist.android.feature.lists.domain.ShareLink
@@ -177,6 +180,54 @@ interface ListsRepository {
 
     /** Removes a connection between lists. */
     suspend fun deleteConnection(id: String): ApiResult<Unit>
+
+    // --- Saved views -------------------------------------------------------
+
+    /**
+     * Saved views for a list: every shared view plus the caller's own personal
+     * ones, in the order the server returns them.
+     */
+    suspend fun getViews(listId: String): ApiResult<List<ListView>>
+
+    /**
+     * Creates a saved view. [scope] is nullable because the UI can ask before the
+     * user has chosen one; a missing or unrecognised scope fails locally without
+     * spending a request, since the server rejects it with a 400 anyway.
+     *
+     * The returned view is the server's own copy: it silently drops [config]
+     * values it does not recognise, so its echo — not the config sent — is what
+     * callers must render.
+     */
+    suspend fun createView(
+        listId: String,
+        name: String,
+        scope: ListViewScope?,
+        config: ListViewConfig? = null,
+        isDefault: Boolean = false,
+    ): ApiResult<ListView>
+
+    /**
+     * Renames / re-configures a view or makes it the default. Only the supplied
+     * fields change, and the server's echo is returned for the same reason as
+     * [createView].
+     */
+    suspend fun updateView(
+        listId: String,
+        viewId: String,
+        name: String? = null,
+        config: ListViewConfig? = null,
+        isDefault: Boolean? = null,
+    ): ApiResult<ListView>
+
+    /**
+     * Forks a view into a personal copy named `"<name> (copy)"` — the escape
+     * hatch when somebody else's shared view does not suit. The original is
+     * untouched.
+     */
+    suspend fun forkView(listId: String, viewId: String): ApiResult<ListView>
+
+    /** Deletes a saved view. The server rejects views the caller does not own. */
+    suspend fun deleteView(listId: String, viewId: String): ApiResult<Unit>
 
     // --- Sharing -----------------------------------------------------------
 
