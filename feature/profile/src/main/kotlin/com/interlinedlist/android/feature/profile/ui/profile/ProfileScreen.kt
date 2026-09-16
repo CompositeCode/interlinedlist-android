@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.ManageAccounts
+import androidx.compose.material.icons.filled.MarkEmailRead
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Search
@@ -67,6 +68,7 @@ object AccountMenuTestTags {
     const val ACCOUNT_SETTINGS = "accountMenuAccountSettings"
     const val SETTINGS = "accountMenuSettings"
     const val BLOG = "accountMenuBlog"
+    const val BLOG_EMAILS = "accountMenuBlogEmails"
 }
 
 /**
@@ -93,6 +95,9 @@ object AccountMenuTestTags {
  * @param onOpenSettings navigate to the Settings (preferences) screen (within this module).
  * @param onOpenBlog open the public blog. NOT an in-app destination: the blog is
  *   server-rendered with no listing API, so the app opens it in a themed Custom Tab.
+ * @param onOpenBlogEmails navigate to the blog email-list screen (subscribe / manage the
+ *   double opt-in). Unlike the blog itself this one IS in-app: the mailing list has a
+ *   real JSON API.
  * @param onSignOut invoked after the caller performs sign-out; the profile module does
  *   not own session state, so the app wires this to the auth logout + navigation.
  */
@@ -117,6 +122,8 @@ fun ProfileRoute(
     onOpenSettings: () -> Unit = {},
     // Defaulted likewise; the app wires this to its Custom Tab launcher.
     onOpenBlog: () -> Unit = {},
+    // Defaulted likewise; wire this to the `blog/subscription` route.
+    onOpenBlogEmails: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: ProfileViewModel = hiltViewModel(),
 ) {
@@ -139,6 +146,7 @@ fun ProfileRoute(
         onOpenAccountSettings = onOpenAccountSettings,
         onOpenSettings = onOpenSettings,
         onOpenBlog = onOpenBlog,
+        onOpenBlogEmails = onOpenBlogEmails,
         onSignOut = onSignOut,
         onRetry = viewModel::refresh,
         modifier = modifier,
@@ -166,6 +174,7 @@ fun ProfileScreen(
     onOpenBlockedMuted: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
     onOpenBlog: () -> Unit = {},
+    onOpenBlogEmails: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -290,6 +299,15 @@ fun ProfileScreen(
                     tag = AccountMenuTestTags.BLOG,
                     trailingIcon = Icons.AutoMirrored.Filled.OpenInNew,
                     trailingContentDescription = "Opens in a browser",
+                )
+                // Stays in the app, unlike the Blog row above it: the mailing list has
+                // a real JSON API, so subscribing and the emailed confirm/unsubscribe
+                // links are all handled on an in-app screen.
+                AccountMenuRow(
+                    icon = Icons.Default.MarkEmailRead,
+                    label = "Blog emails",
+                    onClick = onOpenBlogEmails,
+                    tag = AccountMenuTestTags.BLOG_EMAILS,
                 )
                 AccountMenuRow(
                     icon = Icons.AutoMirrored.Filled.Logout,

@@ -16,6 +16,7 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.interlinedlist.android.blog.BlogLauncher
 import com.interlinedlist.android.blog.BlogLink
+import com.interlinedlist.android.blog.BlogRoutes
 import com.interlinedlist.android.core.datastore.SessionStore
 import com.interlinedlist.android.core.datastore.ThemeMode
 import com.interlinedlist.android.core.datastore.ThemeSettingsStore
@@ -58,6 +59,11 @@ class MainActivity : ComponentActivity() {
         // own tag chips point at) resolves to the tag-filtered feed. Resolved here
         // rather than by implicit nav matching so the rule is unit-testable.
         val tagFeedRoute = MessagesDestinations.routeForTagLink(intent?.dataString)
+        // A tapped blog confirm/unsubscribe link, by contrast, IS handled in-app: the
+        // mailing list has a real JSON API, so the app calls it and shows the outcome
+        // rather than bouncing the user out to a browser. Both endpoints are
+        // unauthenticated, so the route resolves with or without a session.
+        val blogSubscriptionRoute = BlogRoutes.routeForSubscriptionLink(intent?.dataString)
         enableEdgeToEdge()
         setContent {
             val themeMode by themeSettingsStore.themeMode.collectAsStateWithLifecycle()
@@ -85,6 +91,7 @@ class MainActivity : ComponentActivity() {
                     notificationRoute = notificationRoute,
                     emailChangeRoute = emailChangeRoute,
                     tagFeedRoute = tagFeedRoute,
+                    blogSubscriptionRoute = blogSubscriptionRoute,
                 )
             }
         }
