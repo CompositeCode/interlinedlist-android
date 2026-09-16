@@ -4,6 +4,8 @@ import com.google.common.truth.Truth.assertThat
 import com.interlinedlist.android.core.common.dispatcher.DispatcherProvider
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
+import com.interlinedlist.android.core.network.api.InterlinedListApi
+import com.interlinedlist.android.core.network.preferences.NotificationTrayLimitStore
 import com.interlinedlist.android.feature.profile.data.remote.ProfileApi
 import com.interlinedlist.android.feature.profile.domain.UserSettingsUpdate
 import com.interlinedlist.android.feature.profile.domain.ViewingPreference
@@ -33,6 +35,7 @@ class DefaultSettingsRepositoryTest {
     private lateinit var server: MockWebServer
     private lateinit var api: ProfileApi
     private lateinit var repository: DefaultSettingsRepository
+    private lateinit var trayLimitStore: NotificationTrayLimitStore
 
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
     private val testDispatcher = StandardTestDispatcher()
@@ -52,7 +55,9 @@ class DefaultSettingsRepositoryTest {
             .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()
         api = retrofit.create(ProfileApi::class.java)
-        repository = DefaultSettingsRepository(api, json, dispatchers)
+        trayLimitStore =
+            NotificationTrayLimitStore(retrofit.create(InterlinedListApi::class.java), json)
+        repository = DefaultSettingsRepository(api, trayLimitStore, json, dispatchers)
     }
 
     @After
@@ -66,6 +71,7 @@ class DefaultSettingsRepositoryTest {
         messagesPerPage: Int = 20,
         showAdvancedPostSettings: Boolean = false,
         isPrivateAccount: Boolean = false,
+        notificationTrayLimit: Int = 25,
     ) = server.enqueue(
         MockResponse().setResponseCode(200).setBody(
             """
@@ -85,7 +91,7 @@ class DefaultSettingsRepositoryTest {
                 "longitude": -122.68,
                 "isPrivateAccount": $isPrivateAccount,
                 "githubDefaultRepo": "adron/notes",
-                "notificationTrayLimit": 25
+                "notificationTrayLimit": $notificationTrayLimit
               }
             }
             """.trimIndent(),
@@ -345,5 +351,58 @@ class DefaultSettingsRepositoryTest {
 
             assertThat(result).isInstanceOf(ApiResult.Failure::class.java)
             assertThat(repository.observeSettings().first()?.isPrivateAccount).isFalse()
+        }
+
+    // --- Notification tray limit (issue #35) ---------------------------------
+    // The one preference a *different* feature module reads, so it has to reach the
+    // shared :core:network accessor as well as the settings cache.
+
+    @Test
+    fun `notificationTrayLimit PATCHes alone as a JSON number`() = runTest(testDispatcher) {
+        enqueueUser(notificationTrayLimit = 40)
+
+        val result = repository.update(UserSettingsUpdate(notificationTrayLimit = 40))
+
+        val body = server.takeJsonBody()
+        assertThat(body.keys).containsExactly("notificationTrayLimit")
+        val sent = body.getValue("notificationTrayLimit").jsonPrimitive
+        assertThat(sent.isString).isFalse()
+        assertThat(sent.intOrNull).isEqualTo(40)
+        assertThat((result as ApiResult.Success).data.notificationTrayLimit).isEqualTo(40)
+        assertThat(repository.observeSettings().first()?.notificationTrayLimit).isEqualTo(40)
+    }
+
+    @Test
+    fun `a saved tray limit reaches the shared store the notifications feature reads`() =
+        runTest(testDispatcher) {
+            enqueueUser(notificationTrayLimit = 40)
+
+            repository.update(UserSettingsUpdate(notificationTrayLimit = 40))
+
+            // No further response is queued: the store answers from what was published,
+            // so :feature:notifications sees the change without another GET /api/user.
+            assertThat(trayLimitStore.current()).isEqualTo(40)
+        }
+
+    @Test
+    fun `a refresh republishes the tray limit to the shared store`() = runTest(testDispatcher) {
+        enqueueUser(notificationTrayLimit = 10)
+
+        repository.refresh()
+
+        assertThat(trayLimitStore.current()).isEqualTo(10)
+    }
+
+    @Test
+    fun `an account without a stored tray limit publishes the documented default`() =
+        runTest(testDispatcher) {
+            server.enqueue(
+                MockResponse().setResponseCode(200)
+                    .setBody("""{ "user": { "id": "u1", "username": "adron" } }"""),
+            )
+
+            repository.refresh()
+
+            assertThat(trayLimitStore.current()).isEqualTo(20)
         }
 }

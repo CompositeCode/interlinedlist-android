@@ -41,6 +41,7 @@ import com.interlinedlist.android.feature.profile.domain.defaultPubliclyVisibleO
 import com.interlinedlist.android.feature.profile.domain.isPrivateAccountOrDefault
 import com.interlinedlist.android.feature.profile.domain.maxMessageLengthOrDefault
 import com.interlinedlist.android.feature.profile.domain.messagesPerPageOrDefault
+import com.interlinedlist.android.feature.profile.domain.notificationTrayLimitOrDefault
 import com.interlinedlist.android.feature.profile.domain.showAdvancedPostSettingsOrDefault
 
 /** Stable test tags for the Settings screen. */
@@ -57,6 +58,7 @@ object SettingsTestTags {
     const val SHOW_PREVIEWS = "settingsShowPreviews"
     const val MAX_MESSAGE_LENGTH = "settingsMaxMessageLength"
     const val MESSAGES_PER_PAGE = "settingsMessagesPerPage"
+    const val NOTIFICATION_TRAY_LIMIT = "settingsNotificationTrayLimit"
     const val DEFAULT_PUBLICLY_VISIBLE = "settingsDefaultPubliclyVisible"
     const val SHOW_ADVANCED_POST_SETTINGS = "settingsShowAdvancedPostSettings"
     const val PRIVATE_ACCOUNT = "settingsPrivateAccount"
@@ -104,6 +106,7 @@ fun SettingsRoute(
         onSelectViewingPreference = viewModel::setViewingPreference,
         onToggleShowPreviews = viewModel::setShowPreviews,
         onSetMessagesPerPage = viewModel::setMessagesPerPage,
+        onSetNotificationTrayLimit = viewModel::setNotificationTrayLimit,
         onSetMaxMessageLength = viewModel::setMaxMessageLength,
         onToggleDefaultPubliclyVisible = viewModel::setDefaultPubliclyVisible,
         onToggleShowAdvancedPostSettings = viewModel::setShowAdvancedPostSettings,
@@ -123,6 +126,7 @@ fun SettingsScreen(
     onSelectViewingPreference: (ViewingPreference) -> Unit,
     onToggleShowPreviews: (Boolean) -> Unit,
     onSetMessagesPerPage: (Int) -> Unit,
+    onSetNotificationTrayLimit: (Int) -> Unit,
     onSetMaxMessageLength: (Int) -> Unit,
     onToggleDefaultPubliclyVisible: (Boolean) -> Unit,
     onToggleShowAdvancedPostSettings: (Boolean) -> Unit,
@@ -163,6 +167,7 @@ fun SettingsScreen(
                     onSelectViewingPreference = onSelectViewingPreference,
                     onToggleShowPreviews = onToggleShowPreviews,
                     onSetMessagesPerPage = onSetMessagesPerPage,
+                    onSetNotificationTrayLimit = onSetNotificationTrayLimit,
                 )
                 MessageSettingsGroup(
                     settings = settings,
@@ -206,8 +211,14 @@ fun SettingsScreen(
 }
 
 /**
- * "View preferences": which messages the Home feed shows, and whether link-preview
- * cards render at all.
+ * "View preferences": which messages the Home feed shows, whether link-preview cards
+ * render at all, and how much the feed and the notification tray hold.
+ *
+ * The notification tray limit is filed here rather than under a notifications group
+ * because that is where the web keeps it: `/help/settings` lists it under **View
+ * preferences** alongside Messages per page, and the same page's Notifications section
+ * points back at it ("up to your Notification tray limit (see View Preferences
+ * above)").
  */
 @Composable
 private fun ViewPreferencesGroup(
@@ -215,10 +226,11 @@ private fun ViewPreferencesGroup(
     onSelectViewingPreference: (ViewingPreference) -> Unit,
     onToggleShowPreviews: (Boolean) -> Unit,
     onSetMessagesPerPage: (Int) -> Unit,
+    onSetNotificationTrayLimit: (Int) -> Unit,
 ) {
     SettingsGroup(
         title = "View preferences",
-        description = "Control what appears in your Home feed.",
+        description = "Control what appears in your Home feed and your notification tray.",
         modifier = Modifier.testTag(SettingsTestTags.VIEW_PREFERENCES),
     ) {
         ViewingPreference.entries.forEach { option ->
@@ -247,6 +259,16 @@ private fun ViewPreferencesGroup(
             range = SettingsBounds.MESSAGES_PER_PAGE,
             onValueChange = onSetMessagesPerPage,
             tag = SettingsTestTags.MESSAGES_PER_PAGE,
+        )
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        SettingsNumberRow(
+            label = "Notification tray limit",
+            description = "How many notifications the tray holds before older ones " +
+                "drop off (10 to 40).",
+            value = settings.notificationTrayLimitOrDefault,
+            range = SettingsBounds.NOTIFICATION_TRAY_LIMIT,
+            onValueChange = onSetNotificationTrayLimit,
+            tag = SettingsTestTags.NOTIFICATION_TRAY_LIMIT,
         )
     }
 }
@@ -403,6 +425,7 @@ private fun SettingsScreenPreview() {
                     maxMessageLength = 666,
                     defaultPubliclyVisible = true,
                     messagesPerPage = 20,
+                    notificationTrayLimit = 20,
                     viewingPreference = ViewingPreference.FOLLOWING,
                     showPreviews = true,
                     showAdvancedPostSettings = false,
@@ -414,6 +437,7 @@ private fun SettingsScreenPreview() {
             onSelectViewingPreference = {},
             onToggleShowPreviews = {},
             onSetMessagesPerPage = {},
+            onSetNotificationTrayLimit = {},
             onSetMaxMessageLength = {},
             onToggleDefaultPubliclyVisible = {},
             onToggleShowAdvancedPostSettings = {},

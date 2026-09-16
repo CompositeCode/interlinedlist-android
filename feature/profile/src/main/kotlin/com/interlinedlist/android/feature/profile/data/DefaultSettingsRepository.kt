@@ -4,6 +4,7 @@ import com.interlinedlist.android.core.common.dispatcher.DispatcherProvider
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
 import com.interlinedlist.android.core.network.error.safeApiCall
+import com.interlinedlist.android.core.network.preferences.NotificationTrayLimitStore
 import com.interlinedlist.android.feature.profile.data.mapper.toRequest
 import com.interlinedlist.android.feature.profile.data.mapper.toUserSettings
 import com.interlinedlist.android.feature.profile.data.remote.ProfileApi
@@ -21,10 +22,17 @@ import javax.inject.Singleton
  * Network-backed settings with a process-scoped in-memory cache: every successful
  * read or write publishes the new value to [observeSettings], so the Settings screen
  * and the feed see the same preferences without either re-fetching.
+ *
+ * `notificationTrayLimit` is additionally forwarded to [NotificationTrayLimitStore] in
+ * `:core:network`, because `:feature:notifications` sizes its list and its system-tray
+ * group by that preference and no feature module here may depend on another. Without
+ * the forward, a limit changed in Settings would not take effect until the process
+ * restarted.
  */
 @Singleton
 class DefaultSettingsRepository @Inject constructor(
     private val api: ProfileApi,
+    private val trayLimitStore: NotificationTrayLimitStore,
     private val json: Json,
     private val dispatchers: DispatcherProvider,
 ) : SettingsRepository {
@@ -59,6 +67,7 @@ class DefaultSettingsRepository @Inject constructor(
 
     private fun publish(settings: UserSettings): UserSettings {
         cached.value = settings
+        trayLimitStore.publish(settings.notificationTrayLimit)
         return settings
     }
 }

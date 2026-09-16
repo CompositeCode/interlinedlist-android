@@ -14,14 +14,23 @@ import com.interlinedlist.android.feature.notifications.domain.Notification
  * side-effects live only in [SystemNotificationPoster].
  */
 interface SystemNotificationRaiser {
-    /** Raises tray notifications for [items] (newest-first, already push-filtered). */
-    fun post(items: List<Notification>)
+    /**
+     * Raises tray notifications for [items] (newest-first, already push-filtered),
+     * showing at most [maxIndividual] of them separately.
+     */
+    fun post(items: List<Notification>, maxIndividual: Int)
 }
 
 /**
  * Posts system-tray notifications for a batch of NEW notifications. The batch is
- * capped so a large backlog can't spam the tray: at most [MAX_INDIVIDUAL] individual
+ * capped so a large backlog can't spam the tray: at most `maxIndividual` individual
  * items are shown, and when there are more, only a single summary is posted.
+ *
+ * The cap is the account's `notificationTrayLimit` — the same preference that sizes
+ * the web's bell tray and this app's notifications list — rather than a constant of
+ * this class's own choosing, so "how many notifications the tray holds" means one
+ * thing everywhere. [NotificationPollRunner] resolves it and passes it in, keeping
+ * this class free of the preference lookup.
  *
  * Each notification's tap opens the app's launcher activity (resolved via the package
  * manager, so this module needs no compile-time reference to `MainActivity`) carrying
@@ -37,13 +46,16 @@ class SystemNotificationPoster(
     /**
      * Posts [items] (newest-first, already push-filtered). No-op when the list is empty
      * or the user has notifications disabled at the OS level.
+     *
+     * [maxIndividual] is coerced to at least 1 so a nonsensical cap still surfaces the
+     * activity as a summary rather than swallowing it.
      */
-    override fun post(items: List<Notification>) {
+    override fun post(items: List<Notification>, maxIndividual: Int) {
         if (items.isEmpty()) return
         val manager = NotificationManagerCompat.from(context)
         if (!manager.areNotificationsEnabled()) return
 
-        if (items.size > MAX_INDIVIDUAL) {
+        if (collapsesToSummary(items.size, maxIndividual)) {
             postSummaryOnly(manager, items)
             return
         }
@@ -139,8 +151,18 @@ class SystemNotificationPoster(
     }
 
     companion object {
-        /** Max individual notifications before collapsing to a single summary. */
-        const val MAX_INDIVIDUAL = 5
+        /**
+         * Whether a batch of [count] items collapses to a single summary instead of
+         * being posted one by one: true once it exceeds [maxIndividual], the account's
+         * `notificationTrayLimit`.
+         *
+         * Pure, and separate from [post], because this is the rule the tray group is
+         * sized by and it has to be assertable without an Android notification manager.
+         * A nonsensical cap is coerced to at least 1, so activity still surfaces as a
+         * summary rather than being swallowed.
+         */
+        fun collapsesToSummary(count: Int, maxIndividual: Int): Boolean =
+            count > maxIndividual.coerceAtLeast(1)
 
         /** Shared group key so the shade collapses our notifications together. */
         const val GROUP_KEY = "il.notifications.group"
