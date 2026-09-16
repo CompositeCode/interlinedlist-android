@@ -26,8 +26,10 @@ class FakeMessagesRepository : MessagesRepository {
     private val single = MutableStateFlow<Map<String, Message>>(emptyMap())
     private val scheduled = MutableStateFlow<List<Message>>(emptyList())
 
-    var refreshResult: ApiResult<Boolean> = ApiResult.Success(false)
-    var loadMoreResult: ApiResult<Boolean> = ApiResult.Success(false)
+    /** The cursor a refresh hands back; null means "end of the feed". */
+    var refreshResult: ApiResult<String?> = ApiResult.Success(null)
+    /** The cursor a page-append hands back; null means "end of the feed". */
+    var loadMoreResult: ApiResult<String?> = ApiResult.Success(null)
     var createResult: ApiResult<Message>? = null
     /** Cross-post statuses returned alongside a successful [createResult]. */
     var createCrossPosts: List<CrossPostStatus> = emptyList()
@@ -53,6 +55,8 @@ class FakeMessagesRepository : MessagesRepository {
 
     var refreshCount = 0
     var loadMoreCount = 0
+    /** Every cursor handed to [loadMoreFeed], in order. */
+    val loadMoreCursors = mutableListOf<String>()
     var lastSetDug: Pair<String, Boolean>? = null
     var deletedIds = mutableListOf<String>()
     var lastCreate: CreateArgs? = null
@@ -100,13 +104,14 @@ class FakeMessagesRepository : MessagesRepository {
 
     override fun observeScheduled(): Flow<List<Message>> = scheduled
 
-    override suspend fun refreshFeed(): ApiResult<Boolean> {
+    override suspend fun refreshFeed(): ApiResult<String?> {
         refreshCount++
         return refreshResult
     }
 
-    override suspend fun loadMoreFeed(currentCount: Int): ApiResult<Boolean> {
+    override suspend fun loadMoreFeed(cursor: String): ApiResult<String?> {
         loadMoreCount++
+        loadMoreCursors += cursor
         return loadMoreResult
     }
 

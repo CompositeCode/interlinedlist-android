@@ -105,7 +105,11 @@ enum class ModerationAction { BLOCK, MUTE, REPORT }
 private data class FeedTransientState(
     val isRefreshing: Boolean = false,
     val isLoadingMore: Boolean = false,
-    val canLoadMore: Boolean = false,
+    /**
+     * Opaque keyset cursor for the next feed page, or null at the end of the feed
+     * (and until the first refresh returns). Held verbatim: never parsed or built.
+     */
+    val nextCursor: String? = null,
     val errorMessage: String? = null,
     val subscriptionRequired: Boolean = false,
     val isComposeOpen: Boolean = false,
@@ -130,6 +134,9 @@ private data class FeedTransientState(
 ) {
     /** A per-message override always wins over the account default. */
     val composeVisibility: MessageVisibility get() = visibilityOverride ?: defaultVisibility
+
+    /** More pages remain exactly while the server handed back a cursor. */
+    val canLoadMore: Boolean get() = nextCursor != null
 }
 
 @HiltViewModel
@@ -217,12 +224,21 @@ class MessagesFeedViewModel @Inject constructor(
         }
     }
 
+    /** Reloads the head of the feed, discarding the stored paging cursor. */
     fun refresh() {
-        transient.update { it.copy(isRefreshing = true, errorMessage = null, subscriptionRequired = false) }
+        transient.update {
+            it.copy(
+                isRefreshing = true,
+                // Paging restarts from the top; the old cursor no longer applies.
+                nextCursor = null,
+                errorMessage = null,
+                subscriptionRequired = false,
+            )
+        }
         viewModelScope.launch {
             when (val result = repository.refreshFeed()) {
                 is ApiResult.Success -> transient.update {
-                    it.copy(isRefreshing = false, canLoadMore = result.data)
+                    it.copy(isRefreshing = false, nextCursor = result.data)
                 }
                 is ApiResult.Failure -> transient.update {
                     it.copy(isRefreshing = false).withError(result.error)
@@ -231,14 +247,16 @@ class MessagesFeedViewModel @Inject constructor(
         }
     }
 
+    /** Appends the page after the stored cursor; a no-op at the end of the feed. */
     fun loadMore() {
-        val current = uiState.value
-        if (current.isLoadingMore || !current.canLoadMore) return
+        val current = transient.value
+        val cursor = current.nextCursor ?: return
+        if (current.isLoadingMore || current.isRefreshing) return
         transient.update { it.copy(isLoadingMore = true) }
         viewModelScope.launch {
-            when (val result = repository.loadMoreFeed(currentCount = current.messages.size)) {
+            when (val result = repository.loadMoreFeed(cursor)) {
                 is ApiResult.Success -> transient.update {
-                    it.copy(isLoadingMore = false, canLoadMore = result.data)
+                    it.copy(isLoadingMore = false, nextCursor = result.data)
                 }
                 is ApiResult.Failure -> transient.update {
                     it.copy(isLoadingMore = false).withError(result.error)

@@ -71,7 +71,7 @@ class DefaultMessagesRepositoryTest {
     }
 
     @Test
-    fun `refreshFeed caches messages and reports hasMore`() = runTest(dispatcher) {
+    fun `refreshFeed caches messages and reports the next cursor`() = runTest(dispatcher) {
         enqueueJson(
             200,
             """
@@ -81,7 +81,7 @@ class DefaultMessagesRepositoryTest {
                   "digCount": 2, "replyCount": 1 },
                 { "id": "2", "content": "second", "author": { "id": "me", "username": "me" } }
               ],
-              "pagination": { "total": 5, "limit": 20, "offset": 0, "hasMore": true }
+              "pagination": { "limit": 20, "hasMore": true, "nextCursor": "page-2" }
             }
             """.trimIndent(),
         )
@@ -90,7 +90,7 @@ class DefaultMessagesRepositoryTest {
         val result = repo.refreshFeed()
 
         assertThat(result).isInstanceOf(ApiResult.Success::class.java)
-        assertThat((result as ApiResult.Success).data).isTrue() // hasMore
+        assertThat((result as ApiResult.Success).data).isEqualTo("page-2")
         val cached = repo.observeFeed().first()
         assertThat(cached.map { it.id }).containsExactly("1", "2").inOrder()
         // Author id "me" matches the session user -> flagged mine.
@@ -114,26 +114,27 @@ class DefaultMessagesRepositoryTest {
         enqueueJson(
             200,
             """{ "data": [ { "id": "1", "content": "a" } ],
-                "pagination": { "total": 3, "limit": 20, "offset": 0, "hasMore": true } }""",
+                "pagination": { "limit": 20, "hasMore": true, "nextCursor": "after-1" } }""",
         )
         enqueueJson(
             200,
             """{ "data": [ { "id": "2", "content": "b" } ],
-                "pagination": { "total": 3, "limit": 20, "offset": 1, "hasMore": false } }""",
+                "pagination": { "limit": 20, "hasMore": false, "nextCursor": null } }""",
         )
         val repo = repository()
-        repo.refreshFeed()
+        val cursor = (repo.refreshFeed() as ApiResult.Success).data!!
 
-        val more = repo.loadMoreFeed(currentCount = 1)
+        val more = repo.loadMoreFeed(cursor)
 
-        assertThat((more as ApiResult.Success).data).isFalse() // no more pages
+        assertThat((more as ApiResult.Success).data).isNull() // end of the feed
         val ids = repo.observeFeed().first().map { it.id }
         assertThat(ids).containsExactly("1", "2").inOrder()
 
-        // Second request carried the offset from the current feed size.
+        // Second request carried the previous page's cursor, verbatim.
         server.takeRequest()
-        val secondPath = server.takeRequest().path
-        assertThat(secondPath).contains("offset=1")
+        val second = server.takeRequest().requestUrl!!
+        assertThat(second.queryParameter("cursor")).isEqualTo("after-1")
+        assertThat(second.queryParameter("offset")).isNull()
     }
 
     @Test

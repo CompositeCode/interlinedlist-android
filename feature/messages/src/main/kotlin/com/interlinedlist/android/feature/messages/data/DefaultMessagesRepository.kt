@@ -54,33 +54,43 @@ class DefaultMessagesRepository @Inject constructor(
     override fun observeScheduled(): Flow<List<Message>> =
         messageDao.observeScheduled().map { rows -> rows.map { it.toDomain() } }
 
-    override suspend fun refreshFeed(): ApiResult<Boolean> = withContext(dispatchers.io) {
-        when (val result = safeCall { api.getMessages(limit = PaginationDto.DEFAULT_LIMIT, offset = 0) }) {
+    /**
+     * Loads the head of the feed (no cursor) and replaces the cached feed with it,
+     * restarting keyset pagination. Returns the next page's opaque cursor.
+     */
+    override suspend fun refreshFeed(): ApiResult<String?> = withContext(dispatchers.io) {
+        when (val result = safeCall { api.getMessages(limit = PaginationDto.DEFAULT_LIMIT) }) {
             is ApiResult.Success -> {
                 val page = result.data
-                val entities = page.data.mapIndexed { index, dto ->
+                val entities = page.rows.mapIndexed { index, dto ->
                     dto.toDomain(currentUserId()).toEntity(feedOrder = index.toLong())
                 }
                 messageDao.clearFeed()
                 messageDao.insertAll(entities)
-                ApiResult.Success(page.pagination.hasMore)
+                ApiResult.Success(page.nextCursor)
             }
             is ApiResult.Failure -> result
         }
     }
 
-    override suspend fun loadMoreFeed(currentCount: Int): ApiResult<Boolean> = withContext(dispatchers.io) {
+    /**
+     * Appends the page following [cursor] to the tail of the cached feed. The
+     * cursor is opaque: it goes back to the API exactly as it arrived. Rows are
+     * keyed by id, so a row the server happens to repeat updates in place rather
+     * than duplicating.
+     */
+    override suspend fun loadMoreFeed(cursor: String): ApiResult<String?> = withContext(dispatchers.io) {
         when (val result = safeCall {
-            api.getMessages(limit = PaginationDto.DEFAULT_LIMIT, offset = currentCount)
+            api.getMessages(limit = PaginationDto.DEFAULT_LIMIT, cursor = cursor)
         }) {
             is ApiResult.Success -> {
                 val page = result.data
                 val base = (messageDao.maxFeedOrder() ?: -1L) + 1L
-                val entities = page.data.mapIndexed { index, dto ->
+                val entities = page.rows.mapIndexed { index, dto ->
                     dto.toDomain(currentUserId()).toEntity(feedOrder = base + index)
                 }
                 messageDao.insertAll(entities)
-                ApiResult.Success(page.pagination.hasMore)
+                ApiResult.Success(page.nextCursor)
             }
             is ApiResult.Failure -> result
         }
@@ -172,7 +182,7 @@ class DefaultMessagesRepository @Inject constructor(
     override suspend fun refreshReplies(messageId: String): ApiResult<Unit> = withContext(dispatchers.io) {
         when (val result = safeCall { api.getReplies(messageId) }) {
             is ApiResult.Success -> {
-                val entities = result.data.data.mapIndexed { index, dto ->
+                val entities = result.data.rows.mapIndexed { index, dto ->
                     dto.toDomain(currentUserId())
                         .copy(parentId = messageId)
                         .toEntity(feedOrder = index.toLong())
@@ -374,7 +384,7 @@ class DefaultMessagesRepository @Inject constructor(
             api.search(query = query, limit = PaginationDto.DEFAULT_LIMIT, offset = 0)
         }) {
             is ApiResult.Success ->
-                ApiResult.Success(result.data.data.map { it.toDomain(currentUserId()) })
+                ApiResult.Success(result.data.rows.map { it.toDomain(currentUserId()) })
             is ApiResult.Failure -> result
         }
     }
