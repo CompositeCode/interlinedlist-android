@@ -8,9 +8,12 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.interlinedlist.android.core.designsystem.theme.InterlinedListTheme
+import com.interlinedlist.android.feature.organizations.domain.OrgLinkedInPage
+import com.interlinedlist.android.feature.organizations.domain.OrgLinkedInStatus
 import com.interlinedlist.android.feature.organizations.domain.OrgMember
 import com.interlinedlist.android.feature.organizations.domain.OrgRole
 import com.interlinedlist.android.feature.organizations.domain.Organization
+import com.interlinedlist.android.feature.organizations.ui.LINKEDIN_DISCONNECT_CONSEQUENCE
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -38,6 +41,9 @@ class OrganizationDetailScreenTest {
         onDelete: () -> Unit = {},
         onJoin: () -> Unit = {},
         onLeave: () -> Unit = {},
+        onAssignLinkedInPage: (OrgMember, String?) -> Unit = { _, _ -> },
+        onSyncLinkedInPages: () -> Unit = {},
+        onRemoveLinkedInCredential: () -> Unit = {},
     ) {
         composeRule.setContent {
             InterlinedListTheme {
@@ -52,6 +58,9 @@ class OrganizationDetailScreenTest {
                     onDelete = onDelete,
                     onJoin = onJoin,
                     onLeave = onLeave,
+                    onAssignLinkedInPage = onAssignLinkedInPage,
+                    onSyncLinkedInPages = onSyncLinkedInPages,
+                    onRemoveLinkedInCredential = onRemoveLinkedInCredential,
                 )
             }
         }
@@ -62,6 +71,7 @@ class OrganizationDetailScreenTest {
         members: List<OrgMember> = emptyList(),
         isPublic: Boolean = false,
         isSystem: Boolean = false,
+        linkedIn: OrgLinkedInStatus? = null,
     ) = OrganizationDetailUiState(
         organization = Organization(
             id = "o1",
@@ -76,6 +86,7 @@ class OrganizationDetailScreenTest {
         ),
         members = members,
         isLoading = false,
+        linkedIn = linkedIn,
     )
 
     private val ada = OrgMember("u1", "ada", "Ada", null, OrgRole.OWNER, active = true)
@@ -311,5 +322,140 @@ class OrganizationDetailScreenTest {
         composeRule.onNodeWithText("Save").performClick()
 
         assert(saved?.third == true) { "expected the toggled visibility to reach the save, got $saved" }
+    }
+
+    // ---- LinkedIn company pages --------------------------------------------
+
+    private val acmePage = OrgLinkedInPage(id = "p1", linkedInPageId = "12345678", name = "Acme Corp")
+    private val labsPage = OrgLinkedInPage(id = "p2", linkedInPageId = "87654321", name = "Acme Labs")
+
+    private fun connected(assignments: Map<String, String> = emptyMap()) = OrgLinkedInStatus(
+        connected = true,
+        expiresAt = "2026-12-01T00:00:00.000Z",
+        pages = listOf(acmePage, labsPage),
+        assignments = assignments,
+    )
+
+    @Test
+    fun owner_seesTheLinkedInSection() {
+        setScreen(state = state(OrgRole.OWNER, listOf(ada, grace), linkedIn = connected()))
+
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.LINKEDIN).assertIsDisplayed()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.LINKEDIN_CONNECTED).assertIsDisplayed()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.linkedInPage("p1")).assertIsDisplayed()
+    }
+
+    @Test
+    fun admin_seesTheLinkedInSection() {
+        setScreen(state = state(OrgRole.ADMIN, listOf(ada, grace), linkedIn = connected()))
+
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.LINKEDIN).assertIsDisplayed()
+    }
+
+    @Test
+    fun member_isOfferedNoLinkedInSection() {
+        // The server refuses a member outright ("Admin or owner required"), so the
+        // section they could not use is not shown at all.
+        setScreen(state = state(OrgRole.MEMBER, listOf(ada, grace), linkedIn = connected()))
+
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.LINKEDIN).assertDoesNotExist()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.LINKEDIN_SYNC).assertDoesNotExist()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.LINKEDIN_DISCONNECT).assertDoesNotExist()
+    }
+
+    @Test
+    fun notConnected_readsAsAState_notAnError() {
+        setScreen(
+            state = state(
+                OrgRole.OWNER,
+                listOf(ada, grace),
+                linkedIn = OrgLinkedInStatus.NOT_CONNECTED,
+            ),
+        )
+
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.LINKEDIN_NOT_CONNECTED).assertIsDisplayed()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.LINKEDIN_ERROR).assertDoesNotExist()
+        // Nothing to sync or disconnect without a credential.
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.LINKEDIN_SYNC).assertDoesNotExist()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.LINKEDIN_DISCONNECT).assertDoesNotExist()
+    }
+
+    @Test
+    fun disconnect_statesTheConsequenceAndOnlyActsOnConfirmation() {
+        var disconnected = false
+        setScreen(
+            state = state(OrgRole.OWNER, listOf(ada, grace), linkedIn = connected()),
+            onRemoveLinkedInCredential = { disconnected = true },
+        )
+
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.LINKEDIN_DISCONNECT).performClick()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.LINKEDIN_DISCONNECT_DIALOG).assertIsDisplayed()
+        // The dialog names the cost before anything happens.
+        composeRule.onNodeWithText(LINKEDIN_DISCONNECT_CONSEQUENCE).assertIsDisplayed()
+        assert(!disconnected) { "the credential must not be removed before confirmation" }
+
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.LINKEDIN_DISCONNECT_CONFIRM).performClick()
+        assert(disconnected)
+    }
+
+    @Test
+    fun disconnect_cancelLeavesTheCredentialAlone() {
+        var disconnected = false
+        setScreen(
+            state = state(OrgRole.OWNER, listOf(ada, grace), linkedIn = connected()),
+            onRemoveLinkedInCredential = { disconnected = true },
+        )
+
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.LINKEDIN_DISCONNECT).performClick()
+        composeRule.onNodeWithText("Cancel").performClick()
+
+        assert(!disconnected)
+    }
+
+    @Test
+    fun sync_refreshesThePageList() {
+        var synced = false
+        setScreen(
+            state = state(OrgRole.OWNER, listOf(ada, grace), linkedIn = connected()),
+            onSyncLinkedInPages = { synced = true },
+        )
+
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.LINKEDIN_SYNC).performClick()
+        assert(synced)
+    }
+
+    @Test
+    fun assigningAPage_reportsTheMemberAndPage() {
+        var assigned: Pair<String, String?>? = null
+        setScreen(
+            state = state(OrgRole.OWNER, listOf(ada, grace), linkedIn = connected()),
+            onAssignLinkedInPage = { member, pageId -> assigned = member.userId to pageId },
+        )
+
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.linkedInAssignment("u2")).performClick()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.linkedInPageOption("u2", "p2")).performClick()
+
+        assert(assigned == "u2" to "p2") { "expected grace to be assigned Acme Labs, got $assigned" }
+    }
+
+    @Test
+    fun clearingAnAssignment_sendsNoPage() {
+        var assigned: Pair<String, String?>? = null
+        setScreen(
+            state = state(
+                OrgRole.OWNER,
+                listOf(ada, grace),
+                linkedIn = connected(mapOf("u2" to "p1")),
+            ),
+            onAssignLinkedInPage = { member, pageId -> assigned = member.userId to pageId },
+        )
+
+        // The current assignment is what the control reads.
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.linkedInAssignment("u2"))
+            .assertTextContains("Acme Corp")
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.linkedInAssignment("u2")).performClick()
+        composeRule.onNodeWithTag(OrganizationDetailTestTags.linkedInClearOption("u2")).performClick()
+
+        assert(assigned == "u2" to null) { "expected the assignment to be cleared, got $assigned" }
     }
 }

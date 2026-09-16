@@ -4,8 +4,10 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.interlinedlist.android.core.common.result.ApiResult
+import com.interlinedlist.android.core.common.result.AppError
 import com.interlinedlist.android.feature.organizations.data.OrganizationsRepository
 import com.interlinedlist.android.feature.organizations.domain.MemberCandidate
+import com.interlinedlist.android.feature.organizations.domain.OrgLinkedInStatus
 import com.interlinedlist.android.feature.organizations.domain.OrgMember
 import com.interlinedlist.android.feature.organizations.domain.OrgPermissions
 import com.interlinedlist.android.feature.organizations.domain.OrgRole
@@ -13,7 +15,9 @@ import com.interlinedlist.android.feature.organizations.domain.Organization
 import com.interlinedlist.android.feature.organizations.ui.LAST_OWNER_DEMOTE_EXPLANATION
 import com.interlinedlist.android.feature.organizations.ui.LAST_OWNER_EXPLANATION
 import com.interlinedlist.android.feature.organizations.ui.LAST_OWNER_REMOVE_EXPLANATION
+import com.interlinedlist.android.feature.organizations.ui.isMissingLinkedInCredential
 import com.interlinedlist.android.feature.organizations.ui.isSubscriptionGate
+import com.interlinedlist.android.feature.organizations.ui.toLinkedInMessage
 import com.interlinedlist.android.feature.organizations.ui.toJoinMessage
 import com.interlinedlist.android.feature.organizations.ui.toLeaveMessage
 import com.interlinedlist.android.feature.organizations.ui.toRemoveMemberMessage
@@ -46,6 +50,12 @@ data class OrganizationDetailUiState(
     val searchQuery: String = "",
     val candidates: List<MemberCandidate> = emptyList(),
     val isSearching: Boolean = false,
+    // Shared LinkedIn credential; null until it has been read (or when the
+    // viewer's role may not manage it, in which case it is never requested).
+    val linkedIn: OrgLinkedInStatus? = null,
+    val isLinkedInLoading: Boolean = false,
+    val isLinkedInSyncing: Boolean = false,
+    val linkedInError: String? = null,
 ) {
     val title: String get() = organization?.displayName.orEmpty()
     val isEmpty: Boolean get() = members.isEmpty() && !isLoading && errorMessage == null && isMember
@@ -61,6 +71,13 @@ data class OrganizationDetailUiState(
 
     /** A public organization the user has not joined can be joined from here. */
     val canJoin: Boolean get() = permissions.canJoin
+
+    /**
+     * Whether the LinkedIn section is offered at all. Only an owner or admin may
+     * manage the shared credential, and the server enforces it, so no one else is
+     * shown controls that would only be refused.
+     */
+    val showLinkedIn: Boolean get() = permissions.canManageLinkedIn && organization != null
 
     /** How many owners the loaded member list holds; the server protects the last one. */
     private val ownerCount: Int get() = members.count { it.role == OrgRole.OWNER }
@@ -144,6 +161,9 @@ class OrganizationDetailViewModel @Inject constructor(
                     it.copy(errorMessage = it.errorMessage ?: members.error.toUserMessage())
                 }
             }
+            // Only an owner or admin manages the shared LinkedIn credential, so
+            // nobody else's screen even asks for it.
+            if (OrgPermissions.of(organization).canManageLinkedIn) loadLinkedIn()
         }
     }
 
@@ -319,6 +339,106 @@ class OrganizationDetailViewModel @Inject constructor(
             }
         }
     }
+
+    // ---- LinkedIn company pages --------------------------------------------
+
+    /**
+     * Reads the shared credential, its pages and the per-member assignments. An
+     * organization with no credential is a normal success
+     * (`{"credential":null}`), so it lands in [OrgLinkedInStatus.NOT_CONNECTED]
+     * and the section says so instead of showing an error.
+     */
+    fun loadLinkedIn() {
+        if (!_uiState.value.permissions.canManageLinkedIn) return
+        _uiState.update { it.copy(isLinkedInLoading = true, linkedInError = null) }
+        viewModelScope.launch {
+            when (val result = repository.getLinkedInStatus(orgId)) {
+                is ApiResult.Success -> _uiState.update {
+                    it.copy(linkedIn = result.data, isLinkedInLoading = false)
+                }
+                is ApiResult.Failure -> _uiState.update {
+                    it.copy(isLinkedInLoading = false).withLinkedInFailure(result.error)
+                }
+            }
+        }
+    }
+
+    /**
+     * Assigns [member] to the company page [pageId], or clears their assignment
+     * when it is null. The server takes one pair per call and answers with
+     * whether the member ends up assigned, which is what the UI then shows.
+     */
+    fun assignLinkedInPage(member: OrgMember, pageId: String?) {
+        val state = _uiState.value
+        if (!state.permissions.canManageLinkedIn) return
+        if (state.linkedIn?.connected != true) return
+        _uiState.update { it.copy(linkedInError = null) }
+        viewModelScope.launch {
+            when (val result = repository.assignLinkedInPage(orgId, member.userId, pageId)) {
+                is ApiResult.Success -> _uiState.update { current ->
+                    val status = current.linkedIn ?: return@update current
+                    val assignments = status.assignments.toMutableMap()
+                    if (result.data && pageId != null) {
+                        assignments[member.userId] = pageId
+                    } else {
+                        assignments.remove(member.userId)
+                    }
+                    current.copy(linkedIn = status.copy(assignments = assignments))
+                }
+                is ApiResult.Failure -> _uiState.update { it.withLinkedInFailure(result.error) }
+            }
+        }
+    }
+
+    /** Re-discovers the organization's company pages and refreshes the list. */
+    fun syncLinkedInPages() {
+        val state = _uiState.value
+        if (!state.permissions.canManageLinkedIn || state.isLinkedInSyncing) return
+        _uiState.update { it.copy(isLinkedInSyncing = true, linkedInError = null) }
+        viewModelScope.launch {
+            when (val result = repository.syncLinkedInPages(orgId)) {
+                is ApiResult.Success -> _uiState.update {
+                    it.copy(isLinkedInSyncing = false, linkedIn = result.data)
+                }
+                is ApiResult.Failure -> _uiState.update {
+                    it.copy(isLinkedInSyncing = false).withLinkedInFailure(result.error)
+                }
+            }
+        }
+    }
+
+    /**
+     * Disconnects the shared credential. Destructive — the organization can no
+     * longer post to its company pages and every assignment is cleared — so the
+     * UI only calls this from a confirmed dialog.
+     */
+    fun removeLinkedInCredential() {
+        if (!_uiState.value.permissions.canManageLinkedIn) return
+        _uiState.update { it.copy(linkedInError = null) }
+        viewModelScope.launch {
+            when (val result = repository.removeLinkedInCredential(orgId)) {
+                is ApiResult.Success -> _uiState.update {
+                    it.copy(linkedIn = OrgLinkedInStatus.NOT_CONNECTED)
+                }
+                // "No credential" is the outcome the user asked for, not a failure.
+                is ApiResult.Failure -> _uiState.update { it.withLinkedInFailure(result.error) }
+            }
+        }
+    }
+
+    /**
+     * Applies a LinkedIn failure. An organization whose credential is missing (or
+     * has just been disconnected elsewhere) is not an error state: the section
+     * becomes the not-connected one. Everything else is explained to the user.
+     */
+    private fun OrganizationDetailUiState.withLinkedInFailure(error: AppError) =
+        if (error.isMissingLinkedInCredential) {
+            copy(linkedIn = OrgLinkedInStatus.NOT_CONNECTED, linkedInError = null)
+        } else {
+            copy(linkedInError = error.toLinkedInMessage())
+        }
+
+    fun clearLinkedInError() = _uiState.update { it.copy(linkedInError = null) }
 
     fun clearError() = _uiState.update { it.copy(errorMessage = null) }
 }

@@ -76,4 +76,43 @@ class OrganizationsErrorMessagesTest {
         assertThat(forbidden.toRoleChangeMessage()).isEqualTo(forbidden.toUserMessage())
         assertThat(forbidden.toRemoveMemberMessage()).isEqualTo(forbidden.toUserMessage())
     }
+
+    // ---- LinkedIn ----------------------------------------------------------
+
+    @Test
+    fun `an organization with no LinkedIn credential is a state, not an error`() {
+        // Both spellings captured live, from DELETE .../credential and POST .../sync-pages.
+        val onDelete = AppError.NotFound("No LinkedIn credential found")
+        val onSync = AppError.NotFound("No active LinkedIn credential for this organization")
+
+        assertThat(onDelete.isMissingLinkedInCredential).isTrue()
+        assertThat(onSync.isMissingLinkedInCredential).isTrue()
+        assertThat(onSync.toLinkedInMessage()).isEqualTo(LINKEDIN_NOT_CONNECTED_EXPLANATION)
+    }
+
+    @Test
+    fun `the owner-or-admin rejection is explained in role terms`() {
+        // Live 403: {"error":"Admin or owner required","code":"forbidden"}
+        val error = AppError.Forbidden("Admin or owner required")
+
+        assertThat(error.isMissingLinkedInCredential).isFalse()
+        assertThat(error.toLinkedInMessage())
+            .isEqualTo("Only an owner or admin can manage this organization's LinkedIn connection.")
+    }
+
+    @Test
+    fun `a stale page assignment points at syncing`() {
+        // Live 404: {"error":"Page not found in this organization","code":"not_found"}
+        val error = AppError.NotFound("Page not found in this organization")
+
+        assertThat(error.toLinkedInMessage())
+            .isEqualTo("That page is no longer in this organization. Sync pages and try again.")
+    }
+
+    @Test
+    fun `other LinkedIn failures fall back to the shared mapping`() {
+        val error = AppError.Network(null)
+
+        assertThat(error.toLinkedInMessage()).isEqualTo(error.toUserMessage())
+    }
 }
