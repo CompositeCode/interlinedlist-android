@@ -28,9 +28,10 @@ enum class MessageVisibility(val publiclyVisible: Boolean) {
          *
          * A push/quote amplifies another user's message, so it is always public —
          * there is no private amplification and the composer's per-message choice
-         * does not apply. Push/quote composition is not built yet (issue #20);
-         * when it lands it must pass this rather than the user's selection, and
-         * this is the one place that invariant is expressed.
+         * does not apply. This is the one place that invariant is expressed: the
+         * repository posts it instead of the caller's selection whenever a
+         * `pushedMessageId` is present, and the composer reads it to lock the
+         * visibility control and show its "this will be public" banner.
          */
         val PUSH_OR_QUOTE: MessageVisibility = PUBLIC
     }

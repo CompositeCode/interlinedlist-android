@@ -3,7 +3,10 @@ package com.interlinedlist.android.feature.messages.ui.feed
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.assertHasClickAction
+import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -16,6 +19,7 @@ import com.interlinedlist.android.core.model.ViewingPreference
 import com.interlinedlist.android.feature.messages.domain.LinkedNetwork
 import com.interlinedlist.android.feature.messages.domain.Message
 import com.interlinedlist.android.feature.messages.domain.MessageVisibility
+import com.interlinedlist.android.feature.messages.domain.PushedMessage
 import com.interlinedlist.android.feature.messages.ui.components.EditMessageSheetTags
 import com.interlinedlist.android.feature.messages.ui.components.MessageCardTags
 import com.interlinedlist.android.feature.messages.ui.components.MessageMediaTags
@@ -38,11 +42,24 @@ class MessagesFeedScreenTest {
         mine: Boolean = false,
         editedAt: String? = null,
         publiclyVisible: Boolean = true,
+        pushCount: Int = 0,
+        pushedMessage: PushedMessage? = null,
     ) = Message(
         id = id, content = body, authorId = "u1", authorUsername = "adron",
         authorDisplayName = "Adron", authorAvatarUrl = null, createdAt = null,
         digCount = 0, replyCount = 0, dugByMe = false, parentId = null, mine = mine,
         imageUrls = imageUrls, editedAt = editedAt, publiclyVisible = publiclyVisible,
+        pushCount = pushCount,
+        pushedMessageId = pushedMessage?.id,
+        pushedMessage = pushedMessage,
+    )
+
+    private fun original(
+        id: String = "orig",
+        body: String = "the original post",
+    ) = PushedMessage(
+        id = id, content = body, authorUsername = "quinn", authorDisplayName = "Quinn",
+        authorAvatarUrl = null, createdAt = null,
     )
 
     /** Hosts the stateless feed with a tiny in-memory state holder. */
@@ -55,6 +72,8 @@ class MessagesFeedScreenTest {
         onMuteUser: (Message) -> Unit = {},
         onReportUser: (Message) -> Unit = {},
         onViewingPreferenceChange: ((ViewingPreference) -> Unit)? = null,
+        onPush: (Message) -> Unit = {},
+        onQuote: (Message) -> Unit = {},
     ) {
         composeRule.setContent {
             var state by mutableStateOf(initial)
@@ -88,6 +107,11 @@ class MessagesFeedScreenTest {
                     onBlockUser = onBlockUser,
                     onMuteUser = onMuteUser,
                     onReportUser = onReportUser,
+                    onPush = onPush,
+                    onQuote = { quoted ->
+                        state = state.copy(isComposeOpen = true, quoteTarget = quoted)
+                        onQuote(quoted)
+                    },
                 )
             }
         }
@@ -371,5 +395,151 @@ class MessagesFeedScreenTest {
         // The user must still be able to switch away from a view they cannot see.
         composeRule.onNodeWithTag(MessagesFeedTags.VIEW_PREFERENCES).assertIsDisplayed()
         composeRule.onNodeWithTag(MessagesFeedTags.LOCKED).assertIsDisplayed()
+    }
+
+    // --- push / quote ------------------------------------------------------
+
+    @Test
+    fun push_rendersTheEmbeddedOriginal_insteadOfAnEmptyBody() {
+        setFeed(
+            MessagesFeedUiState(messages = listOf(message("p1", "", pushedMessage = original()))),
+        )
+
+        composeRule.onNodeWithTag(MessageCardTags.PUSH_HEADER).assertIsDisplayed()
+        composeRule.onNodeWithText("Adron pushed").assertIsDisplayed()
+        composeRule.onNodeWithTag(MessageCardTags.PUSHED_ORIGINAL).assertIsDisplayed()
+        composeRule.onNodeWithText("the original post").assertIsDisplayed()
+        composeRule.onNodeWithText("Quinn").assertIsDisplayed()
+    }
+
+    @Test
+    fun quote_rendersTheOwnNote_andTheEmbeddedOriginal() {
+        setFeed(
+            MessagesFeedUiState(
+                messages = listOf(message("q1", "worth reading", pushedMessage = original())),
+            ),
+        )
+
+        // A quote has words of its own, so it carries no "pushed" header.
+        composeRule.onNodeWithTag(MessageCardTags.PUSH_HEADER).assertDoesNotExist()
+        composeRule.onNodeWithText("worth reading").assertIsDisplayed()
+        composeRule.onNodeWithTag(MessageCardTags.PUSHED_ORIGINAL).assertIsDisplayed()
+        composeRule.onNodeWithText("the original post").assertIsDisplayed()
+    }
+
+    @Test
+    fun tappingTheEmbeddedOriginal_opensTheOriginalMessage() {
+        var opened: String? = null
+        setFeed(
+            MessagesFeedUiState(messages = listOf(message("p1", "", pushedMessage = original()))),
+            onOpenMessage = { opened = it },
+        )
+
+        composeRule.onNodeWithTag(MessageCardTags.PUSHED_ORIGINAL).performClick()
+
+        assertThat(opened).isEqualTo("orig")
+    }
+
+    @Test
+    fun pushAndQuote_areOffered_onSomeoneElsesPublicMessage() {
+        val pushed = mutableListOf<Message>()
+        setFeed(
+            MessagesFeedUiState(messages = listOf(message("1", "hello"))),
+            onPush = { pushed += it },
+        )
+
+        composeRule.onNodeWithTag(MessageCardTags.QUOTE).assertIsDisplayed()
+        composeRule.onNodeWithTag(MessageCardTags.PUSH).performClick()
+
+        assertThat(pushed.map { it.id }).containsExactly("1")
+    }
+
+    @Test
+    fun push_isNotOffered_onYourOwnMessage() {
+        setFeed(MessagesFeedUiState(messages = listOf(message("1", "hello", mine = true))))
+
+        composeRule.onNodeWithTag(MessageCardTags.PUSH).assertDoesNotExist()
+        composeRule.onNodeWithTag(MessageCardTags.QUOTE).assertDoesNotExist()
+    }
+
+    @Test
+    fun push_isNotOffered_onAPushOfAPush() {
+        setFeed(
+            MessagesFeedUiState(messages = listOf(message("p1", "", pushedMessage = original()))),
+        )
+
+        composeRule.onNodeWithTag(MessageCardTags.QUOTE).assertDoesNotExist()
+        // The count still shows, but never as a control that would fail on tap.
+        composeRule.onNodeWithTag(MessageCardTags.PUSH).assertDoesNotExist()
+    }
+
+    @Test
+    fun pushCount_isShownWithoutTheAction_whenTheMessageCannotBePushed() {
+        setFeed(
+            MessagesFeedUiState(
+                messages = listOf(message("1", "popular", mine = true, pushCount = 3)),
+            ),
+        )
+
+        composeRule.onNodeWithTag(MessageCardTags.PUSH).assertHasNoClickAction()
+        composeRule.onNodeWithText("3").assertIsDisplayed()
+    }
+
+    @Test
+    fun quote_asksToComposeAQuoteOfThatMessage() {
+        val quoted = mutableListOf<Message>()
+        setFeed(
+            MessagesFeedUiState(messages = listOf(message("1", "the original post"))),
+            onQuote = { quoted += it },
+        )
+
+        composeRule.onNodeWithTag(MessageCardTags.QUOTE).performClick()
+
+        assertThat(quoted.map { it.id }).containsExactly("1")
+    }
+
+    @Test
+    fun composer_showsTheQuotedMessage_andItsAlwaysPublicBanner() {
+        setFeed(
+            MessagesFeedUiState(
+                isComposeOpen = true,
+                quoteTarget = message("orig", "the original post"),
+            ),
+        )
+
+        composeRule.onNodeWithTag(MessagesFeedTags.COMPOSE_INPUT).assertIsDisplayed()
+        composeRule.onNodeWithTag(MessagesFeedTags.QUOTE_ATTACHED).assertIsDisplayed()
+        composeRule.onNodeWithTag(MessagesFeedTags.QUOTE_PUBLIC_BANNER).assertIsDisplayed()
+        composeRule.onNodeWithText("Pushes and quotes are always public.").assertIsDisplayed()
+    }
+
+    @Test
+    fun composer_doesNotOfferPrivate_forAQuote() {
+        setFeed(
+            MessagesFeedUiState(
+                isComposeOpen = true,
+                composeText = "worth reading",
+                quoteTarget = message("orig", "the original post"),
+                composeVisibility = MessageVisibility.PUBLIC,
+            ),
+        )
+
+        composeRule.onNodeWithTag(MessagesFeedTags.VISIBILITY_PRIVATE).assertDoesNotExist()
+        // Public is shown, selected and locked.
+        composeRule.onNodeWithTag(MessagesFeedTags.VISIBILITY_PUBLIC).assertIsSelected()
+        composeRule.onNodeWithTag(MessagesFeedTags.VISIBILITY_PUBLIC).assertIsNotEnabled()
+    }
+
+    @Test
+    fun composer_stillOffersPrivate_forAnOrdinaryMessage() {
+        setFeed(
+            MessagesFeedUiState(
+                isComposeOpen = true,
+                composeText = "hi",
+                composeVisibility = MessageVisibility.PUBLIC,
+            ),
+        )
+
+        composeRule.onNodeWithTag(MessagesFeedTags.VISIBILITY_PRIVATE).assertHasClickAction()
     }
 }

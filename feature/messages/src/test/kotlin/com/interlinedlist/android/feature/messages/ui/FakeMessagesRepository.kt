@@ -10,6 +10,7 @@ import com.interlinedlist.android.feature.messages.domain.CrossPostStatus
 import com.interlinedlist.android.feature.messages.domain.LinkedNetwork
 import com.interlinedlist.android.feature.messages.domain.Message
 import com.interlinedlist.android.feature.messages.domain.MessageVisibility
+import com.interlinedlist.android.feature.messages.domain.PushedMessage
 import com.interlinedlist.android.feature.messages.domain.ReportReason
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,6 +33,8 @@ class FakeMessagesRepository : MessagesRepository {
     /** The cursor a page-append hands back; null means "end of the feed". */
     var loadMoreResult: ApiResult<String?> = ApiResult.Success(null)
     var createResult: ApiResult<Message>? = null
+    /** What [pushMessage] answers with; falls back to [createResult]'s message. */
+    var pushResult: ApiResult<Message>? = null
     /** Cross-post statuses returned alongside a successful [createResult]. */
     var createCrossPosts: List<CrossPostStatus> = emptyList()
     var linkedNetworksResult: ApiResult<List<LinkedNetwork>> = ApiResult.Success(emptyList())
@@ -71,6 +74,8 @@ class FakeMessagesRepository : MessagesRepository {
     var lastSetDug: Pair<String, Boolean>? = null
     var deletedIds = mutableListOf<String>()
     var lastCreate: CreateArgs? = null
+    /** Every message id handed to [pushMessage], in order. */
+    val pushedMessageIds = mutableListOf<String>()
     var uploadedImages = 0
     var uploadedVideos = 0
     var refreshScheduledCount = 0
@@ -90,6 +95,7 @@ class FakeMessagesRepository : MessagesRepository {
         val scheduledAt: String?,
         val crossPost: CrossPostSelection = CrossPostSelection.NONE,
         val visibility: MessageVisibility = MessageVisibility.PUBLIC,
+        val pushedMessageId: String? = null,
     )
 
     /** Snapshot of the arguments passed to the last [report] call. */
@@ -144,12 +150,24 @@ class FakeMessagesRepository : MessagesRepository {
         scheduledAt: String?,
         crossPost: CrossPostSelection,
         visibility: MessageVisibility,
+        pushedMessageId: String?,
     ): ApiResult<CreatedMessage> {
-        lastCreate = CreateArgs(content, imageUrls, videoUrls, scheduledAt, crossPost, visibility)
+        lastCreate = CreateArgs(
+            content, imageUrls, videoUrls, scheduledAt, crossPost, visibility, pushedMessageId,
+        )
         return when (val result = createResult) {
             is ApiResult.Success -> ApiResult.Success(CreatedMessage(result.data, createCrossPosts))
             is ApiResult.Failure -> result
             null -> ApiResult.Failure(AppError.Unknown("createResult not set"))
+        }
+    }
+
+    override suspend fun pushMessage(messageId: String): ApiResult<CreatedMessage> {
+        pushedMessageIds += messageId
+        return when (val result = pushResult ?: createResult) {
+            is ApiResult.Success -> ApiResult.Success(CreatedMessage(result.data, emptyList()))
+            is ApiResult.Failure -> result
+            null -> ApiResult.Failure(AppError.Unknown("pushResult not set"))
         }
     }
 
@@ -269,6 +287,9 @@ fun sampleMessage(
     authorUsername: String = "adron",
     editedAt: String? = null,
     publiclyVisible: Boolean = true,
+    pushCount: Int = 0,
+    pushedMessageId: String? = null,
+    pushedMessage: PushedMessage? = null,
 ) = Message(
     id = id,
     content = content,
@@ -287,4 +308,22 @@ fun sampleMessage(
     scheduledAt = scheduledAt,
     editedAt = editedAt,
     publiclyVisible = publiclyVisible,
+    pushCount = pushCount,
+    pushedMessageId = pushedMessageId,
+    pushedMessage = pushedMessage,
+)
+
+/** Builds a sample embedded original (the `pushedMessage` on a push/quote). */
+fun samplePushedMessage(
+    id: String = "orig",
+    content: String = "the original post",
+    authorUsername: String = "quinn",
+    authorDisplayName: String? = "Quinn",
+) = PushedMessage(
+    id = id,
+    content = content,
+    authorUsername = authorUsername,
+    authorDisplayName = authorDisplayName,
+    authorAvatarUrl = null,
+    createdAt = null,
 )

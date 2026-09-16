@@ -55,9 +55,15 @@ data class MessagesFeedUiState(
     val scheduledAt: String? = null,
     /**
      * Visibility the in-progress compose will post with: the account's
-     * `defaultPubliclyVisible` preference unless the user overrode it here.
+     * `defaultPubliclyVisible` preference unless the user overrode it here — or
+     * [MessageVisibility.PUSH_OR_QUOTE] when a quote is attached.
      */
     val composeVisibility: MessageVisibility = MessageVisibility.PUBLIC,
+    /**
+     * The message the open composer will quote, if any. Its presence turns the
+     * compose into a quote post: it sends `pushedMessageId` alongside the note.
+     */
+    val quoteTarget: Message? = null,
     /** The caller's already-linked networks, offered as cross-post destinations. */
     val linkedNetworks: List<LinkedNetwork> = emptyList(),
     /** Ids of the linked networks currently selected as cross-post targets. */
@@ -77,6 +83,16 @@ data class MessagesFeedUiState(
     val isModerating: Boolean = false,
 ) {
     val isEmpty: Boolean get() = messages.isEmpty()
+
+    /** True while the composer is writing a quote of [quoteTarget]. */
+    val isQuoting: Boolean get() = quoteTarget != null
+
+    /**
+     * False while quoting: a push/quote is always public, so the composer locks
+     * the visibility control instead of offering Private.
+     */
+    val canChangeVisibility: Boolean get() = !isQuoting
+
     val hasAttachments: Boolean get() = attachments.isNotEmpty()
     val isUploading: Boolean get() = attachments.any { it.isUploading }
     val isScheduled: Boolean get() = scheduledAt != null
@@ -133,6 +149,13 @@ private data class FeedTransientState(
     val defaultVisibility: MessageVisibility = MessageVisibility.PUBLIC,
     /** The user's per-message choice for the open composer; null = use the default. */
     val visibilityOverride: MessageVisibility? = null,
+    /** The message the open composer is quoting, if any. */
+    val quoteTarget: Message? = null,
+    /**
+     * Ids of pushes currently in flight, so a double tap cannot post the same
+     * repost twice. Purely a guard: the count itself comes from the server.
+     */
+    val pushesInFlight: Set<String> = emptySet(),
     val linkedNetworks: List<LinkedNetwork> = emptyList(),
     val selectedNetworkIds: Set<String> = emptySet(),
     val crossPostStatuses: List<CrossPostStatus> = emptyList(),
@@ -144,8 +167,17 @@ private data class FeedTransientState(
     val moderationTarget: ModerationTarget? = null,
     val isModerating: Boolean = false,
 ) {
-    /** A per-message override always wins over the account default. */
-    val composeVisibility: MessageVisibility get() = visibilityOverride ?: defaultVisibility
+    /**
+     * A quote is always public — [MessageVisibility.PUSH_OR_QUOTE] outranks both
+     * the per-message override and the account default. Otherwise an override
+     * wins over the default.
+     */
+    val composeVisibility: MessageVisibility
+        get() = if (quoteTarget != null) {
+            MessageVisibility.PUSH_OR_QUOTE
+        } else {
+            visibilityOverride ?: defaultVisibility
+        }
 
     /** More pages remain exactly while the server handed back a cursor. */
     val canLoadMore: Boolean get() = nextCursor != null
@@ -179,6 +211,7 @@ class MessagesFeedViewModel @Inject constructor(
                 attachments = t.attachments,
                 scheduledAt = t.scheduledAt,
                 composeVisibility = t.composeVisibility,
+                quoteTarget = t.quoteTarget,
                 linkedNetworks = t.linkedNetworks,
                 selectedNetworkIds = t.selectedNetworkIds,
                 crossPostStatuses = t.crossPostStatuses,
@@ -356,6 +389,51 @@ class MessagesFeedViewModel @Inject constructor(
         }
     }
 
+    // --- push / quote ------------------------------------------------------
+
+    /**
+     * Pushes (reposts) [message] straight away: no composer, no comment, always
+     * public. Ignored for a message the rules say cannot be pushed (your own, a
+     * private one, or a re-share) — the card does not offer the action there
+     * either — and while an earlier push of the same message is still in flight.
+     * A server rejection is surfaced verbatim.
+     */
+    fun onPush(message: Message) {
+        if (!message.canBePushed) return
+        if (message.id in transient.value.pushesInFlight) return
+        transient.update {
+            it.copy(pushesInFlight = it.pushesInFlight + message.id, errorMessage = null)
+        }
+        viewModelScope.launch {
+            val result = repository.pushMessage(message.id)
+            transient.update { state ->
+                val cleared = state.copy(pushesInFlight = state.pushesInFlight - message.id)
+                if (result is ApiResult.Failure) cleared.withError(result.error) else cleared
+            }
+        }
+    }
+
+    /**
+     * Opens the normal composer with [message] attached as a quote. The post then
+     * carries both the user's note and `pushedMessageId`, and is always public.
+     */
+    fun openQuote(message: Message) {
+        if (!message.canBePushed) return
+        transient.update {
+            it.copy(
+                isComposeOpen = true,
+                quoteTarget = message,
+                // A quote's visibility is fixed; any earlier override is moot.
+                visibilityOverride = null,
+                // The API rejects scheduledAt together with pushedMessageId, so a
+                // quote is never scheduled — and the composer hides the chip.
+                scheduledAt = null,
+                errorMessage = null,
+                crossPostStatuses = emptyList(),
+            )
+        }
+    }
+
     // --- compose sheet -----------------------------------------------------
 
     fun openCompose() = transient.update {
@@ -370,13 +448,17 @@ class MessagesFeedViewModel @Inject constructor(
             scheduledAt = null,
             // Drop the per-message override; the next compose starts from the default.
             visibilityOverride = null,
+            quoteTarget = null,
             selectedNetworkIds = emptySet(),
         )
     }
 
-    /** Overrides the account default for this message only. */
+    /**
+     * Overrides the account default for this message only. Ignored while quoting:
+     * a push/quote is always public, and the composer offers no other choice.
+     */
     fun onVisibilityChange(visibility: MessageVisibility) = transient.update {
-        it.copy(visibilityOverride = visibility)
+        if (it.quoteTarget != null) it else it.copy(visibilityOverride = visibility)
     }
 
     fun onComposeTextChange(value: String) = transient.update { it.copy(composeText = value) }
@@ -462,6 +544,8 @@ class MessagesFeedViewModel @Inject constructor(
                     scheduledAt = snapshot.scheduledAt,
                     crossPost = crossPost,
                     visibility = snapshot.composeVisibility,
+                    // Present only for a quote; the repository forces it public.
+                    pushedMessageId = snapshot.quoteTarget?.id,
                 )
             ) {
                 is ApiResult.Success -> transient.update {
@@ -472,6 +556,7 @@ class MessagesFeedViewModel @Inject constructor(
                         attachments = emptyList(),
                         scheduledAt = null,
                         visibilityOverride = null,
+                        quoteTarget = null,
                         selectedNetworkIds = emptySet(),
                         crossPostStatuses = result.data.crossPosts,
                     )

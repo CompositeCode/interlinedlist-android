@@ -226,6 +226,8 @@ private fun Content(
                         onMuteUser = { onMuteUser(message) },
                         onReportUser = { onReportUser(message) },
                         onOpenLink = { onFetchMetadata(message) },
+                        // A push/quote here still opens the original it re-shares.
+                        onOpenPushedMessage = onOpenMessage,
                     )
                     HorizontalDivider(thickness = 2.dp, color = MaterialTheme.colorScheme.outlineVariant)
                     Text(
@@ -247,6 +249,7 @@ private fun Content(
                     onMuteUser = { onMuteUser(reply) },
                     onReportUser = { onReportUser(reply) },
                     onOpenLink = { onFetchMetadata(reply) },
+                    onOpenPushedMessage = onOpenMessage,
                 )
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             }

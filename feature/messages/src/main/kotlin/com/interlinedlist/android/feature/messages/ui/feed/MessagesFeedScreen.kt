@@ -3,6 +3,7 @@ package com.interlinedlist.android.feature.messages.ui.feed
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.lazy.LazyColumn
@@ -55,9 +57,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -111,6 +115,10 @@ object MessagesFeedTags {
     const val VISIBILITY_PRIVATE = "messagesComposeVisibilityPrivate"
     const val VISIBILITY_HINT = "messagesComposeVisibilityHint"
 
+    /** The quoted message attached to the composer, and its always-public banner. */
+    const val QUOTE_ATTACHED = "messagesComposeQuoteAttached"
+    const val QUOTE_PUBLIC_BANNER = "messagesComposeQuoteBanner"
+
     fun destinationTag(networkId: String): String = DESTINATION_PREFIX + networkId
 
     fun viewPreferenceTag(preference: ViewingPreference): String =
@@ -141,6 +149,8 @@ fun MessagesRoute(
         onOpenScheduled = onOpenScheduled,
         onDig = viewModel::onDig,
         onDelete = viewModel::onDelete,
+        onPush = viewModel::onPush,
+        onQuote = viewModel::openQuote,
         onReport = viewModel::openReport,
         onEdit = viewModel::openEdit,
         onBlockUser = { viewModel.openModeration(it, ModerationAction.BLOCK) },
@@ -191,6 +201,8 @@ fun MessagesFeedScreen(
     modifier: Modifier = Modifier,
     onViewingPreferenceChange: (ViewingPreference) -> Unit = {},
     onOpenScheduled: () -> Unit = {},
+    onPush: (Message) -> Unit = {},
+    onQuote: (Message) -> Unit = {},
     onReport: (Message) -> Unit = {},
     onEdit: (Message) -> Unit = {},
     onBlockUser: (Message) -> Unit = {},
@@ -252,6 +264,8 @@ fun MessagesFeedScreen(
                     onOpenMessage = onOpenMessage,
                     onDig = onDig,
                     onDelete = onDelete,
+                    onPush = onPush,
+                    onQuote = onQuote,
                     onReport = onReport,
                     onEdit = onEdit,
                     onBlockUser = onBlockUser,
@@ -363,6 +377,8 @@ private fun FeedContent(
     onOpenMessage: (String) -> Unit,
     onDig: (Message) -> Unit,
     onDelete: (Message) -> Unit,
+    onPush: (Message) -> Unit,
+    onQuote: (Message) -> Unit,
     onReport: (Message) -> Unit,
     onEdit: (Message) -> Unit,
     onBlockUser: (Message) -> Unit,
@@ -385,6 +401,8 @@ private fun FeedContent(
                 onOpenMessage = onOpenMessage,
                 onDig = onDig,
                 onDelete = onDelete,
+                onPush = onPush,
+                onQuote = onQuote,
                 onReport = onReport,
                 onEdit = onEdit,
                 onBlockUser = onBlockUser,
@@ -403,6 +421,8 @@ private fun FeedList(
     onOpenMessage: (String) -> Unit,
     onDig: (Message) -> Unit,
     onDelete: (Message) -> Unit,
+    onPush: (Message) -> Unit,
+    onQuote: (Message) -> Unit,
     onReport: (Message) -> Unit,
     onEdit: (Message) -> Unit,
     onBlockUser: (Message) -> Unit,
@@ -438,6 +458,10 @@ private fun FeedList(
                 onMuteUser = { onMuteUser(message) },
                 onReportUser = { onReportUser(message) },
                 onOpenLink = { onFetchMetadata(message) },
+                onPush = { onPush(message) },
+                onQuote = { onQuote(message) },
+                // The embedded original opens on its own page.
+                onOpenPushedMessage = onOpenMessage,
             )
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         }
@@ -540,20 +564,33 @@ private fun ComposeSheet(
                 .padding(horizontal = 20.dp, vertical = 12.dp),
         ) {
             Text(
-                text = if (state.isScheduled) "Schedule message" else "New message",
+                text = when {
+                    state.isQuoting -> "Quote message"
+                    state.isScheduled -> "Schedule message"
+                    else -> "New message"
+                },
                 style = MaterialTheme.typography.titleMedium,
             )
             Spacer(Modifier.height(12.dp))
             OutlinedTextField(
                 value = state.composeText,
                 onValueChange = onTextChange,
-                placeholder = { Text("What's on your mind?") },
+                placeholder = {
+                    Text(if (state.isQuoting) "Add a comment" else "What's on your mind?")
+                },
                 enabled = !state.isPosting,
                 minLines = 3,
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag(MessagesFeedTags.COMPOSE_INPUT),
             )
+
+            state.quoteTarget?.let { quoted ->
+                Spacer(Modifier.height(8.dp))
+                QuotedMessage(quoted)
+                Spacer(Modifier.height(8.dp))
+                AlwaysPublicBanner()
+            }
 
             if (state.hasAttachments) {
                 Spacer(Modifier.height(8.dp))
@@ -576,17 +613,22 @@ private fun ComposeSheet(
                 ) {
                     Icon(Icons.Filled.Videocam, contentDescription = "Attach video")
                 }
-                ScheduleChip(
-                    scheduledAt = state.scheduledAt,
-                    enabled = !state.isPosting,
-                    onSchedule = onScheduleChange,
-                )
+                // Scheduling and pushedMessageId are mutually exclusive on the
+                // create endpoint, so a quote is not offered a send time.
+                if (!state.isQuoting) {
+                    ScheduleChip(
+                        scheduledAt = state.scheduledAt,
+                        enabled = !state.isPosting,
+                        onSchedule = onScheduleChange,
+                    )
+                }
             }
 
             Spacer(Modifier.height(12.dp))
             VisibilityRow(
                 visibility = state.composeVisibility,
                 enabled = !state.isPosting,
+                canChangeVisibility = state.canChangeVisibility,
                 onVisibilityChange = onVisibilityChange,
             )
 
@@ -667,12 +709,17 @@ private fun AttachmentRow(
  * explicitly so the server default never silently decides. A short hint spells out
  * what "Private" means, since the consequence (nobody else sees the post) is not
  * recoverable from the chip alone.
+ *
+ * A push/quote is always public ([MessageVisibility.PUSH_OR_QUOTE]), so when
+ * [canChangeVisibility] is false the Private chip is not offered at all and
+ * Public is shown locked — the banner above the control explains why.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun VisibilityRow(
     visibility: MessageVisibility,
     enabled: Boolean,
+    canChangeVisibility: Boolean,
     onVisibilityChange: (MessageVisibility) -> Unit,
 ) {
     Column {
@@ -686,23 +733,25 @@ private fun VisibilityRow(
             FilterChip(
                 selected = visibility == MessageVisibility.PUBLIC,
                 onClick = { onVisibilityChange(MessageVisibility.PUBLIC) },
-                enabled = enabled,
+                enabled = enabled && canChangeVisibility,
                 label = { Text("Public") },
                 leadingIcon = {
                     Icon(Icons.Filled.Public, contentDescription = null, modifier = Modifier.size(16.dp))
                 },
                 modifier = Modifier.testTag(MessagesFeedTags.VISIBILITY_PUBLIC),
             )
-            FilterChip(
-                selected = visibility == MessageVisibility.PRIVATE,
-                onClick = { onVisibilityChange(MessageVisibility.PRIVATE) },
-                enabled = enabled,
-                label = { Text("Private") },
-                leadingIcon = {
-                    Icon(Icons.Filled.Lock, contentDescription = null, modifier = Modifier.size(16.dp))
-                },
-                modifier = Modifier.testTag(MessagesFeedTags.VISIBILITY_PRIVATE),
-            )
+            if (canChangeVisibility) {
+                FilterChip(
+                    selected = visibility == MessageVisibility.PRIVATE,
+                    onClick = { onVisibilityChange(MessageVisibility.PRIVATE) },
+                    enabled = enabled,
+                    label = { Text("Private") },
+                    leadingIcon = {
+                        Icon(Icons.Filled.Lock, contentDescription = null, modifier = Modifier.size(16.dp))
+                    },
+                    modifier = Modifier.testTag(MessagesFeedTags.VISIBILITY_PRIVATE),
+                )
+            }
         }
         if (visibility == MessageVisibility.PRIVATE) {
             Spacer(Modifier.height(4.dp))
@@ -711,6 +760,70 @@ private fun VisibilityRow(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.testTag(MessagesFeedTags.VISIBILITY_HINT),
+            )
+        }
+    }
+}
+
+/**
+ * The message this compose will quote, shown inset so the user can see exactly
+ * what they are re-sharing before they send it.
+ */
+@Composable
+private fun QuotedMessage(quoted: Message) {
+    val shape = MaterialTheme.shapes.medium
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape)
+            .padding(12.dp)
+            .testTag(MessagesFeedTags.QUOTE_ATTACHED),
+    ) {
+        Text(
+            text = quoted.authorLabel,
+            style = MaterialTheme.typography.labelLarge,
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = quoted.content,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/**
+ * The banner that confirms, before sending, that a quote is public — matching the
+ * web. It states the rule the app enforces via [MessageVisibility.PUSH_OR_QUOTE],
+ * so the user is never surprised by where their post ends up.
+ */
+@Composable
+private fun AlwaysPublicBanner() {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(MessagesFeedTags.QUOTE_PUBLIC_BANNER),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+        ) {
+            Icon(
+                Icons.Filled.Public,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = "Pushes and quotes are always public.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }

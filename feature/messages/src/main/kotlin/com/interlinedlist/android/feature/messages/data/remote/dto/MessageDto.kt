@@ -2,6 +2,7 @@ package com.interlinedlist.android.feature.messages.data.remote.dto
 
 import com.interlinedlist.android.feature.messages.domain.LinkPreview
 import com.interlinedlist.android.feature.messages.domain.Message
+import com.interlinedlist.android.feature.messages.domain.PushedMessage
 import kotlinx.serialization.Serializable
 
 /**
@@ -38,6 +39,15 @@ data class MessageDto(
     val scheduledAt: String? = null,
     /** False when the message is private (visible only to its author). */
     val publiclyVisible: Boolean = true,
+    /** How many times this message has been pushed (reposted). */
+    val pushCount: Int = 0,
+    /** Id of the message this one re-shares (push or quote); null otherwise. */
+    val pushedMessageId: String? = null,
+    /**
+     * The re-shared original, embedded by the server. Null when this message is
+     * not a push/quote — so the feed renders the original without a second fetch.
+     */
+    val pushedMessage: PushedMessageDto? = null,
 )
 
 /** Author identity embedded in a message. */
@@ -47,6 +57,22 @@ data class MessageAuthorDto(
     val username: String = "",
     val displayName: String? = null,
     val avatar: String? = null,
+)
+
+/**
+ * The original message nested under `pushedMessage` on a push or a quote.
+ *
+ * Only the fields the inset "original" card renders are modelled: the server
+ * sends a full message object here, and `ignoreUnknownKeys` drops the rest. Like
+ * the outer message, the author arrives as either `user` or `author`.
+ */
+@Serializable
+data class PushedMessageDto(
+    val id: String = "",
+    val content: String = "",
+    val user: MessageAuthorDto? = null,
+    val author: MessageAuthorDto? = null,
+    val createdAt: String? = null,
 )
 
 /**
@@ -90,6 +116,26 @@ fun MessageDto.toDomain(currentUserId: String?): Message {
         linkPreview = linkMetadata?.toDomain(),
         scheduledAt = scheduledAt,
         publiclyVisible = publiclyVisible,
+        pushCount = pushCount,
+        // The embedded original is authoritative for the id when the flat field
+        // is absent: either one makes this a push/quote.
+        pushedMessageId = pushedMessageId?.takeIf { it.isNotBlank() }
+            ?: pushedMessage?.id?.takeIf { it.isNotBlank() },
+        pushedMessage = pushedMessage?.toDomainOrNull(),
+    )
+}
+
+/** Maps the embedded original, dropping an entry the server sent without an id. */
+fun PushedMessageDto.toDomainOrNull(): PushedMessage? {
+    val originalId = id.takeIf { it.isNotBlank() } ?: return null
+    val person = author ?: user
+    return PushedMessage(
+        id = originalId,
+        content = content,
+        authorUsername = person?.username.orEmpty(),
+        authorDisplayName = person?.displayName,
+        authorAvatarUrl = person?.avatar,
+        createdAt = createdAt,
     )
 }
 

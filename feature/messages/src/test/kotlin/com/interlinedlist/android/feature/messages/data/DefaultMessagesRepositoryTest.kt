@@ -765,4 +765,139 @@ class DefaultMessagesRepositoryTest {
         assertThat(private.showsPrivateBadge).isTrue()
         assertThat(cached.first { it.id == "2" }.showsPrivateBadge).isFalse()
     }
+
+    // --- push / quote (pushedMessageId) ------------------------------------
+
+    @Test
+    fun `pushMessage sends pushedMessageId and no content at all`() = runTest(dispatcher) {
+        enqueueJson(
+            201,
+            """{ "message": "Message created successfully",
+                "data": { "id": "push1", "content": "", "pushedMessageId": "orig" } }""",
+        )
+        val repo = repository()
+
+        val result = repo.pushMessage("orig")
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        val body = server.takeRequest().body.readUtf8()
+        assertThat(body).contains("\"pushedMessageId\":\"orig\"")
+        // "Required unless pushing with no comment" - so the field is omitted.
+        assertThat(body).doesNotContain("content")
+    }
+
+    @Test
+    fun `a quote sends both the note and pushedMessageId`() = runTest(dispatcher) {
+        enqueueJson(
+            201,
+            """{ "message": "Message created successfully",
+                "data": { "id": "quote1", "content": "worth reading",
+                          "pushedMessageId": "orig" } }""",
+        )
+        val repo = repository()
+
+        val result = repo.createMessage(content = "worth reading", pushedMessageId = "orig")
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        val body = server.takeRequest().body.readUtf8()
+        assertThat(body).contains("\"content\":\"worth reading\"")
+        assertThat(body).contains("\"pushedMessageId\":\"orig\"")
+    }
+
+    @Test
+    fun `a push is public even when the caller asks for private`() = runTest(dispatcher) {
+        enqueueJson(
+            201,
+            """{ "message": "Message created successfully",
+                "data": { "id": "push2", "content": "", "publiclyVisible": true } }""",
+        )
+        val repo = repository()
+
+        repo.createMessage(
+            content = "",
+            visibility = MessageVisibility.PRIVATE,
+            pushedMessageId = "orig",
+        )
+
+        // MessageVisibility.PUSH_OR_QUOTE overrides the caller's selection.
+        val body = server.takeRequest().body.readUtf8()
+        assertThat(body).contains("\"publiclyVisible\":true")
+    }
+
+    @Test
+    fun `refreshFeed caches a push with the embedded original from the payload`() =
+        runTest(dispatcher) {
+            enqueueJson(
+                200,
+                """
+                {
+                  "messages": [
+                    { "id": "p1", "content": "", "pushCount": 2, "pushedMessageId": "orig",
+                      "user": { "id": "u2", "username": "pusher" },
+                      "pushedMessage": { "id": "orig", "content": "the original post",
+                        "user": { "id": "u9", "username": "quinn", "displayName": "Quinn" } } },
+                    { "id": "q1", "content": "worth reading", "pushedMessageId": "orig",
+                      "pushedMessage": { "id": "orig", "content": "the original post",
+                        "user": { "id": "u9", "username": "quinn" } } }
+                  ],
+                  "pagination": { "hasMore": false }
+                }
+                """.trimIndent(),
+            )
+            val repo = repository()
+
+            repo.refreshFeed()
+
+            val cached = repo.observeFeed().first()
+            val push = cached.first { it.id == "p1" }
+            assertThat(push.isPush).isTrue()
+            assertThat(push.pushCount).isEqualTo(2)
+            assertThat(push.pushedMessage?.content).isEqualTo("the original post")
+            assertThat(push.pushedMessage?.authorLabel).isEqualTo("Quinn")
+            val quote = cached.first { it.id == "q1" }
+            assertThat(quote.isQuote).isTrue()
+            assertThat(quote.pushedMessage?.content).isEqualTo("the original post")
+        }
+
+    @Test
+    fun `a new push renders the original even though the create response omits it`() =
+        runTest(dispatcher) {
+            enqueueJson(
+                200,
+                """{ "data": [ { "id": "orig", "content": "the original post",
+                    "author": { "id": "u9", "username": "quinn", "displayName": "Quinn" } } ],
+                    "pagination": { "hasMore": false } }""",
+            )
+            // The create endpoint echoes back only the new message.
+            enqueueJson(
+                201,
+                """{ "message": "Message created successfully",
+                    "data": { "id": "push3", "content": "" } }""",
+            )
+            val repo = repository()
+            repo.refreshFeed()
+
+            val result = repo.pushMessage("orig")
+
+            val created = (result as ApiResult.Success).data.message
+            assertThat(created.isPush).isTrue()
+            assertThat(created.pushedMessageId).isEqualTo("orig")
+            assertThat(created.pushedMessage?.content).isEqualTo("the original post")
+            // And the feed row it cached carries the original too.
+            val cached = repo.observeMessage("push3").first()
+            assertThat(cached?.pushedMessage?.authorLabel).isEqualTo("Quinn")
+        }
+
+    @Test
+    fun `a rejected push carries the server's own message`() = runTest(dispatcher) {
+        enqueueJson(403, """{ "error": "You cannot push your own message", "code": "forbidden" }""")
+        val repo = repository()
+
+        val result = repo.pushMessage("mine")
+
+        assertThat(result).isInstanceOf(ApiResult.Failure::class.java)
+        val error = (result as ApiResult.Failure).error
+        assertThat(error).isInstanceOf(AppError.Forbidden::class.java)
+        assertThat(error.message).isEqualTo("You cannot push your own message")
+    }
 }

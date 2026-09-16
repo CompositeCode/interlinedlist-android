@@ -2,6 +2,7 @@ package com.interlinedlist.android.feature.messages.data.local
 
 import androidx.room.TypeConverter
 import com.interlinedlist.android.feature.messages.domain.LinkPreview
+import com.interlinedlist.android.feature.messages.domain.PushedMessage
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.serializer
@@ -35,6 +36,17 @@ class MessageConverters {
             json.decodeFromString(LinkPreviewSurrogate.serializer(), value).toDomain()
         }.getOrNull()
 
+    @TypeConverter
+    fun pushedMessageToJson(value: PushedMessage?): String? =
+        value?.let { json.encodeToString(PushedMessageSurrogate.serializer(), it.toSurrogate()) }
+
+    @TypeConverter
+    fun jsonToPushedMessage(value: String?): PushedMessage? =
+        if (value.isNullOrBlank()) null
+        else runCatching {
+            json.decodeFromString(PushedMessageSurrogate.serializer(), value).toDomain()
+        }.getOrNull()
+
     private companion object {
         val json = Json { ignoreUnknownKeys = true }
     }
@@ -55,3 +67,22 @@ private data class LinkPreviewSurrogate(
 
 private fun LinkPreview.toSurrogate() = LinkPreviewSurrogate(url, title, description, imageUrl, siteName)
 private fun LinkPreviewSurrogate.toDomain() = LinkPreview(url, title, description, imageUrl, siteName)
+
+/** Serializable mirror of the domain [PushedMessage], for the same reason. */
+@Serializable
+private data class PushedMessageSurrogate(
+    val id: String,
+    val content: String = "",
+    val authorUsername: String = "",
+    val authorDisplayName: String? = null,
+    val authorAvatarUrl: String? = null,
+    val createdAt: String? = null,
+)
+
+private fun PushedMessage.toSurrogate() = PushedMessageSurrogate(
+    id, content, authorUsername, authorDisplayName, authorAvatarUrl, createdAt,
+)
+
+private fun PushedMessageSurrogate.toDomain() = PushedMessage(
+    id, content, authorUsername, authorDisplayName, authorAvatarUrl, createdAt,
+)

@@ -4,6 +4,7 @@ import androidx.room.Entity
 import androidx.room.PrimaryKey
 import com.interlinedlist.android.feature.messages.domain.LinkPreview
 import com.interlinedlist.android.feature.messages.domain.Message
+import com.interlinedlist.android.feature.messages.domain.PushedMessage
 
 /**
  * Locally cached message row — this module's own offline-first source of truth
@@ -38,6 +39,15 @@ data class MessageEntity(
     val editedAt: String? = null,
     /** False when the message is private (visible only to its author). */
     val publiclyVisible: Boolean = true,
+    /** How many times this message has been pushed (reposted). */
+    val pushCount: Int = 0,
+    /** Id of the message this one re-shares (push or quote); null otherwise. */
+    val pushedMessageId: String? = null,
+    /**
+     * The re-shared original, stored as JSON via [MessageConverters] so the feed
+     * renders a cached push/quote offline, exactly as it came from the server.
+     */
+    val pushedMessage: PushedMessage? = null,
 )
 
 fun MessageEntity.toDomain(): Message = Message(
@@ -59,6 +69,9 @@ fun MessageEntity.toDomain(): Message = Message(
     scheduledAt = scheduledAt,
     editedAt = editedAt,
     publiclyVisible = publiclyVisible,
+    pushCount = pushCount,
+    pushedMessageId = pushedMessageId,
+    pushedMessage = pushedMessage,
 )
 
 fun Message.toEntity(feedOrder: Long): MessageEntity = MessageEntity(
@@ -81,4 +94,7 @@ fun Message.toEntity(feedOrder: Long): MessageEntity = MessageEntity(
     scheduledAt = scheduledAt,
     editedAt = editedAt,
     publiclyVisible = publiclyVisible,
+    pushCount = pushCount,
+    pushedMessageId = pushedMessageId,
+    pushedMessage = pushedMessage,
 )

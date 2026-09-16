@@ -180,4 +180,88 @@ class MessageDtoMapperTest {
 
         assertThat(message.publiclyVisible).isTrue()
     }
+
+    // --- push / quote ------------------------------------------------------
+
+    @Test
+    fun `maps a push with its embedded original`() {
+        val message = MessageDto(
+            id = "p1",
+            content = "",
+            user = MessageAuthorDto(id = "u2", username = "pusher"),
+            pushCount = 0,
+            pushedMessageId = "orig",
+            pushedMessage = PushedMessageDto(
+                id = "orig",
+                content = "the original post",
+                user = MessageAuthorDto(id = "u9", username = "quinn", displayName = "Quinn"),
+                createdAt = "2026-07-18T09:00:00Z",
+            ),
+        ).toDomain(currentUserId = null)
+
+        assertThat(message.isPush).isTrue()
+        assertThat(message.pushedMessageId).isEqualTo("orig")
+        assertThat(message.pushedMessage?.content).isEqualTo("the original post")
+        assertThat(message.pushedMessage?.authorLabel).isEqualTo("Quinn")
+        assertThat(message.pushedMessage?.createdAt).isEqualTo("2026-07-18T09:00:00Z")
+    }
+
+    @Test
+    fun `maps a quote with both the note and the embedded original`() {
+        val message = MessageDto(
+            id = "q1",
+            content = "worth reading",
+            pushedMessageId = "orig",
+            pushedMessage = PushedMessageDto(
+                id = "orig",
+                content = "the original post",
+                author = MessageAuthorDto(id = "u9", username = "quinn"),
+            ),
+        ).toDomain(currentUserId = null)
+
+        assertThat(message.isQuote).isTrue()
+        assertThat(message.content).isEqualTo("worth reading")
+        // The embedded original keys its author as `author` here, `user` above.
+        assertThat(message.pushedMessage?.authorUsername).isEqualTo("quinn")
+    }
+
+    @Test
+    fun `maps the push count`() {
+        val message = MessageDto(id = "m13", content = "popular", pushCount = 7)
+            .toDomain(currentUserId = null)
+
+        assertThat(message.pushCount).isEqualTo(7)
+    }
+
+    @Test
+    fun `an ordinary message carries no pushed original`() {
+        val message = MessageDto(id = "m14", content = "plain").toDomain(currentUserId = null)
+
+        assertThat(message.isReshare).isFalse()
+        assertThat(message.pushedMessage).isNull()
+        assertThat(message.pushedMessageId).isNull()
+    }
+
+    @Test
+    fun `takes the pushed id from the embedded original when the flat field is missing`() {
+        val message = MessageDto(
+            id = "p2",
+            content = "",
+            pushedMessage = PushedMessageDto(id = "orig", content = "x"),
+        ).toDomain(currentUserId = null)
+
+        assertThat(message.pushedMessageId).isEqualTo("orig")
+    }
+
+    @Test
+    fun `drops an embedded original the server sent without an id`() {
+        val message = MessageDto(
+            id = "p3",
+            content = "hm",
+            pushedMessage = PushedMessageDto(content = "no id"),
+        ).toDomain(currentUserId = null)
+
+        assertThat(message.pushedMessage).isNull()
+        assertThat(message.isReshare).isFalse()
+    }
 }

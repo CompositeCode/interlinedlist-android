@@ -81,9 +81,12 @@ interface MessagesRepository {
      *
      * [visibility] is always sent explicitly so the server default never silently
      * decides; callers seed it from [getDefaultVisibility] and let the user
-     * override it per message. A push/quote post must instead pass
-     * [MessageVisibility.PUSH_OR_QUOTE] — amplifying someone else's message is
-     * always public.
+     * override it per message.
+     *
+     * [pushedMessageId] re-shares another message: with [content] this is a
+     * **quote**, and [pushMessage] is the no-comment **push**. Amplifying someone
+     * else's message is always public, so a non-null [pushedMessageId] overrides
+     * [visibility] with [MessageVisibility.PUSH_OR_QUOTE].
      */
     suspend fun createMessage(
         content: String,
@@ -92,7 +95,18 @@ interface MessagesRepository {
         scheduledAt: String? = null,
         crossPost: CrossPostSelection = CrossPostSelection.NONE,
         visibility: MessageVisibility = MessageVisibility.PUBLIC,
+        pushedMessageId: String? = null,
     ): ApiResult<CreatedMessage>
+
+    /**
+     * Pushes (reposts) [messageId] as-is: posts `pushedMessageId` with **no**
+     * content, always publicly. A quote — the same repost with the user's own
+     * note — goes through [createMessage] with a `pushedMessageId` instead.
+     *
+     * Callers must only offer this for a message whose [Message.canBePushed] is
+     * true; the server rejects the rest and the failure is surfaced verbatim.
+     */
+    suspend fun pushMessage(messageId: String): ApiResult<CreatedMessage>
 
     /**
      * The account's default post visibility, read from `defaultPubliclyVisible`
