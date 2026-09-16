@@ -1,5 +1,6 @@
 package com.interlinedlist.android.feature.auth.data
 
+import com.interlinedlist.android.core.common.device.DeviceLabelProvider
 import com.interlinedlist.android.core.common.dispatcher.DispatcherProvider
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.database.dao.UserDao
@@ -29,6 +30,12 @@ class DefaultAuthRepository @Inject constructor(
     private val userDao: UserDao,
     private val json: Json,
     private val dispatchers: DispatcherProvider,
+    /**
+     * The one name this phone reports for itself. Shared with the companion-app device
+     * registry (`:core:appsettings`) so the same device reads identically in
+     * Settings → Sessions and Settings → Applications.
+     */
+    private val deviceLabels: DeviceLabelProvider,
     /**
      * Steps contributed by other feature modules that must run while the session is
      * still valid (e.g. unregistering this device's push token). Dagger supplies an
@@ -125,7 +132,7 @@ class DefaultAuthRepository @Inject constructor(
                 SyncTokenRequest(
                     email,
                     password,
-                    deviceLabel = "InterlinedList Android · ${android.os.Build.MODEL}",
+                    deviceLabel = deviceLabels.deviceLabel,
                 ),
             )
         }

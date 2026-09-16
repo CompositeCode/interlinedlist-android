@@ -3,6 +3,7 @@ package com.interlinedlist.android.feature.auth.data
 import com.google.common.truth.Truth.assertThat
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
+import com.interlinedlist.android.core.common.device.DeviceLabelProvider
 import com.interlinedlist.android.core.common.session.SessionTeardownTask
 import com.interlinedlist.android.core.datastore.SessionStore
 import com.interlinedlist.android.core.network.api.InterlinedListApi
@@ -56,6 +57,7 @@ class DefaultAuthRepositoryTest {
 
     private fun repository(
         teardownTasks: Set<SessionTeardownTask> = emptySet(),
+        deviceLabels: DeviceLabelProvider = FixedDeviceLabelProvider(),
     ) = DefaultAuthRepository(
         api = api,
         authApi = authApi,
@@ -63,6 +65,7 @@ class DefaultAuthRepositoryTest {
         userDao = dao,
         json = json,
         dispatchers = TestDispatcherProvider(dispatcher),
+        deviceLabels = deviceLabels,
         sessionTeardownTasks = teardownTasks,
     )
 
@@ -131,6 +134,23 @@ class DefaultAuthRepositoryTest {
         assertThat(result).isInstanceOf(ApiResult.Failure::class.java)
         assertThat((result as ApiResult.Failure).error.message).isEqualTo("Password is too weak")
         assertThat(session.isLoggedIn).isFalse()
+    }
+
+    // ---- device label ------------------------------------------------------
+
+    @Test
+    fun `sign-in reports the shared device label on sync-token`() = runTest(dispatcher) {
+        enqueue(200, """{ "token": "il_tok_abc" }""")
+        enqueue(200, """{ "user": { "id": "u1", "username": "me" } }""")
+
+        repository(deviceLabels = FixedDeviceLabelProvider("InterlinedList Android · Pixel 8"))
+            .login("me@example.com", "s3cret!!")
+
+        // One label, produced once (DeviceLabelProvider) and reused by the
+        // companion-app device registry, so Settings → Sessions and Settings →
+        // Applications name the same phone identically.
+        val body = server.takeRequest().body.readUtf8()
+        assertThat(body).contains("\"deviceLabel\":\"InterlinedList Android · Pixel 8\"")
     }
 
     // ---- forgot password ---------------------------------------------------
@@ -315,6 +335,15 @@ class DefaultAuthRepositoryTest {
         assertThat((result as ApiResult.Failure).error.message).isEqualTo("Undo link has expired")
     }
 }
+
+/**
+ * The device label `sync-token` reports. In production this is the app-wide
+ * [DeviceLabelProvider] implementation, shared with the companion-app device registry
+ * so one phone reads identically in Settings → Sessions and Settings → Applications.
+ */
+private class FixedDeviceLabelProvider(
+    override val deviceLabel: String = "InterlinedList Android · Pixel 8",
+) : DeviceLabelProvider
 
 /** Records that teardown ran, and what the session looked like at that moment. */
 private class RecordingTeardown(private val session: SessionStore) : SessionTeardownTask {

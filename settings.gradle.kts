@@ -36,6 +36,11 @@ include(":core:datastore")
 // invoked from :feature:messages, :feature:lists and :feature:documents, so it
 // cannot live inside any one of them.
 include(":core:materialize")
+// Shared cross-feature capability: the companion-app device registry + settings store
+// (`/api/user/app-settings/...`). It owns this install's device identity, which both
+// `:feature:auth` (the sign-in device label) and, later, the Applications screen need,
+// so it cannot live inside a single feature module.
+include(":core:appsettings")
 
 // Feature modules (added per roadmap phase)
 include(":feature:auth")
