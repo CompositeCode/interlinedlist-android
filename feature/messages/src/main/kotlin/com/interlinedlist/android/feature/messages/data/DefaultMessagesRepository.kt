@@ -3,6 +3,7 @@ package com.interlinedlist.android.feature.messages.data
 import com.interlinedlist.android.core.common.dispatcher.DispatcherProvider
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.datastore.SessionStore
+import com.interlinedlist.android.core.model.ViewingPreference
 import com.interlinedlist.android.feature.messages.data.local.MessageDao
 import com.interlinedlist.android.feature.messages.data.local.toDomain
 import com.interlinedlist.android.feature.messages.data.local.toEntity
@@ -16,6 +17,7 @@ import com.interlinedlist.android.feature.messages.data.remote.dto.toDomain
 import com.interlinedlist.android.core.network.api.InterlinedListApi
 import com.interlinedlist.android.core.network.dto.toDomain
 import com.interlinedlist.android.core.network.error.safeApiCall
+import com.interlinedlist.android.core.network.preferences.ViewingPreferenceStore
 import com.interlinedlist.android.feature.messages.domain.CreatedMessage
 import com.interlinedlist.android.feature.messages.domain.CrossPostSelection
 import com.interlinedlist.android.feature.messages.domain.LinkedNetwork
@@ -36,6 +38,8 @@ class DefaultMessagesRepository @Inject constructor(
     private val api: MessagesApi,
     /** The shared current-user endpoint; supplies the default-visibility preference. */
     private val userApi: InterlinedListApi,
+    /** The shared accessor for the account's feed view preference. */
+    private val viewingPreferenceStore: ViewingPreferenceStore,
     private val messageDao: MessageDao,
     private val sessionStore: SessionStore,
     private val json: Json,
@@ -58,20 +62,23 @@ class DefaultMessagesRepository @Inject constructor(
      * Loads the head of the feed (no cursor) and replaces the cached feed with it,
      * restarting keyset pagination. Returns the next page's opaque cursor.
      */
-    override suspend fun refreshFeed(): ApiResult<String?> = withContext(dispatchers.io) {
-        when (val result = safeCall { api.getMessages(limit = PaginationDto.DEFAULT_LIMIT) }) {
-            is ApiResult.Success -> {
-                val page = result.data
-                val entities = page.rows.mapIndexed { index, dto ->
-                    dto.toDomain(currentUserId()).toEntity(feedOrder = index.toLong())
+    override suspend fun refreshFeed(preference: ViewingPreference): ApiResult<String?> =
+        withContext(dispatchers.io) {
+            when (val result = safeCall {
+                api.getMessages(limit = PaginationDto.DEFAULT_LIMIT, onlyMine = preference.onlyMine)
+            }) {
+                is ApiResult.Success -> {
+                    val page = result.data
+                    val entities = page.rows.mapIndexed { index, dto ->
+                        dto.toDomain(currentUserId()).toEntity(feedOrder = index.toLong())
+                    }
+                    messageDao.clearFeed()
+                    messageDao.insertAll(entities)
+                    ApiResult.Success(page.nextCursor)
                 }
-                messageDao.clearFeed()
-                messageDao.insertAll(entities)
-                ApiResult.Success(page.nextCursor)
+                is ApiResult.Failure -> result
             }
-            is ApiResult.Failure -> result
         }
-    }
 
     /**
      * Appends the page following [cursor] to the tail of the cached feed. The
@@ -79,9 +86,16 @@ class DefaultMessagesRepository @Inject constructor(
      * keyed by id, so a row the server happens to repeat updates in place rather
      * than duplicating.
      */
-    override suspend fun loadMoreFeed(cursor: String): ApiResult<String?> = withContext(dispatchers.io) {
+    override suspend fun loadMoreFeed(
+        cursor: String,
+        preference: ViewingPreference,
+    ): ApiResult<String?> = withContext(dispatchers.io) {
         when (val result = safeCall {
-            api.getMessages(limit = PaginationDto.DEFAULT_LIMIT, cursor = cursor)
+            api.getMessages(
+                limit = PaginationDto.DEFAULT_LIMIT,
+                cursor = cursor,
+                onlyMine = preference.onlyMine,
+            )
         }) {
             is ApiResult.Success -> {
                 val page = result.data
@@ -144,6 +158,14 @@ class DefaultMessagesRepository @Inject constructor(
                 is ApiResult.Failure -> result
             }
         }
+
+    override suspend fun getViewingPreference(): ApiResult<ViewingPreference> =
+        withContext(dispatchers.io) { viewingPreferenceStore.read() }
+
+    override suspend fun setViewingPreference(
+        preference: ViewingPreference,
+    ): ApiResult<ViewingPreference> =
+        withContext(dispatchers.io) { viewingPreferenceStore.write(preference) }
 
     override suspend fun getLinkedNetworks(): ApiResult<List<LinkedNetwork>> = withContext(dispatchers.io) {
         when (val result = safeCall { api.getIdentities() }) {
@@ -390,6 +412,14 @@ class DefaultMessagesRepository @Inject constructor(
     }
 
     // --- helpers -----------------------------------------------------------
+
+    /**
+     * `onlyMine=true` is the feed's only request-level scoping mechanism, and it
+     * only applies to My Messages. For every other view the parameter is omitted
+     * and the server scopes the feed from the saved `viewingPreference`.
+     */
+    private val ViewingPreference.onlyMine: Boolean?
+        get() = true.takeIf { this == ViewingPreference.MINE }
 
     private suspend fun <T> safeCall(block: suspend () -> T): ApiResult<T> =
         safeApiCall(json, block)

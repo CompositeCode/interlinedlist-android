@@ -4,6 +4,7 @@ import app.cash.turbine.test
 import com.google.common.truth.Truth.assertThat
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
+import com.interlinedlist.android.core.model.ViewingPreference
 import com.interlinedlist.android.feature.messages.domain.CrossPostStatus
 import com.interlinedlist.android.feature.messages.domain.MessageVisibility
 import com.interlinedlist.android.feature.messages.domain.ReportReason
@@ -736,5 +737,143 @@ class MessagesFeedViewModelTest {
 
         assertThat(repo.lastCreate?.visibility).isEqualTo(MessageVisibility.PRIVATE)
         assertThat(vm.uiState.value.composeVisibility).isEqualTo(MessageVisibility.PUBLIC)
+    }
+
+    // --- view preferences (All / My / Following / Followers) ----------------
+
+    @Test
+    fun `the feed opens on the account's saved viewing preference`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            viewingPreferenceResult = ApiResult.Success(ViewingPreference.FOLLOWING)
+        }
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.viewingPreference).isEqualTo(ViewingPreference.FOLLOWING)
+        // The very first feed request already carries the saved preference: the feed
+        // never briefly shows All Messages before correcting itself.
+        assertThat(repo.refreshPreferences).containsExactly(ViewingPreference.FOLLOWING)
+    }
+
+    @Test
+    fun `an unreadable account preference leaves the feed on All Messages`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            viewingPreferenceResult = ApiResult.Failure(AppError.Network("offline"))
+        }
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.viewingPreference).isEqualTo(ViewingPreference.ALL)
+        assertThat(repo.refreshPreferences).containsExactly(ViewingPreference.ALL)
+    }
+
+    @Test
+    fun `switching saves the preference to the account and refreshes the feed`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository()
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.onViewingPreferenceChange(ViewingPreference.FOLLOWERS)
+        advanceUntilIdle()
+
+        // Persisted, so the web and Android agree on the next load.
+        assertThat(repo.savedViewingPreferences).containsExactly(ViewingPreference.FOLLOWERS)
+        assertThat(vm.uiState.value.viewingPreference).isEqualTo(ViewingPreference.FOLLOWERS)
+        // And the feed reloaded under the new preference.
+        assertThat(repo.refreshCount).isEqualTo(2)
+        assertThat(repo.refreshPreferences.last()).isEqualTo(ViewingPreference.FOLLOWERS)
+    }
+
+    @Test
+    fun `switching restarts paging from the top`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply { refreshResult = ApiResult.Success("cursor-all") }
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        // The refresh triggered by the switch returns a different head-of-feed cursor.
+        repo.refreshResult = ApiResult.Success("cursor-mine")
+        vm.onViewingPreferenceChange(ViewingPreference.MINE)
+        advanceUntilIdle()
+        vm.loadMore()
+        advanceUntilIdle()
+
+        // The stale cursor from the previous preference was discarded, not reused.
+        assertThat(repo.loadMoreCursors).containsExactly("cursor-mine")
+        assertThat(repo.loadMorePreferences).containsExactly(ViewingPreference.MINE)
+    }
+
+    @Test
+    fun `a failed save rolls the selection back and reports the error`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            viewingPreferenceResult = ApiResult.Success(ViewingPreference.ALL)
+            setViewingPreferenceResult = ApiResult.Failure(AppError.Network("offline"))
+        }
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.onViewingPreferenceChange(ViewingPreference.FOLLOWING)
+        advanceUntilIdle()
+
+        assertThat(repo.savedViewingPreferences).containsExactly(ViewingPreference.FOLLOWING)
+        // Never leave a selection showing that the account did not actually save.
+        assertThat(vm.uiState.value.viewingPreference).isEqualTo(ViewingPreference.ALL)
+        assertThat(vm.uiState.value.errorMessage)
+            .isEqualTo("No connection. Check your network and try again.")
+        // And no feed reload under a preference the server rejected.
+        assertThat(repo.refreshCount).isEqualTo(1)
+        assertThat(vm.uiState.value.isChangingViewingPreference).isFalse()
+    }
+
+    @Test
+    fun `the server's own normalised value wins over the tapped one`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            setViewingPreferenceResult = ApiResult.Success(ViewingPreference.ALL)
+        }
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.onViewingPreferenceChange(ViewingPreference.FOLLOWING)
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.viewingPreference).isEqualTo(ViewingPreference.ALL)
+        assertThat(repo.refreshPreferences.last()).isEqualTo(ViewingPreference.ALL)
+    }
+
+    @Test
+    fun `re-tapping the current preference does nothing`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            viewingPreferenceResult = ApiResult.Success(ViewingPreference.MINE)
+        }
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.onViewingPreferenceChange(ViewingPreference.MINE)
+        advanceUntilIdle()
+
+        assertThat(repo.savedViewingPreferences).isEmpty()
+        assertThat(repo.refreshCount).isEqualTo(1)
+    }
+
+    @Test
+    fun `manual refresh keeps the selected preference`() = runTest(dispatcher) {
+        val repo = FakeMessagesRepository().apply {
+            viewingPreferenceResult = ApiResult.Success(ViewingPreference.FOLLOWERS)
+        }
+        val vm = MessagesFeedViewModel(repo)
+        backgroundScope.launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.refresh()
+        advanceUntilIdle()
+
+        assertThat(repo.refreshPreferences)
+            .containsExactly(ViewingPreference.FOLLOWERS, ViewingPreference.FOLLOWERS)
     }
 }

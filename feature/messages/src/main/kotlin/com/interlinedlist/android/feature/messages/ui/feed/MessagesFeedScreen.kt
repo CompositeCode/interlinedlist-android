@@ -3,10 +3,10 @@ package com.interlinedlist.android.feature.messages.ui.feed
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
@@ -62,6 +63,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.interlinedlist.android.core.designsystem.theme.InterlinedListTheme
+import com.interlinedlist.android.core.model.ViewingPreference
 import com.interlinedlist.android.feature.messages.domain.CrossPostStatus
 import com.interlinedlist.android.feature.messages.domain.LinkedNetwork
 import com.interlinedlist.android.feature.messages.domain.Message
@@ -90,6 +92,11 @@ object MessagesFeedTags {
     const val COMPOSE_SCHEDULE = "messagesComposeSchedule"
     const val SCHEDULED_ACTION = "messagesFeedScheduledAction"
 
+    /** The in-feed All / My / Following / Followers switcher. */
+    const val VIEW_PREFERENCES = "messagesFeedViewPreferences"
+    /** Prefix for one switcher chip; suffixed with the preference's wire value. */
+    const val VIEW_PREFERENCE_PREFIX = "messagesFeedViewPreference_"
+
     /** The always-on InterlinedList destination chip. */
     const val DESTINATION_IL = "messagesComposeDestinationInterlinedList"
     /** Prefix for a per-network destination chip; suffixed with the network id. */
@@ -105,6 +112,9 @@ object MessagesFeedTags {
     const val VISIBILITY_HINT = "messagesComposeVisibilityHint"
 
     fun destinationTag(networkId: String): String = DESTINATION_PREFIX + networkId
+
+    fun viewPreferenceTag(preference: ViewingPreference): String =
+        VIEW_PREFERENCE_PREFIX + preference.wire
 }
 
 /**
@@ -126,6 +136,7 @@ fun MessagesRoute(
         state = state,
         onRefresh = viewModel::refresh,
         onLoadMore = viewModel::loadMore,
+        onViewingPreferenceChange = viewModel::onViewingPreferenceChange,
         onOpenMessage = onOpenMessage,
         onOpenScheduled = onOpenScheduled,
         onDig = viewModel::onDig,
@@ -178,6 +189,7 @@ fun MessagesFeedScreen(
     onComposeTextChange: (String) -> Unit,
     onPost: () -> Unit,
     modifier: Modifier = Modifier,
+    onViewingPreferenceChange: (ViewingPreference) -> Unit = {},
     onOpenScheduled: () -> Unit = {},
     onReport: (Message) -> Unit = {},
     onEdit: (Message) -> Unit = {},
@@ -225,26 +237,29 @@ fun MessagesFeedScreen(
             }
         },
     ) { padding ->
-        when {
-            state.subscriptionRequired -> LockedState(
-                message = state.errorMessage,
-                modifier = Modifier.padding(padding),
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            ViewPreferenceSwitcher(
+                selected = state.viewingPreference,
+                enabled = !state.isChangingViewingPreference,
+                onSelect = onViewingPreferenceChange,
             )
-            else -> FeedContent(
-                state = state,
-                contentPadding = padding,
-                onRefresh = onRefresh,
-                onLoadMore = onLoadMore,
-                onOpenMessage = onOpenMessage,
-                onDig = onDig,
-                onDelete = onDelete,
-                onReport = onReport,
-                onEdit = onEdit,
-                onBlockUser = onBlockUser,
-                onMuteUser = onMuteUser,
-                onReportUser = onReportUser,
-                onFetchMetadata = onFetchMetadata,
-            )
+            when {
+                state.subscriptionRequired -> LockedState(message = state.errorMessage)
+                else -> FeedContent(
+                    state = state,
+                    onRefresh = onRefresh,
+                    onLoadMore = onLoadMore,
+                    onOpenMessage = onOpenMessage,
+                    onDig = onDig,
+                    onDelete = onDelete,
+                    onReport = onReport,
+                    onEdit = onEdit,
+                    onBlockUser = onBlockUser,
+                    onMuteUser = onMuteUser,
+                    onReportUser = onReportUser,
+                    onFetchMetadata = onFetchMetadata,
+                )
+            }
         }
     }
 
@@ -298,11 +313,51 @@ fun MessagesFeedScreen(
     }
 }
 
+/**
+ * The in-feed view switcher: the same four choices as Settings -> View Preferences
+ * on the web. Selecting one saves it to the account (so the web agrees) and reloads
+ * the feed, which is why the row is disabled while a save is in flight.
+ */
+@Composable
+private fun ViewPreferenceSwitcher(
+    selected: ViewingPreference,
+    enabled: Boolean,
+    onSelect: (ViewingPreference) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .testTag(MessagesFeedTags.VIEW_PREFERENCES),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        ViewingPreference.entries.forEach { preference ->
+            FilterChip(
+                selected = preference == selected,
+                onClick = { onSelect(preference) },
+                enabled = enabled,
+                label = { Text(preference.label) },
+                modifier = Modifier.testTag(MessagesFeedTags.viewPreferenceTag(preference)),
+            )
+        }
+    }
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+}
+
+/** The switcher wording, matching Settings -> View Preferences on the web. */
+private val ViewingPreference.label: String
+    get() = when (this) {
+        ViewingPreference.ALL -> "All Messages"
+        ViewingPreference.MINE -> "My Messages"
+        ViewingPreference.FOLLOWING -> "Following Only"
+        ViewingPreference.FOLLOWERS -> "Followers Only"
+    }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun FeedContent(
     state: MessagesFeedUiState,
-    contentPadding: PaddingValues,
     onRefresh: () -> Unit,
     onLoadMore: () -> Unit,
     onOpenMessage: (String) -> Unit,
@@ -318,9 +373,7 @@ private fun FeedContent(
     PullToRefreshBox(
         isRefreshing = state.isRefreshing,
         onRefresh = onRefresh,
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(contentPadding),
+        modifier = Modifier.fillMaxSize(),
     ) {
         when {
             state.isEmpty && state.isRefreshing -> LoadingState()

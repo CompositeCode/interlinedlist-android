@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.interlinedlist.android.core.common.result.ApiResult
 import com.interlinedlist.android.core.common.result.AppError
+import com.interlinedlist.android.core.model.ViewingPreference
 import com.interlinedlist.android.feature.messages.data.MessagesRepository
 import com.interlinedlist.android.feature.messages.domain.CrossPostSelection
 import com.interlinedlist.android.feature.messages.domain.CrossPostStatus
@@ -41,6 +42,10 @@ data class MessagesFeedUiState(
     val errorMessage: String? = null,
     /** True when the failure is a subscription gate — render an upsell instead. */
     val subscriptionRequired: Boolean = false,
+    /** Which messages the feed is showing; drives the in-feed switcher. */
+    val viewingPreference: ViewingPreference = ViewingPreference.DEFAULT,
+    /** True while a switcher choice is being saved to the account. */
+    val isChangingViewingPreference: Boolean = false,
     val isComposeOpen: Boolean = false,
     val composeText: String = "",
     val isPosting: Boolean = false,
@@ -112,6 +117,13 @@ private data class FeedTransientState(
     val nextCursor: String? = null,
     val errorMessage: String? = null,
     val subscriptionRequired: Boolean = false,
+    /**
+     * The account's feed view preference. Seeded from `GET /api/user` and changed
+     * by the switcher; the server scopes the feed by it, so it is also the value
+     * every feed request runs under.
+     */
+    val viewingPreference: ViewingPreference = ViewingPreference.DEFAULT,
+    val isChangingViewingPreference: Boolean = false,
     val isComposeOpen: Boolean = false,
     val composeText: String = "",
     val isPosting: Boolean = false,
@@ -159,6 +171,8 @@ class MessagesFeedViewModel @Inject constructor(
                 canLoadMore = t.canLoadMore,
                 errorMessage = t.errorMessage,
                 subscriptionRequired = t.subscriptionRequired,
+                viewingPreference = t.viewingPreference,
+                isChangingViewingPreference = t.isChangingViewingPreference,
                 isComposeOpen = t.isComposeOpen,
                 composeText = t.composeText,
                 isPosting = t.isPosting,
@@ -183,9 +197,67 @@ class MessagesFeedViewModel @Inject constructor(
         )
 
     init {
-        refresh()
+        loadViewingPreferenceThenRefresh()
         loadLinkedNetworks()
         loadDefaultVisibility()
+    }
+
+    /**
+     * Reads the account's saved view preference and only then loads the feed, so
+     * the first request already runs under the right view instead of briefly
+     * showing All Messages. A failed read leaves the default (All Messages) in
+     * place and still loads the feed — an unreadable preference must not leave the
+     * user staring at an empty screen.
+     */
+    private fun loadViewingPreferenceThenRefresh() {
+        // Set up front so the feed shows its loading state, not its empty state,
+        // while the preference is being read.
+        transient.update { it.copy(isRefreshing = true) }
+        viewModelScope.launch {
+            val result = repository.getViewingPreference()
+            if (result is ApiResult.Success) {
+                transient.update { it.copy(viewingPreference = result.data) }
+            }
+            refresh()
+        }
+    }
+
+    /**
+     * Switches the feed to [preference]: saves it to the account first (so the
+     * choice persists and the web agrees), then reloads the feed from the top.
+     *
+     * The selection updates immediately for responsiveness but is **rolled back**
+     * if the save fails — the switcher must never show a view the account never
+     * stored. The feed is only reloaded once the save succeeded, because the
+     * server scopes the feed from the saved preference.
+     */
+    fun onViewingPreferenceChange(preference: ViewingPreference) {
+        val current = transient.value
+        if (preference == current.viewingPreference || current.isChangingViewingPreference) return
+        val previous = current.viewingPreference
+        transient.update {
+            it.copy(
+                viewingPreference = preference,
+                isChangingViewingPreference = true,
+                errorMessage = null,
+                subscriptionRequired = false,
+            )
+        }
+        viewModelScope.launch {
+            when (val result = repository.setViewingPreference(preference)) {
+                is ApiResult.Success -> {
+                    // Server truth wins over the tapped value.
+                    transient.update {
+                        it.copy(viewingPreference = result.data, isChangingViewingPreference = false)
+                    }
+                    refresh()
+                }
+                is ApiResult.Failure -> transient.update {
+                    it.copy(viewingPreference = previous, isChangingViewingPreference = false)
+                        .withError(result.error)
+                }
+            }
+        }
     }
 
     /**
@@ -236,7 +308,7 @@ class MessagesFeedViewModel @Inject constructor(
             )
         }
         viewModelScope.launch {
-            when (val result = repository.refreshFeed()) {
+            when (val result = repository.refreshFeed(transient.value.viewingPreference)) {
                 is ApiResult.Success -> transient.update {
                     it.copy(isRefreshing = false, nextCursor = result.data)
                 }
@@ -254,7 +326,7 @@ class MessagesFeedViewModel @Inject constructor(
         if (current.isLoadingMore || current.isRefreshing) return
         transient.update { it.copy(isLoadingMore = true) }
         viewModelScope.launch {
-            when (val result = repository.loadMoreFeed(cursor)) {
+            when (val result = repository.loadMoreFeed(cursor, current.viewingPreference)) {
                 is ApiResult.Success -> transient.update {
                     it.copy(isLoadingMore = false, nextCursor = result.data)
                 }

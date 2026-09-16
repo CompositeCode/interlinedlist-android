@@ -1,6 +1,7 @@
 package com.interlinedlist.android.feature.messages.data
 
 import com.interlinedlist.android.core.common.result.ApiResult
+import com.interlinedlist.android.core.model.ViewingPreference
 import com.interlinedlist.android.feature.messages.domain.CreatedMessage
 import com.interlinedlist.android.feature.messages.domain.CrossPostSelection
 import com.interlinedlist.android.feature.messages.domain.LinkedNetwork
@@ -32,16 +33,43 @@ interface MessagesRepository {
      * Refreshes the first page of the feed from the API and replaces the cached
      * feed, restarting keyset pagination from the top. Returns the opaque cursor
      * for the next page, or null when the feed ends here.
+     *
+     * [preference] is the account's current view selection. Only
+     * [ViewingPreference.MINE] has a request-level mechanism (`onlyMine=true`);
+     * the following/followers scopes are applied by the server from the saved
+     * preference, which is why [setViewingPreference] must succeed before a
+     * refresh can show a different view.
      */
-    suspend fun refreshFeed(): ApiResult<String?>
+    suspend fun refreshFeed(
+        preference: ViewingPreference = ViewingPreference.DEFAULT,
+    ): ApiResult<String?>
 
     /**
      * Fetches the page that follows [cursor] and appends it to the cached feed.
      * [cursor] is the opaque token a previous [refreshFeed]/[loadMoreFeed]
      * returned and is handed to the API verbatim — never construct or parse one.
-     * Returns the cursor for the page after this one, or null at the end.
+     * [preference] must match the one the page chain started under. Returns the
+     * cursor for the page after this one, or null at the end.
      */
-    suspend fun loadMoreFeed(cursor: String): ApiResult<String?>
+    suspend fun loadMoreFeed(
+        cursor: String,
+        preference: ViewingPreference = ViewingPreference.DEFAULT,
+    ): ApiResult<String?>
+
+    /**
+     * The account's saved feed view preference, read from `viewingPreference` on
+     * `GET /api/user`. Seeds the in-feed switcher so Android opens on whatever the
+     * web was last set to.
+     */
+    suspend fun getViewingPreference(): ApiResult<ViewingPreference>
+
+    /**
+     * Saves [preference] to the account with a partial `PATCH /api/user/update`,
+     * so the choice persists and the web agrees. Returns the value the server
+     * reports as saved. Callers must reload the feed from the top afterwards: the
+     * server applies this preference when it builds the feed.
+     */
+    suspend fun setViewingPreference(preference: ViewingPreference): ApiResult<ViewingPreference>
 
     /**
      * Creates a new top-level message and caches it. Optionally attaches already
