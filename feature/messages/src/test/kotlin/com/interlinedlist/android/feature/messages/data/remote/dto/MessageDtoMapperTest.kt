@@ -264,4 +264,25 @@ class MessageDtoMapperTest {
         assertThat(message.pushedMessage).isNull()
         assertThat(message.isReshare).isFalse()
     }
+
+    @Test
+    fun `carries the tags the feed returned, verbatim`() {
+        val message = MessageDto(
+            id = "m3",
+            content = "tagged",
+            // Free-form labels: mixed case and inner punctuation are both real.
+            tags = listOf("lists", "Lego", "life is short, o brave girl"),
+        ).toDomain(currentUserId = null)
+
+        assertThat(message.tags)
+            .containsExactly("lists", "Lego", "life is short, o brave girl").inOrder()
+        assertThat(message.hasTags).isTrue()
+    }
+
+    @Test
+    fun `an untagged message has no tags`() {
+        val message = MessageDto(id = "m4", content = "plain").toDomain(currentUserId = null)
+        assertThat(message.tags).isEmpty()
+        assertThat(message.hasTags).isFalse()
+    }
 }

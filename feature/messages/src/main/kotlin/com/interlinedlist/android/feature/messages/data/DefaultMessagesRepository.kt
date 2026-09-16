@@ -24,6 +24,7 @@ import com.interlinedlist.android.feature.messages.domain.LinkedNetwork
 import com.interlinedlist.android.feature.messages.domain.Message
 import com.interlinedlist.android.feature.messages.domain.MessageVisibility
 import com.interlinedlist.android.feature.messages.domain.ReportReason
+import com.interlinedlist.android.feature.messages.domain.TagSuggestion
 import com.interlinedlist.android.feature.messages.domain.asPushedOriginal
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -119,6 +120,7 @@ class DefaultMessagesRepository @Inject constructor(
         crossPost: CrossPostSelection,
         visibility: MessageVisibility,
         pushedMessageId: String?,
+        tags: List<String>,
     ): ApiResult<CreatedMessage> = withContext(dispatchers.io) {
         val isReshare = pushedMessageId != null
         val request = CreateMessageRequest(
@@ -138,6 +140,9 @@ class DefaultMessagesRepository @Inject constructor(
             imageUrls = imageUrls.ifEmpty { null },
             videoUrls = videoUrls.ifEmpty { null },
             scheduledAt = scheduledAt,
+            // Sent verbatim — a tag may contain spaces and punctuation. Omitted
+            // entirely (explicitNulls = false) when the composer added none.
+            tags = tags.ifEmpty { null },
             // Encode cross-post targets per the create schema. explicitNulls=false
             // drops these when empty/false, so a plain post keeps its original body.
             mastodonProviderIds = crossPost.mastodonProviderIds.ifEmpty { null },
@@ -414,6 +419,21 @@ class DefaultMessagesRepository @Inject constructor(
                     )
                 }
             }
+            is ApiResult.Failure -> result
+        }
+    }
+
+    /**
+     * Asks the server for suggestions and hands back exactly what it said, in the
+     * order it said it. The matching rule (case-insensitive literal prefix) lives
+     * on the server; re-filtering here would misrepresent it.
+     */
+    override suspend fun autocompleteTags(
+        query: String,
+        limit: Int,
+    ): ApiResult<List<TagSuggestion>> = withContext(dispatchers.io) {
+        when (val result = safeCall { api.autocompleteTags(query = query, limit = limit) }) {
+            is ApiResult.Success -> ApiResult.Success(result.data.toDomain())
             is ApiResult.Failure -> result
         }
     }

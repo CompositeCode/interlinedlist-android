@@ -8,6 +8,7 @@ import com.interlinedlist.android.feature.messages.domain.LinkedNetwork
 import com.interlinedlist.android.feature.messages.domain.Message
 import com.interlinedlist.android.feature.messages.domain.MessageVisibility
 import com.interlinedlist.android.feature.messages.domain.ReportReason
+import com.interlinedlist.android.feature.messages.domain.TagSuggestion
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -87,6 +88,9 @@ interface MessagesRepository {
      * **quote**, and [pushMessage] is the no-comment **push**. Amplifying someone
      * else's message is always public, so a non-null [pushedMessageId] overrides
      * [visibility] with [MessageVisibility.PUSH_OR_QUOTE].
+     *
+     * [tags] are sent as `tags[]`, verbatim: free-form labels that may contain
+     * spaces and punctuation. An empty list omits the field entirely.
      */
     suspend fun createMessage(
         content: String,
@@ -96,7 +100,19 @@ interface MessagesRepository {
         crossPost: CrossPostSelection = CrossPostSelection.NONE,
         visibility: MessageVisibility = MessageVisibility.PUBLIC,
         pushedMessageId: String? = null,
+        tags: List<String> = emptyList(),
     ): ApiResult<CreatedMessage>
+
+    /**
+     * Tag suggestions for the prefix the user is typing, from
+     * `GET /api/tags/autocomplete` (query parameter **`q`**).
+     *
+     * The server does the matching: a **case-insensitive literal prefix** over
+     * existing public tags. The result is returned in the server's order and is
+     * never re-filtered or fuzzy-matched here — doing so would show (or hide)
+     * suggestions the server never chose. Network-only: suggestions are not cached.
+     */
+    suspend fun autocompleteTags(query: String, limit: Int = TAG_SUGGESTION_LIMIT): ApiResult<List<TagSuggestion>>
 
     /**
      * Pushes (reposts) [messageId] as-is: posts `pushedMessageId` with **no**
@@ -181,4 +197,9 @@ interface MessagesRepository {
 
     /** Full-text search over top-level messages (does not touch the feed cache). */
     suspend fun search(query: String): ApiResult<List<Message>>
+
+    companion object {
+        /** How many tag suggestions to ask for (server default 10, max 50). */
+        const val TAG_SUGGESTION_LIMIT = 10
+    }
 }

@@ -35,6 +35,12 @@ data class MessageDto(
     val videoUrls: List<String> = emptyList(),
     /** Fetched link-preview metadata for the first URL in the body, if any. */
     val linkMetadata: LinkMetadataDto? = null,
+    /**
+     * Free-form tags on the message. The feed already carries these, so the card
+     * renders them without a second fetch. Values may contain spaces and
+     * punctuation — never split or normalise them.
+     */
+    val tags: List<String> = emptyList(),
     /** Future send time for a scheduled message; null once published. */
     val scheduledAt: String? = null,
     /** False when the message is private (visible only to its author). */
@@ -114,6 +120,8 @@ fun MessageDto.toDomain(currentUserId: String?): Message {
         imageUrls = imageUrls,
         videoUrls = videoUrls,
         linkPreview = linkMetadata?.toDomain(),
+        // Kept verbatim: a tag is a label, not a token.
+        tags = tags,
         scheduledAt = scheduledAt,
         publiclyVisible = publiclyVisible,
         pushCount = pushCount,

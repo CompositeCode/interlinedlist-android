@@ -6,6 +6,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -70,6 +72,13 @@ object MessageCardTags {
     const val PUSH_HEADER = "messagePushHeader"
     /** The embedded original rendered inside a push or a quote. */
     const val PUSHED_ORIGINAL = "messagePushedOriginal"
+
+    /** The row of tags on a tagged message. */
+    const val TAGS = "messageTags"
+    /** Prefix for one tag label; suffixed with the tag itself. */
+    const val TAG_PREFIX = "messageTag_"
+
+    fun tagTag(tag: String): String = TAG_PREFIX + tag
 }
 
 /**
@@ -173,6 +182,10 @@ fun MessageCard(
                     Spacer(Modifier.size(8.dp))
                     MessageMedia(message = message, onOpenLink = onOpenLink)
                 }
+                if (message.hasTags) {
+                    Spacer(Modifier.size(8.dp))
+                    TagRow(tags = message.tags)
+                }
                 Spacer(Modifier.size(8.dp))
                 EngagementRow(
                     message = message,
@@ -182,6 +195,37 @@ fun MessageCard(
                     onQuote = onQuote,
                 )
             }
+        }
+    }
+}
+
+/**
+ * The message's tags, straight from the `tags[]` the feed already returned — no
+ * extra fetch. Rendered as plain labels: a tag is a free-form string that may
+ * contain spaces and punctuation, so it is shown exactly as stored rather than
+ * being prettified into a hashtag.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TagRow(tags: List<String>) {
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(MessageCardTags.TAGS),
+    ) {
+        tags.forEach { tag ->
+            Text(
+                text = tag,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .clip(MaterialTheme.shapes.small)
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                    .testTag(MessageCardTags.tagTag(tag)),
+            )
         }
     }
 }

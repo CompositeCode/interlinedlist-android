@@ -33,6 +33,8 @@ data class MessageEntity(
     val videoUrls: List<String> = emptyList(),
     /** Link-preview card, stored via [MessageConverters]; null when none. */
     val linkPreview: LinkPreview? = null,
+    /** Free-form tags, stored as JSON via [MessageConverters]. */
+    val tags: List<String> = emptyList(),
     /** Future send time for a scheduled message; null for a normal message. */
     val scheduledAt: String? = null,
     /** Last-edited instant; null when the message has not been edited. */
@@ -66,6 +68,7 @@ fun MessageEntity.toDomain(): Message = Message(
     imageUrls = imageUrls,
     videoUrls = videoUrls,
     linkPreview = linkPreview,
+    tags = tags,
     scheduledAt = scheduledAt,
     editedAt = editedAt,
     publiclyVisible = publiclyVisible,
@@ -91,6 +94,7 @@ fun Message.toEntity(feedOrder: Long): MessageEntity = MessageEntity(
     imageUrls = imageUrls,
     videoUrls = videoUrls,
     linkPreview = linkPreview,
+    tags = tags,
     scheduledAt = scheduledAt,
     editedAt = editedAt,
     publiclyVisible = publiclyVisible,

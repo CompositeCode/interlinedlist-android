@@ -10,7 +10,7 @@ import androidx.room.TypeConverters
  */
 @Database(
     entities = [MessageEntity::class],
-    version = 4,
+    version = 5,
     exportSchema = false,
 )
 @TypeConverters(MessageConverters::class)

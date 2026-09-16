@@ -10,6 +10,7 @@ import com.interlinedlist.android.feature.messages.data.remote.dto.MessagesRespo
 import com.interlinedlist.android.feature.messages.data.remote.dto.MetadataResponse
 import com.interlinedlist.android.feature.messages.data.remote.dto.ReportRequest
 import com.interlinedlist.android.feature.messages.data.remote.dto.ScheduledMessagesResponse
+import com.interlinedlist.android.feature.messages.data.remote.dto.TagAutocompleteResponse
 import com.interlinedlist.android.feature.messages.data.remote.dto.UserReportRequest
 import okhttp3.MultipartBody
 import retrofit2.http.Body
@@ -112,6 +113,22 @@ interface MessagesApi {
      */
     @GET("api/user/identities")
     suspend fun getIdentities(): IdentitiesResponse
+
+    /**
+     * Tag suggestions for a prefix the user is typing.
+     *
+     * The query parameter is **`q`** — the endpoint 400s with
+     * `{"error":"Query parameter 'q' is required","code":"bad_request"}` for
+     * anything else (notably `prefix`). Matching is a **case-insensitive literal
+     * prefix** over existing public tags (`%` and `_` are not wildcards) and a
+     * single leading `#` is stripped server-side; an empty `q` is a 400.
+     * [limit] defaults to 10 server-side and is clamped to 50.
+     */
+    @GET("api/tags/autocomplete")
+    suspend fun autocompleteTags(
+        @Query("q") query: String,
+        @Query("limit") limit: Int? = null,
+    ): TagAutocompleteResponse
 
     /** Reports a message with a reason (and optional free-text detail). */
     @POST("api/messages/{id}/report")

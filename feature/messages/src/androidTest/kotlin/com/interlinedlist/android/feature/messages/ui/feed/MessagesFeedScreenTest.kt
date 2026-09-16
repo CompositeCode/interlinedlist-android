@@ -12,6 +12,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.google.common.truth.Truth.assertThat
 import com.interlinedlist.android.core.designsystem.theme.InterlinedListTheme
@@ -20,6 +21,7 @@ import com.interlinedlist.android.feature.messages.domain.LinkedNetwork
 import com.interlinedlist.android.feature.messages.domain.Message
 import com.interlinedlist.android.feature.messages.domain.MessageVisibility
 import com.interlinedlist.android.feature.messages.domain.PushedMessage
+import com.interlinedlist.android.feature.messages.domain.TagSuggestion
 import com.interlinedlist.android.feature.messages.ui.components.EditMessageSheetTags
 import com.interlinedlist.android.feature.messages.ui.components.MessageCardTags
 import com.interlinedlist.android.feature.messages.ui.components.MessageMediaTags
@@ -44,6 +46,7 @@ class MessagesFeedScreenTest {
         publiclyVisible: Boolean = true,
         pushCount: Int = 0,
         pushedMessage: PushedMessage? = null,
+        tags: List<String> = emptyList(),
     ) = Message(
         id = id, content = body, authorId = "u1", authorUsername = "adron",
         authorDisplayName = "Adron", authorAvatarUrl = null, createdAt = null,
@@ -52,6 +55,7 @@ class MessagesFeedScreenTest {
         pushCount = pushCount,
         pushedMessageId = pushedMessage?.id,
         pushedMessage = pushedMessage,
+        tags = tags,
     )
 
     private fun original(
@@ -74,6 +78,7 @@ class MessagesFeedScreenTest {
         onViewingPreferenceChange: ((ViewingPreference) -> Unit)? = null,
         onPush: (Message) -> Unit = {},
         onQuote: (Message) -> Unit = {},
+        onSelectTagSuggestion: (TagSuggestion) -> Unit = {},
     ) {
         composeRule.setContent {
             var state by mutableStateOf(initial)
@@ -107,6 +112,26 @@ class MessagesFeedScreenTest {
                     onBlockUser = onBlockUser,
                     onMuteUser = onMuteUser,
                     onReportUser = onReportUser,
+                    onTagQueryChange = { state = state.copy(tagQuery = it) },
+                    onCommitTag = {
+                        val tag = state.tagQuery.trim()
+                        state = if (tag.isEmpty() || tag in state.composeTags) {
+                            state.copy(tagQuery = "")
+                        } else {
+                            state.copy(composeTags = state.composeTags + tag, tagQuery = "")
+                        }
+                    },
+                    onSelectTagSuggestion = { suggestion ->
+                        state = state.copy(
+                            composeTags = state.composeTags + suggestion.tag,
+                            tagQuery = "",
+                            tagSuggestions = emptyList(),
+                        )
+                        onSelectTagSuggestion(suggestion)
+                    },
+                    onRemoveTag = { tag ->
+                        state = state.copy(composeTags = state.composeTags - tag)
+                    },
                     onPush = onPush,
                     onQuote = { quoted ->
                         state = state.copy(isComposeOpen = true, quoteTarget = quoted)
@@ -541,5 +566,72 @@ class MessagesFeedScreenTest {
         )
 
         composeRule.onNodeWithTag(MessagesFeedTags.VISIBILITY_PRIVATE).assertHasClickAction()
+    }
+
+    // --- tags ---------------------------------------------------------------
+
+    @Test
+    fun tags_areRendered_onTheCard() {
+        setFeed(
+            MessagesFeedUiState(
+                // Straight from the feed payload's tags[] — no extra fetch.
+                messages = listOf(message("1", "tagged post", tags = listOf("lists", "Lego"))),
+            ),
+        )
+        composeRule.onNodeWithTag(MessageCardTags.TAGS).assertIsDisplayed()
+        composeRule.onNodeWithTag(MessageCardTags.tagTag("lists")).assertIsDisplayed()
+        composeRule.onNodeWithTag(MessageCardTags.tagTag("Lego")).assertIsDisplayed()
+        composeRule.onNodeWithText("lists").assertIsDisplayed()
+    }
+
+    @Test
+    fun aTagWithSpacesAndPunctuation_isRendered_whole() {
+        val tag = "life is short, o brave girl"
+        setFeed(MessagesFeedUiState(messages = listOf(message("1", "tagged", tags = listOf(tag)))))
+        // One label, not four: tags are free-form strings, never word tokens.
+        composeRule.onNodeWithTag(MessageCardTags.tagTag(tag)).assertIsDisplayed()
+        composeRule.onNodeWithText(tag).assertIsDisplayed()
+    }
+
+    @Test
+    fun noTagRow_isShown_forAnUntaggedMessage() {
+        setFeed(MessagesFeedUiState(messages = listOf(message("1", "plain"))))
+        composeRule.onNodeWithTag(MessageCardTags.TAGS).assertDoesNotExist()
+    }
+
+    @Test
+    fun composer_addsATypedTag_asAChip() {
+        setFeed(MessagesFeedUiState(isComposeOpen = true))
+        composeRule.onNodeWithTag(MessagesFeedTags.COMPOSE_TAG_INPUT).performTextInput("lists")
+        composeRule.onNodeWithTag(MessagesFeedTags.COMPOSE_TAG_ADD).performClick()
+
+        composeRule.onNodeWithTag(MessagesFeedTags.composeTagTag("lists")).assertIsDisplayed()
+    }
+
+    @Test
+    fun composer_removesACommittedTag() {
+        setFeed(MessagesFeedUiState(isComposeOpen = true, composeTags = listOf("lists")))
+        composeRule.onNodeWithTag(MessagesFeedTags.composeTagTag("lists")).performClick()
+        composeRule.onNodeWithTag(MessagesFeedTags.composeTagTag("lists")).assertDoesNotExist()
+    }
+
+    @Test
+    fun composer_showsSuggestions_andAddsTheTappedOne() {
+        var selected: TagSuggestion? = null
+        setFeed(
+            MessagesFeedUiState(
+                isComposeOpen = true,
+                tagQuery = "l",
+                // The server matched case-insensitively; the app shows its answer
+                // exactly as given, in its order.
+                tagSuggestions = listOf(TagSuggestion("lists", 8), TagSuggestion("Lego", 2)),
+            ),
+            onSelectTagSuggestion = { selected = it },
+        )
+        composeRule.onNodeWithTag(MessagesFeedTags.TAG_SUGGESTIONS).assertIsDisplayed()
+        composeRule.onNodeWithTag(MessagesFeedTags.tagSuggestionTag("Lego")).performClick()
+
+        assert(selected?.tag == "Lego")
+        composeRule.onNodeWithTag(MessagesFeedTags.composeTagTag("Lego")).assertIsDisplayed()
     }
 }

@@ -900,4 +900,112 @@ class DefaultMessagesRepositoryTest {
         assertThat(error).isInstanceOf(AppError.Forbidden::class.java)
         assertThat(error.message).isEqualTo("You cannot push your own message")
     }
+
+    // --- tags --------------------------------------------------------------
+
+    @Test
+    fun `createMessage sends the tags array`() = runTest(dispatcher) {
+        enqueueJson(
+            201,
+            """{ "message": "Message created successfully",
+                "data": { "id": "t1", "content": "tagged", "tags": ["lists", "llms"] } }""",
+        )
+        val repo = repository()
+
+        val result = repo.createMessage(content = "tagged", tags = listOf("lists", "llms"))
+
+        assertThat(result).isInstanceOf(ApiResult.Success::class.java)
+        val body = server.takeRequest().body.readUtf8()
+        assertThat(body).contains("\"tags\":[\"lists\",\"llms\"]")
+    }
+
+    @Test
+    fun `createMessage omits tags entirely when there are none`() = runTest(dispatcher) {
+        enqueueJson(
+            201,
+            """{ "message": "Message created successfully", "data": { "id": "t2", "content": "plain" } }""",
+        )
+        val repo = repository()
+
+        repo.createMessage(content = "plain")
+
+        assertThat(server.takeRequest().body.readUtf8()).doesNotContain("tags")
+    }
+
+    @Test
+    fun `a tag containing spaces and punctuation round-trips unchanged`() = runTest(dispatcher) {
+        // Straight from the live API: tags are free-form labels, not word tokens.
+        val tag = "life is short, o brave girl"
+        enqueueJson(
+            201,
+            """{ "message": "Message created successfully",
+                "data": { "id": "t3", "content": "tagged",
+                          "tags": ["life is short, o brave girl"] } }""",
+        )
+        val repo = repository()
+
+        val result = repo.createMessage(content = "tagged", tags = listOf(tag))
+
+        // Out: one whole string, not split on the spaces or the comma.
+        val body = server.takeRequest().body.readUtf8()
+        assertThat(body).contains("\"tags\":[\"life is short, o brave girl\"]")
+        // Back: the same single tag, verbatim, on the message and in the cache.
+        assertThat((result as ApiResult.Success).data.message.tags).containsExactly(tag)
+        assertThat(repo.observeMessage("t3").first()?.tags).containsExactly(tag)
+    }
+
+    @Test
+    fun `refreshFeed keeps the tags the feed already returned`() = runTest(dispatcher) {
+        enqueueJson(
+            200,
+            """{ "messages": [ { "id": "1", "content": "hi", "tags": ["lists", "Lego"] },
+                               { "id": "2", "content": "no tags" } ],
+                "pagination": { "hasMore": false } }""",
+        )
+        val repo = repository()
+
+        repo.refreshFeed()
+
+        val cached = repo.observeFeed().first()
+        assertThat(cached.first { it.id == "1" }.tags).containsExactly("lists", "Lego").inOrder()
+        assertThat(cached.first { it.id == "2" }.tags).isEmpty()
+    }
+
+    @Test
+    fun `autocompleteTags asks with q and keeps the server's order`() = runTest(dispatcher) {
+        enqueueJson(
+            200,
+            """{ "tags": [ { "tag": "lists", "count": 8 }, { "tag": "llms", "count": 5 },
+                           { "tag": "Lego", "count": 2 },
+                           { "tag": "life is short, o brave girl", "count": 2 } ] }""",
+        )
+        val repo = repository()
+
+        val result = repo.autocompleteTags("l")
+
+        val request = server.takeRequest().requestUrl!!
+        assertThat(request.encodedPath).isEqualTo("/api/tags/autocomplete")
+        // `prefix` is a 400 from this endpoint — the parameter really is `q`.
+        assertThat(request.queryParameter("q")).isEqualTo("l")
+        assertThat(request.queryParameter("prefix")).isNull()
+        assertThat(request.queryParameter("limit")).isEqualTo("10")
+        val suggestions = (result as ApiResult.Success).data
+        // Case-insensitive matching is the server's job, and so is the ordering:
+        // "Lego" is a legitimate answer for "l" and must not be filtered out here.
+        assertThat(suggestions.map { it.tag })
+            .containsExactly("lists", "llms", "Lego", "life is short, o brave girl").inOrder()
+        assertThat(suggestions.first().count).isEqualTo(8)
+    }
+
+    @Test
+    fun `autocompleteTags surfaces the server's own rejection`() = runTest(dispatcher) {
+        enqueueJson(400, """{ "error": "Query parameter 'q' is required", "code": "bad_request" }""")
+        val repo = repository()
+
+        val result = repo.autocompleteTags("")
+
+        assertThat(result).isInstanceOf(ApiResult.Failure::class.java)
+        assertThat((result as ApiResult.Failure).error.message)
+            .isEqualTo("Query parameter 'q' is required")
+    }
 }
