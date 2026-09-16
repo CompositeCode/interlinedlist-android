@@ -41,6 +41,15 @@ object SettingsBounds {
 
     /** The composer's gear options stay hidden unless the account opts in. */
     const val DEFAULT_SHOW_ADVANCED_POST_SETTINGS: Boolean = false
+
+    /**
+     * Accounts are public unless the owner says otherwise — the help centre frames
+     * private as something you "enable" (`/help/account`, "Private account"). An
+     * absent `isPrivateAccount` must therefore read as public, never as private:
+     * showing the switch on for an account that is not actually private would
+     * promise a privacy guarantee the server is not making.
+     */
+    const val DEFAULT_PRIVATE_ACCOUNT: Boolean = false
 }
 
 /**
@@ -62,3 +71,7 @@ val UserSettings.defaultPubliclyVisibleOrDefault: Boolean
 /** Whether the composer's advanced options show, falling back to the server default. */
 val UserSettings.showAdvancedPostSettingsOrDefault: Boolean
     get() = showAdvancedPostSettings ?: SettingsBounds.DEFAULT_SHOW_ADVANCED_POST_SETTINGS
+
+/** Whether the account is private, falling back to public when the API omits it. */
+val UserSettings.isPrivateAccountOrDefault: Boolean
+    get() = isPrivateAccount ?: SettingsBounds.DEFAULT_PRIVATE_ACCOUNT

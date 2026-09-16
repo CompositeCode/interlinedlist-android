@@ -49,6 +49,7 @@ class FakeSettingsRepository : SettingsRepository {
             messagesPerPage = update.messagesPerPage ?: current.messagesPerPage,
             showAdvancedPostSettings =
                 update.showAdvancedPostSettings ?: current.showAdvancedPostSettings,
+            isPrivateAccount = update.isPrivateAccount ?: current.isPrivateAccount,
         )
     }
 }

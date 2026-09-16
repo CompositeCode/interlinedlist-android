@@ -38,6 +38,7 @@ import com.interlinedlist.android.feature.profile.domain.SettingsBounds
 import com.interlinedlist.android.feature.profile.domain.UserSettings
 import com.interlinedlist.android.feature.profile.domain.ViewingPreference
 import com.interlinedlist.android.feature.profile.domain.defaultPubliclyVisibleOrDefault
+import com.interlinedlist.android.feature.profile.domain.isPrivateAccountOrDefault
 import com.interlinedlist.android.feature.profile.domain.maxMessageLengthOrDefault
 import com.interlinedlist.android.feature.profile.domain.messagesPerPageOrDefault
 import com.interlinedlist.android.feature.profile.domain.showAdvancedPostSettingsOrDefault
@@ -52,11 +53,14 @@ object SettingsTestTags {
     const val PROFILE = "settingsGroupProfile"
     const val VIEW_PREFERENCES = "settingsGroupViewPreferences"
     const val MESSAGE_SETTINGS = "settingsGroupMessageSettings"
+    const val PERMISSIONS = "settingsGroupPermissions"
     const val SHOW_PREVIEWS = "settingsShowPreviews"
     const val MAX_MESSAGE_LENGTH = "settingsMaxMessageLength"
     const val MESSAGES_PER_PAGE = "settingsMessagesPerPage"
     const val DEFAULT_PUBLICLY_VISIBLE = "settingsDefaultPubliclyVisible"
     const val SHOW_ADVANCED_POST_SETTINGS = "settingsShowAdvancedPostSettings"
+    const val PRIVATE_ACCOUNT = "settingsPrivateAccount"
+    const val PRIVATE_ACCOUNT_NOTE = "settingsPrivateAccountNote"
 
     /** Tag for one feed-filter option, keyed on its wire value. */
     fun viewingPreference(option: ViewingPreference): String =
@@ -103,6 +107,7 @@ fun SettingsRoute(
         onSetMaxMessageLength = viewModel::setMaxMessageLength,
         onToggleDefaultPubliclyVisible = viewModel::setDefaultPubliclyVisible,
         onToggleShowAdvancedPostSettings = viewModel::setShowAdvancedPostSettings,
+        onTogglePrivateAccount = viewModel::setPrivateAccount,
         onDismissError = viewModel::dismissError,
         modifier = modifier,
     )
@@ -121,6 +126,7 @@ fun SettingsScreen(
     onSetMaxMessageLength: (Int) -> Unit,
     onToggleDefaultPubliclyVisible: (Boolean) -> Unit,
     onToggleShowAdvancedPostSettings: (Boolean) -> Unit,
+    onTogglePrivateAccount: (Boolean) -> Unit,
     onDismissError: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -162,6 +168,10 @@ fun SettingsScreen(
                     settings = settings,
                     onToggleDefaultPubliclyVisible = onToggleDefaultPubliclyVisible,
                     onToggleShowAdvancedPostSettings = onToggleShowAdvancedPostSettings,
+                )
+                PermissionsGroup(
+                    settings = settings,
+                    onTogglePrivateAccount = onTogglePrivateAccount,
                 )
                 Spacer(Modifier.height(24.dp))
             }
@@ -307,6 +317,61 @@ private fun MessageSettingsGroup(
     }
 }
 
+/**
+ * "Permissions": who may follow the account and therefore see its content.
+ *
+ * The web files the private-account switch here — its Settings page lists "Account
+ * visibility: Make your account private; new followers will need to request to follow
+ * you and you must approve them" under **Permissions** (`/help/settings`), and both
+ * `/help/account` and `/help/people` tell users to enable **Private Account** in
+ * "Settings, then Permissions" — so this group mirrors that placement and name.
+ *
+ * The consequence is spelled out next to the switch rather than left to be discovered,
+ * because flipping it changes who can see the user's content. The wording is the help
+ * centre's own (`/help/people`, "Private accounts"): "New followers must send a follow
+ * request that you approve or reject", "Existing followers are not affected; they
+ * remain followers unless you remove them", "Users who are not approved followers
+ * cannot see your private messages", and "Switching back to a public account does not
+ * automatically re-expose previously hidden content to unapproved followers."
+ *
+ * Requests themselves are approved or rejected on the Follow requests screen, which
+ * the Account tab already links to, so the note points there instead of adding a
+ * second route to the same place.
+ */
+@Composable
+private fun PermissionsGroup(
+    settings: UserSettings,
+    onTogglePrivateAccount: (Boolean) -> Unit,
+) {
+    SettingsGroup(
+        title = "Permissions",
+        description = "Who can follow you, and who can see what you post.",
+        modifier = Modifier.testTag(SettingsTestTags.PERMISSIONS),
+    ) {
+        SettingsSwitchRow(
+            label = "Private account",
+            description = "New followers must send a follow request that you approve or " +
+                "reject. Existing followers are not affected \u2014 they remain followers " +
+                "unless you remove them.",
+            checked = settings.isPrivateAccountOrDefault,
+            onCheckedChange = onTogglePrivateAccount,
+            tag = SettingsTestTags.PRIVATE_ACCOUNT,
+        )
+        Text(
+            text = "People who aren\u2019t approved followers can\u2019t see your private " +
+                "messages. Approve or reject pending requests from Account, then Follow " +
+                "requests. Switching back to public doesn\u2019t automatically re-expose " +
+                "content to followers you never approved.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .testTag(SettingsTestTags.PRIVATE_ACCOUNT_NOTE),
+        )
+    }
+}
+
 /** A failed save reported inline above the groups, dismissible by the user. */
 @Composable
 private fun SaveErrorBanner(message: String, onDismiss: () -> Unit) {
@@ -341,6 +406,7 @@ private fun SettingsScreenPreview() {
                     viewingPreference = ViewingPreference.FOLLOWING,
                     showPreviews = true,
                     showAdvancedPostSettings = false,
+                    isPrivateAccount = true,
                 ),
             ),
             onBack = {},
@@ -351,6 +417,7 @@ private fun SettingsScreenPreview() {
             onSetMaxMessageLength = {},
             onToggleDefaultPubliclyVisible = {},
             onToggleShowAdvancedPostSettings = {},
+            onTogglePrivateAccount = {},
             onDismissError = {},
         )
     }

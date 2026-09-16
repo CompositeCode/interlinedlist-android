@@ -44,6 +44,7 @@ class SettingsScreenTest {
         onSetMaxMessageLength: (Int) -> Unit = {},
         onToggleDefaultPubliclyVisible: (Boolean) -> Unit = {},
         onToggleShowAdvancedPostSettings: (Boolean) -> Unit = {},
+        onTogglePrivateAccount: (Boolean) -> Unit = {},
         onRetry: () -> Unit = {},
         onDismissError: () -> Unit = {},
     ) {
@@ -59,6 +60,7 @@ class SettingsScreenTest {
                     onSetMaxMessageLength = onSetMaxMessageLength,
                     onToggleDefaultPubliclyVisible = onToggleDefaultPubliclyVisible,
                     onToggleShowAdvancedPostSettings = onToggleShowAdvancedPostSettings,
+                    onTogglePrivateAccount = onTogglePrivateAccount,
                     onDismissError = onDismissError,
                 )
             }
@@ -298,6 +300,7 @@ class SettingsScreenTest {
                     onSetMaxMessageLength = { settings = settings.copy(maxMessageLength = it) },
                     onToggleDefaultPubliclyVisible = {},
                     onToggleShowAdvancedPostSettings = {},
+                    onTogglePrivateAccount = {},
                     onDismissError = {},
                 )
             }
@@ -310,5 +313,90 @@ class SettingsScreenTest {
         settings = settings.copy(maxMessageLength = 666)
 
         composeRule.onNodeWithTag(SettingsTestTags.MAX_MESSAGE_LENGTH).assertTextEquals("666")
+    }
+
+    // --- Private account (issue #34) -----------------------------------------
+
+    @Test
+    fun permissions_showsAPublicAccountAsOff() {
+        setContent(SettingsUiState(settings = UserSettings(isPrivateAccount = false)))
+
+        composeRule.onNodeWithTag(SettingsTestTags.PERMISSIONS).assertIsDisplayed()
+        composeRule.onNodeWithTag(SettingsTestTags.PRIVATE_ACCOUNT).assertIsOff()
+    }
+
+    @Test
+    fun permissions_showsAPrivateAccountAsOn() {
+        setContent(SettingsUiState(settings = UserSettings(isPrivateAccount = true)))
+
+        composeRule.onNodeWithTag(SettingsTestTags.PRIVATE_ACCOUNT).assertIsOn()
+    }
+
+    @Test
+    fun permissions_treatsAnAbsentValueAsPublic() {
+        setContent(SettingsUiState(settings = UserSettings(isPrivateAccount = null)))
+
+        composeRule.onNodeWithTag(SettingsTestTags.PRIVATE_ACCOUNT).assertIsOff()
+    }
+
+    @Test
+    fun permissions_explainsTheConsequenceOfGoingPrivate() {
+        setContent(SettingsUiState(settings = UserSettings(isPrivateAccount = false)))
+
+        // The wording is the help centre's (/help/people, "Private accounts"): new
+        // follows become requests, and existing followers keep their access.
+        composeRule.onNodeWithText(
+            "New followers must send a follow request that you approve or reject. " +
+                "Existing followers are not affected \u2014 they remain followers " +
+                "unless you remove them.",
+        ).assertIsDisplayed()
+        composeRule.onNodeWithTag(SettingsTestTags.PRIVATE_ACCOUNT_NOTE).assertIsDisplayed()
+    }
+
+    @Test
+    fun togglingPrivateAccount_reportsTheNewValue() {
+        var toggled: Boolean? = null
+        setContent(
+            state = SettingsUiState(settings = UserSettings(isPrivateAccount = false)),
+            onTogglePrivateAccount = { toggled = it },
+        )
+
+        composeRule.onNodeWithTag(SettingsTestTags.PRIVATE_ACCOUNT).performClick()
+
+        assert(toggled == true)
+    }
+
+    @Test
+    fun privateAccount_switchFollowsTheStateAfterARefresh() {
+        // A refresh (or a rolled-back save) re-renders the screen with the value the
+        // server last reported; the switch must follow it rather than keep the value
+        // the user tapped.
+        var settings by mutableStateOf(UserSettings(isPrivateAccount = false))
+        composeRule.setContent {
+            InterlinedListTheme {
+                SettingsScreen(
+                    state = SettingsUiState(settings = settings),
+                    onBack = {},
+                    onRetry = {},
+                    onSelectViewingPreference = {},
+                    onToggleShowPreviews = {},
+                    onSetMessagesPerPage = {},
+                    onSetMaxMessageLength = {},
+                    onToggleDefaultPubliclyVisible = {},
+                    onToggleShowAdvancedPostSettings = {},
+                    // Optimistic apply; the refresh below stands in for the server's answer.
+                    onTogglePrivateAccount = { settings = settings.copy(isPrivateAccount = it) },
+                    onDismissError = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag(SettingsTestTags.PRIVATE_ACCOUNT).assertIsOff().performClick()
+        composeRule.onNodeWithTag(SettingsTestTags.PRIVATE_ACCOUNT).assertIsOn()
+
+        // The server says the account is public after all.
+        settings = settings.copy(isPrivateAccount = false)
+
+        composeRule.onNodeWithTag(SettingsTestTags.PRIVATE_ACCOUNT).assertIsOff()
     }
 }
