@@ -85,6 +85,9 @@ import com.interlinedlist.android.feature.messages.ui.components.MessageCard
 import com.interlinedlist.android.feature.messages.ui.components.ModerationDialog
 import com.interlinedlist.android.feature.messages.ui.components.ReportDialog
 import com.interlinedlist.android.feature.messages.ui.readMediaBytes
+import com.interlinedlist.android.feature.messages.ui.trending.TrendingTagsRail
+import com.interlinedlist.android.feature.messages.ui.trending.TrendingTagsUiState
+import com.interlinedlist.android.feature.messages.ui.trending.TrendingTagsViewModel
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 
@@ -170,11 +173,17 @@ fun MessagesRoute(
     onOpenTag: ((String) -> Unit)? = null,
     onBack: () -> Unit = {},
     viewModel: MessagesFeedViewModel = hiltViewModel(),
+    trendingViewModel: TrendingTagsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    // Trending has its own ViewModel: it outlives a feed refresh, and a trending
+    // lookup that fails must not read as a feed that failed.
+    val trending by trendingViewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     MessagesFeedScreen(
         state = state,
+        trending = trending,
+        onRetryTrending = trendingViewModel::refresh,
         onRefresh = viewModel::refresh,
         onLoadMore = viewModel::loadMore,
         onViewingPreferenceChange = viewModel::onViewingPreferenceChange,
@@ -238,6 +247,8 @@ fun MessagesFeedScreen(
     onComposeTextChange: (String) -> Unit,
     onPost: () -> Unit,
     modifier: Modifier = Modifier,
+    trending: TrendingTagsUiState = TrendingTagsUiState(),
+    onRetryTrending: () -> Unit = {},
     onViewingPreferenceChange: (ViewingPreference) -> Unit = {},
     onOpenScheduled: () -> Unit = {},
     onOpenTag: ((String) -> Unit)? = null,
@@ -330,10 +341,22 @@ fun MessagesFeedScreen(
                 enabled = !state.isChangingViewingPreference,
                 onSelect = onViewingPreferenceChange,
             )
+            // A rail of doors that open nothing is not worth its space, so it
+            // only exists where the host wired somewhere to go.
+            val trendingRail: (@Composable () -> Unit)? = onOpenTag?.let { openTag ->
+                {
+                    TrendingTagsRail(
+                        state = trending,
+                        onOpenTag = openTag,
+                        onRetry = onRetryTrending,
+                    )
+                }
+            }
             when {
                 state.subscriptionRequired -> LockedState(message = state.errorMessage)
                 else -> FeedContent(
                     state = state,
+                    trendingRail = trendingRail,
                     onRefresh = onRefresh,
                     onLoadMore = onLoadMore,
                     onOpenMessage = onOpenMessage,
@@ -452,6 +475,7 @@ private val ViewingPreference.label: String
 @Composable
 private fun FeedContent(
     state: MessagesFeedUiState,
+    trendingRail: (@Composable () -> Unit)?,
     onRefresh: () -> Unit,
     onLoadMore: () -> Unit,
     onOpenMessage: (String) -> Unit,
@@ -475,9 +499,10 @@ private fun FeedContent(
         when {
             state.isEmpty && state.isRefreshing -> LoadingState()
             state.isEmpty && state.errorMessage != null -> ErrorState(state.errorMessage, onRefresh)
-            state.isEmpty -> EmptyState(tag = state.tag)
+            state.isEmpty -> EmptyState(tag = state.tag, trendingRail = trendingRail)
             else -> FeedList(
                 state = state,
+                trendingRail = trendingRail,
                 onLoadMore = onLoadMore,
                 onOpenMessage = onOpenMessage,
                 onOpenTag = onOpenTag,
@@ -499,6 +524,7 @@ private fun FeedContent(
 @Composable
 private fun FeedList(
     state: MessagesFeedUiState,
+    trendingRail: (@Composable () -> Unit)?,
     onLoadMore: () -> Unit,
     onOpenMessage: (String) -> Unit,
     onOpenTag: ((String) -> Unit)?,
@@ -529,6 +555,10 @@ private fun FeedList(
             .fillMaxSize()
             .testTag(MessagesFeedTags.LIST),
     ) {
+        // First row of the feed rather than a fixed band above it: the switcher
+        // and the composer already own the top of this screen, so the rail earns
+        // its place by scrolling away once the reader is past it.
+        trendingRail?.let { rail -> item(key = "trendingTags") { rail() } }
         items(state.messages, key = { it.id }) { message ->
             MessageCard(
                 message = message,
@@ -567,21 +597,32 @@ private fun LoadingState() {
 }
 
 @Composable
-private fun EmptyState(tag: String? = null) {
-    Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
-        Text(
-            // The tag feed hides the composer, so "be the first to post" would be
-            // an invitation the screen cannot honour.
-            text = if (tag != null) {
-                "Nothing tagged \u201C$tag\u201D yet."
-            } else {
-                "No messages yet. Be the first to post."
-            },
-            style = MaterialTheme.typography.bodyLarge,
-            textAlign = TextAlign.Center,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.testTag(MessagesFeedTags.EMPTY),
-        )
+private fun EmptyState(
+    tag: String? = null,
+    trendingRail: (@Composable () -> Unit)? = null,
+) {
+    Column(Modifier.fillMaxSize()) {
+        // An empty feed is exactly where somewhere-to-go matters most, so the
+        // rail stays on screen instead of scrolling with a list that has no rows.
+        trendingRail?.invoke()
+        Box(
+            modifier = Modifier.fillMaxSize().padding(32.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                // The tag feed hides the composer, so "be the first to post"
+                // would be an invitation the screen cannot honour.
+                text = if (tag != null) {
+                    "Nothing tagged \u201C$tag\u201D yet."
+                } else {
+                    "No messages yet. Be the first to post."
+                },
+                style = MaterialTheme.typography.bodyLarge,
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.testTag(MessagesFeedTags.EMPTY),
+            )
+        }
     }
 }
 

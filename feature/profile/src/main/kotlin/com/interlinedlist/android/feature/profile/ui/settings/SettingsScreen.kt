@@ -133,10 +133,21 @@ fun SettingsRoute(
         onTogglePrivateAccount = viewModel::setPrivateAccount,
         onDismissError = viewModel::dismissError,
         modifier = modifier,
+        // Filled in here rather than inside the stateless screen: the location section
+        // owns a runtime permission request, which needs an activity result registry
+        // that previews and Compose tests of the screen do not have.
+        locationSection = { ProfileLocationSection() },
     )
 }
 
-/** Stateless Settings UI — one titled group per area of the web Settings page. */
+/**
+ * Stateless Settings UI — one titled group per area of the web Settings page.
+ *
+ * @param locationSection the "Profile location" group, passed in as a slot because it
+ *   requests a runtime permission and therefore cannot be rendered from a preview or a
+ *   plain Compose test. It sits between Message settings and Permissions, which is the
+ *   order the web uses (`/help/settings`).
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
@@ -154,6 +165,7 @@ fun SettingsScreen(
     onTogglePrivateAccount: (Boolean) -> Unit,
     onDismissError: () -> Unit,
     modifier: Modifier = Modifier,
+    locationSection: @Composable () -> Unit = {},
 ) {
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -197,6 +209,9 @@ fun SettingsScreen(
                     onToggleDefaultPubliclyVisible = onToggleDefaultPubliclyVisible,
                     onToggleShowAdvancedPostSettings = onToggleShowAdvancedPostSettings,
                 )
+                // Where the web puts it: `/help/settings` lists Profile location after
+                // Message settings and before Permissions.
+                locationSection()
                 PermissionsGroup(
                     settings = settings,
                     onTogglePrivateAccount = onTogglePrivateAccount,

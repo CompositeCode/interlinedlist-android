@@ -9,6 +9,8 @@ import com.interlinedlist.android.feature.messages.domain.Message
 import com.interlinedlist.android.feature.messages.domain.MessageVisibility
 import com.interlinedlist.android.feature.messages.domain.ReportReason
 import com.interlinedlist.android.feature.messages.domain.TagSuggestion
+import com.interlinedlist.android.feature.messages.domain.TrendingTag
+import com.interlinedlist.android.feature.messages.domain.TrendingWindow
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -130,6 +132,20 @@ interface MessagesRepository {
     suspend fun autocompleteTags(query: String, limit: Int = TAG_SUGGESTION_LIMIT): ApiResult<List<TagSuggestion>>
 
     /**
+     * The most-used tags across public messages in the trailing [window], from
+     * `GET /api/tags/trending`, in the server's order (count descending).
+     *
+     * Network-only, like [autocompleteTags]: trending is a discovery surface for
+     * *right now*, so a cached copy would be worse than an honest empty/error
+     * state. [window] is sent explicitly because the response never reports which
+     * period it covers — the request is what makes the surface's wording true.
+     */
+    suspend fun trendingTags(
+        window: TrendingWindow = TrendingWindow.WEEK,
+        limit: Int = TRENDING_TAG_LIMIT,
+    ): ApiResult<List<TrendingTag>>
+
+    /**
      * Pushes (reposts) [messageId] as-is: posts `pushedMessageId` with **no**
      * content, always publicly. A quote — the same repost with the user's own
      * note — goes through [createMessage] with a `pushedMessageId` instead.
@@ -216,5 +232,13 @@ interface MessagesRepository {
     companion object {
         /** How many tag suggestions to ask for (server default 10, max 50). */
         const val TAG_SUGGESTION_LIMIT = 10
+
+        /**
+         * How many trending tags to ask for (server default 20, max 100). Kept
+         * short deliberately: they render as one horizontally scrolling row, and
+         * a rail nobody reaches the end of is no more discoverable than a short
+         * one.
+         */
+        const val TRENDING_TAG_LIMIT = 12
     }
 }
