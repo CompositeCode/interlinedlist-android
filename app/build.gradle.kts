@@ -57,6 +57,10 @@ dependencies {
     implementation(project(":feature:notifications"))
     implementation(project(":feature:organizations"))
     implementation(project(":feature:integrations"))
+    // Depended on so its Hilt modules join the app component. The AI surfaces
+    // themselves live in the feature modules that use them, so there is no
+    // navigation entry here.
+    implementation(project(":feature:ai"))
 
     // Compose
     implementation(platform(libs.androidx.compose.bom))
