@@ -20,6 +20,7 @@ import com.interlinedlist.android.feature.lists.data.remote.dto.CreateViewReques
 import com.interlinedlist.android.feature.lists.data.remote.dto.ListDto
 import com.interlinedlist.android.feature.lists.data.remote.dto.ListViewEnvelope
 import com.interlinedlist.android.feature.lists.data.remote.dto.RowDto
+import com.interlinedlist.android.feature.lists.data.remote.dto.RowVersionsRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.RowWriteRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.UpdateFolderRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.UpdateListRequest
@@ -33,6 +34,7 @@ import com.interlinedlist.android.feature.lists.domain.InviteRole
 import com.interlinedlist.android.feature.lists.domain.ListConnection
 import com.interlinedlist.android.feature.lists.domain.ListDetail
 import com.interlinedlist.android.feature.lists.domain.ListFolder
+import com.interlinedlist.android.feature.lists.domain.ListFreshness
 import com.interlinedlist.android.feature.lists.domain.ListInvite
 import com.interlinedlist.android.feature.lists.domain.ListRow
 import com.interlinedlist.android.feature.lists.domain.ListSchema
@@ -306,7 +308,7 @@ class DefaultListsRepository @Inject constructor(
     override suspend fun addRow(listId: String, values: Map<String, String>): ApiResult<ListRow> =
         withContext(dispatchers.io) {
             safeApiCall(json) { api.createRow(listId, RowWriteRequest(values.toJsonData())) }
-                .map { it.row ?: it.data ?: RowDto(id = "", data = kotlinx.serialization.json.JsonObject(emptyMap())) }
+                .map { it.row ?: it.data ?: RowDto(id = "") }
                 .map(RowMapper::fromDto)
         }
 
@@ -316,7 +318,7 @@ class DefaultListsRepository @Inject constructor(
         values: Map<String, String>,
     ): ApiResult<ListRow> = withContext(dispatchers.io) {
         safeApiCall(json) { api.updateRow(listId, rowId, RowWriteRequest(values.toJsonData())) }
-            .map { it.row ?: it.data ?: RowDto(id = rowId, data = kotlinx.serialization.json.JsonObject(emptyMap())) }
+            .map { it.row ?: it.data ?: RowDto(id = rowId) }
             .map(RowMapper::fromDto)
     }
 
@@ -324,6 +326,24 @@ class DefaultListsRepository @Inject constructor(
         withContext(dispatchers.io) {
             safeApiCall(json) { api.deleteRow(listId, rowId) }.map { }
         }
+
+    override suspend fun pollFreshness(
+        listId: String,
+        rowVersions: Map<String, Int>,
+        focusedRowId: String?,
+    ): ApiResult<ListFreshness> = withContext(dispatchers.io) {
+        val body = RowVersionsRequest(
+            // The server rejects more than 500 rows per request outright, so the
+            // oldest-held window is what gets watched rather than losing the poll.
+            rowVersions = if (rowVersions.size <= MAX_POLLED_ROWS) {
+                rowVersions
+            } else {
+                rowVersions.entries.take(MAX_POLLED_ROWS).associate { it.key to it.value }
+            },
+            focusedRowId = focusedRowId,
+        )
+        safeApiCall(json) { api.pollRowVersions(listId, body) }.map(FreshnessMapper::fromDto)
+    }
 
     override suspend fun getFolders(): ApiResult<List<ListFolder>> = withContext(dispatchers.io) {
         safeApiCall(json) { api.getFolders() }
@@ -669,6 +689,9 @@ class DefaultListsRepository @Inject constructor(
     private companion object {
         /** Safety net for a breadcrumb walk: deep nesting is not worth the requests. */
         const val MAX_PARENT_CHAIN = 10
+
+        /** The freshness poll's documented ceiling — beyond it the server returns 400. */
+        const val MAX_POLLED_ROWS = 500
 
         /** Matches the server's own copy for the 403 a free owner receives. */
         const val NOT_SUBSCRIBED_MESSAGE = "Subscribe to invite people to lists."

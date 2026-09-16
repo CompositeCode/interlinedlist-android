@@ -46,6 +46,28 @@ class RowMapperTest {
     }
 
     @Test
+    fun `reads the live rowData key and keeps the row version`() {
+        val dto = RowDto(
+            id = "r1",
+            rowData = json.parseToJsonElement("""{ "status": "in review" }""").jsonObject,
+            version = 3,
+        )
+
+        val mapped = RowMapper.fromDto(dto)
+
+        assertThat(mapped.valueFor("status")).isEqualTo("in review")
+        assertThat(mapped.version).isEqualTo(3)
+    }
+
+    @Test
+    fun `a row with neither key maps to no values`() {
+        val mapped = RowMapper.fromDto(RowDto(id = "r1"))
+
+        assertThat(mapped.values).isEmpty()
+        assertThat(mapped.version).isNull()
+    }
+
+    @Test
     fun `missing key returns empty via valueFor`() {
         val mapped = RowMapper.fromDto(row("""{ "present": "yes" }"""))
 

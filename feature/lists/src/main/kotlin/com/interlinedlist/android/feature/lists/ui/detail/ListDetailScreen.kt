@@ -39,6 +39,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -54,10 +55,12 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.interlinedlist.android.core.designsystem.theme.InterlinedListTheme
+import com.interlinedlist.android.feature.lists.domain.ListPresence
 import com.interlinedlist.android.feature.lists.domain.ListRow
 import com.interlinedlist.android.feature.lists.domain.ListSchema
 import com.interlinedlist.android.feature.lists.domain.ListSummary
 import com.interlinedlist.android.feature.lists.domain.SchemaField
+import com.interlinedlist.android.feature.lists.ui.presence.ListPresenceIndicator
 import com.interlinedlist.android.feature.lists.ui.views.ListViewSwitcher
 
 /** Stable test tags for the list detail screen. */
@@ -106,6 +109,13 @@ fun ListDetailRoute(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val snackbarHostState = remember { SnackbarHostState() }
 
+    // The freshness poll / presence heartbeat lives exactly as long as this screen
+    // is composed: started on entry, stopped the moment it leaves.
+    DisposableEffect(Unit) {
+        viewModel.startHeartbeat()
+        onDispose { viewModel.stopHeartbeat() }
+    }
+
     // Surface the refresh outcome as a transient snackbar, then clear it.
     LaunchedEffect(state.refreshMessage) {
         state.refreshMessage?.let {
@@ -121,6 +131,8 @@ fun ListDetailRoute(
         onEditRow = {
             // Seed the editor from the freshest server copy of the row.
             viewModel.loadRow(it.id)
+            // Tell everyone else which row is being worked on.
+            viewModel.setFocusedRow(it.id)
             editing = EditorTarget.Existing(it)
         },
         onDeleteRow = viewModel::deleteRow,
@@ -146,7 +158,10 @@ fun ListDetailRoute(
         val liveRow = (target as? EditorTarget.Existing)?.let { existing ->
             state.rows.firstOrNull { it.id == existing.row.id } ?: existing.row
         }
-        ModalBottomSheet(onDismissRequest = { editing = null }, sheetState = sheetState) {
+        ModalBottomSheet(
+            onDismissRequest = { editing = null; viewModel.setFocusedRow(null) },
+            sheetState = sheetState,
+        ) {
             RowEditor(
                 schema = state.schema,
                 row = liveRow,
@@ -154,12 +169,13 @@ fun ListDetailRoute(
                 githubRepo = state.summary?.takeIf { it.isGithubBacked }?.githubRepo,
                 nextIssueNumber = state.nextIssueNumber,
                 onSave = { values ->
+                    val done = { editing = null; viewModel.setFocusedRow(null) }
                     when (target) {
-                        EditorTarget.New -> viewModel.addRow(values) { editing = null }
-                        is EditorTarget.Existing -> viewModel.updateRow(target.row.id, values) { editing = null }
+                        EditorTarget.New -> viewModel.addRow(values) { done() }
+                        is EditorTarget.Existing -> viewModel.updateRow(target.row.id, values) { done() }
                     }
                 },
-                onCancel = { editing = null },
+                onCancel = { editing = null; viewModel.setFocusedRow(null) },
             )
         }
     }
@@ -227,6 +243,11 @@ fun ListDetailScreen(
                     }
                 },
                 actions = {
+                    // Who else is in this list right now (nothing when nobody is).
+                    ListPresenceIndicator(
+                        participants = state.presence,
+                        modifier = Modifier.padding(end = 4.dp),
+                    )
                     // `POST /api/lists/{id}/refresh` only means anything for a
                     // GitHub-backed list, so the action appears only there.
                     if (state.isGithubBacked) {
@@ -517,6 +538,8 @@ private fun ListDetailScreenPreview() {
                     ListRow("r2", mapOf("title" to "Hyperion", "done" to "false")),
                 ),
                 isLoading = false,
+                presence = listOf(ListPresence("u2", displayName = "Casey", username = "casey")),
+                isCollaborative = true,
             ),
             onBack = {},
             onAddRow = {},

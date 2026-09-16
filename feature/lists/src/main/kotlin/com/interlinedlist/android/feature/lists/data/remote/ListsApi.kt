@@ -21,6 +21,8 @@ import com.interlinedlist.android.feature.lists.data.remote.dto.ListViewsRespons
 import com.interlinedlist.android.feature.lists.data.remote.dto.ListsResponse
 import com.interlinedlist.android.feature.lists.data.remote.dto.RefreshResultDto
 import com.interlinedlist.android.feature.lists.data.remote.dto.RowEnvelope
+import com.interlinedlist.android.feature.lists.data.remote.dto.RowVersionsRequest
+import com.interlinedlist.android.feature.lists.data.remote.dto.RowVersionsResponse
 import com.interlinedlist.android.feature.lists.data.remote.dto.RowWriteRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.CreateShareLinkRequest
 import com.interlinedlist.android.feature.lists.data.remote.dto.RowsResponse
@@ -174,6 +176,17 @@ interface ListsApi {
         @Path("rowId") rowId: String,
         @Body body: RowWriteRequest,
     ): RowEnvelope
+
+    /**
+     * Combined freshness poll and presence heartbeat for the grid. A `POST`
+     * because it writes the caller's heartbeat and because the row versions
+     * belong in a body. At most 500 rows per request.
+     */
+    @POST("api/lists/{id}/data/versions")
+    suspend fun pollRowVersions(
+        @Path("id") id: String,
+        @Body body: RowVersionsRequest,
+    ): RowVersionsResponse
 
     @DELETE("api/lists/{id}/data/{rowId}")
     suspend fun deleteRow(

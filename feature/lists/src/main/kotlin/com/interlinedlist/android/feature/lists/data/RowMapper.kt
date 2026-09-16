@@ -20,7 +20,8 @@ object RowMapper {
     fun fromDto(dto: RowDto): ListRow =
         ListRow(
             id = dto.id,
-            values = dto.data.mapValues { (_, value) -> displayString(value) },
+            values = dto.fields.mapValues { (_, value) -> displayString(value) },
+            version = dto.version,
         )
 
     /** Coerces any JSON value to a human-readable string. */

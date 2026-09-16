@@ -8,10 +8,12 @@ import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.interlinedlist.android.core.designsystem.theme.InterlinedListTheme
 import com.interlinedlist.android.feature.lists.domain.FieldType
+import com.interlinedlist.android.feature.lists.domain.ListPresence
 import com.interlinedlist.android.feature.lists.domain.ListRow
 import com.interlinedlist.android.feature.lists.domain.ListSchema
 import com.interlinedlist.android.feature.lists.domain.ListSummary
 import com.interlinedlist.android.feature.lists.domain.SchemaField
+import com.interlinedlist.android.feature.lists.ui.presence.ListPresenceTestTags
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -146,6 +148,37 @@ class ListDetailScreenTest {
         )
 
         composeRule.onNodeWithTag(ListDetailTestTags.BREADCRUMB).assertDoesNotExist()
+    }
+
+    @Test
+    fun showsWhoElseIsInTheList() {
+        setScreen(
+            ListDetailUiState(
+                summary = ListSummary("L1", "Reading", null, 0, null, false, null),
+                schema = schema,
+                rows = emptyList(),
+                isLoading = false,
+                presence = listOf(ListPresence("u2", displayName = "Casey", username = "casey")),
+                isCollaborative = true,
+            ),
+        )
+
+        composeRule.onNodeWithTag(ListPresenceTestTags.ROW).assertIsDisplayed()
+        composeRule.onNodeWithTag(ListPresenceTestTags.avatar("u2")).assertIsDisplayed()
+    }
+
+    @Test
+    fun hidesPresence_whenNobodyElseIsHere() {
+        setScreen(
+            ListDetailUiState(
+                summary = ListSummary("L1", "Reading", null, 0, null, false, null),
+                schema = schema,
+                rows = emptyList(),
+                isLoading = false,
+            ),
+        )
+
+        composeRule.onNodeWithTag(ListPresenceTestTags.ROW).assertDoesNotExist()
     }
 
     @Test
